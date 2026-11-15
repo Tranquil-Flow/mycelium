@@ -327,7 +327,12 @@ pub fn membership_state(authority: &Mutex<Authority>) -> Option<String> {
     if !target {
         return app_host::membership_state(authority);
     }
-    let status = joined_member::target_status(&lock(authority));
+    target_membership_state(&lock(authority))
+}
+/// A joined target's own `membership_state` (`TargetApplication.status()`) over an authority the
+/// caller already holds.
+fn target_membership_state(a: &Authority) -> Option<String> {
+    let status = joined_member::target_status(a);
     match status.get("membership_state") {
         Some(Json::Str(state)) => Some(state.clone()),
         _ => None,
@@ -913,33 +918,39 @@ impl api::member_agent::MemberHost for PackagedMember {
     /// `auto_step_context()` (app.py:1168-1172): the binding only while this Mac is a target
     /// whose membership is `current`; the saved resource policy; the member's join seam.
     fn accept_context(&self) -> Option<api::member_agent::AcceptContext> {
-        let root = lock(&self.authority).root.clone();
-        let current = membership_state(&self.authority).as_deref() == Some("current");
         // The renewal loop holds the live Session for one seed heartbeat
         // (`app_host::renew_member`, `session_view` set meanwhile). For exactly that flight the
         // work session keeps the preceding snapshot (`Network::sync_work_session`), the same
         // membership: its binding stands in. Without it every standing pass that ran during a
         // renewal closed this Mac's work service (`member_agent` closes work without a binding),
         // and the owner's run kept dialling the closed address (lane FLK, rows 6-7).
-        let renewing = lock(&self.authority).session_view.is_some();
+        // The membership state, the live Session or the in-flight snapshot are read in ONE
+        // acquisition of the authority (lane FLK patch 2, FLK-01): a renewal that starts between
+        // separate reads would leave "current" without its binding and close the work service.
+        // Lock order authority -> work session, as `Network::sync_work_session`. An owner host
+        // has no joined Session (`session` is a target's), so it never has a binding here.
+        let (root, binding) = {
+            let a = lock(&self.authority);
+            let current =
+                a.target && target_membership_state(&a).as_deref() == Some("current");
+            let binding = match &a.session {
+                _ if !current => None,
+                Some(session) => api::peer::membership_binding(Some(session)),
+                None if a.session_view.is_some() => {
+                    api::peer::membership_binding(lock(&self.network.work_session).as_ref())
+                }
+                None => None,
+            };
+            (a.root.clone(), binding)
+        };
         #[cfg(test)]
         if let Some(hook) = lock(&self.inside_accept_context).take() {
             hook();
         }
-        let binding = current
-            .then(|| {
-                app_host::membership_binding(&self.network.cell(&self.authority)).or_else(|| {
-                    renewing
-                        .then(|| lock(&self.network.work_session).clone())
-                        .flatten()
-                        .and_then(|held| held.binding())
-                })
-            })
-            .flatten()
-            .map(|b| {
-                json!({"swarm_id": b.swarm_id, "node_id": b.node_id,
+        let binding = binding.map(|b| {
+            json!({"swarm_id": b.swarm_id, "node_id": b.node_id,
                 "seed_key_digest": b.seed_key_digest})
-            });
+        });
         Some(api::member_agent::AcceptContext {
             policy: api::preferences::resource_policy::read(&root)
                 .ok()

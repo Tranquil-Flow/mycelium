@@ -59,13 +59,13 @@ impl Gate {
             return;
         }
         if let Some(entered) = lock(&self.entered).take() {
-            drop(entered.send(()));
+            entered.send(()).unwrap_or(());
         }
         match self.mode {
             AtPutBack::Hold => {
                 if let Some(released) = lock(&self.release).take() {
                     // Err only when the test dropped its sender: proceed either way.
-                    drop(released.recv());
+                    released.recv().unwrap_or(());
                 }
             }
             AtPutBack::Panic => panic!("lane FLK: the renewal thread dies between take and put-back"),
@@ -227,7 +227,7 @@ impl ReportsPort for RenewalInFlight<'_> {
     fn announce_work(&mut self, a: &Announcement, limits: &Value) -> Result<(), StepError> {
         let (renewal, release) = contributor_renewal(self.fixture, AtPutBack::Hold);
         let answer = self.inner.announce_work(a, limits);
-        drop(release.send(()));
+        release.send(()).unwrap_or(());
         renewal.join().expect("the renewal pass returned");
         assert!(
             self.fixture
@@ -630,7 +630,7 @@ fn a_joined_macs_standing_pass_during_its_renewal_keeps_the_runs_work_service() 
     // `app_host::renew_member`'s flight on the joined Mac: the product's pass, held at its put-back.
     let (renewal, release) = member_renewal(&f, AtPutBack::Hold);
     f.agent.tick(&f.member);
-    drop(release.send(()));
+    release.send(()).unwrap_or(());
     renewal.join().expect("the renewal pass returned");
     member_renewal_tail(&f);
     // The standing loop's next pass, after the renewal (as on the gate's joined Mac).
@@ -692,7 +692,7 @@ fn a_joined_macs_renewal_that_starts_inside_its_standing_pass_keeps_the_runs_wor
     let (renewal, release) = lock(&started)
         .take()
         .expect("the standing pass read its acceptor context, and the renewal started inside it");
-    drop(release.send(()));
+    release.send(()).unwrap_or(());
     renewal.join().expect("the renewal pass returned");
     member_renewal_tail(&f);
     f.agent.tick(&f.member);
