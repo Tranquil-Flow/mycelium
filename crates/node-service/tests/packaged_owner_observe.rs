@@ -278,8 +278,13 @@ mod observe_test_double;
 /// model (the default Qwen2.5-0.5B run model) has no native challenge producer (only Qwen3-0.6B
 /// with the pinned native worker and the real checkpoint, ruling 28: `native_compiler::build`
 /// answers none, `native_challenge_producer_unavailable` inside the compiler), and the step fails
-/// with the workflow's failed state, `chain_compile_failed` (chain_compile `failed_state`). The
-/// work phase (slices, publish, targets, activate: PH3b S4c-b) is not reached.
+/// with that refusal by name. v0.1.4 reports the constant `chain_compile_failed` for any failed
+/// build (chain_compile.py:302, demo_chain.py:806-808 @ f4e366e9, the reason only in
+/// `compile-error.private.log`); v0.2 deliberately keeps the build's own closed code
+/// (`8a4bab8e`, `owner-run/src/steps/compile.rs` `BuildPoll::Done(Err)`; roadmap addendum
+/// 13 Nov: the constant had hidden this very refusal for several cycles). This test predated
+/// that change (lane BND). The work phase (slices, publish, targets, activate: PH3b S4c-b) is
+/// not reached.
 #[test]
 fn with_an_observe_test_double_the_run_passes_observe_and_compile_refuses_by_name() {
     let base = state_root("observe-double");
@@ -314,8 +319,12 @@ fn with_an_observe_test_double_the_run_passes_observe_and_compile_refuses_by_nam
     assert_eq!(run["steps"][4]["state"], "failed", "{run}");
     assert_eq!(run["failed_step"], "compile", "{run}");
     // Changed in S4c-a item 2 (was `member_capability_report_stale`: the join report carried no
-    // generation and the member sent no periodic report).
-    assert_eq!(run["error_code"], "chain_compile_failed", "{run}");
+    // generation and the member sent no periodic report), then by `8a4bab8e` (was the constant
+    // `chain_compile_failed`; the build's own refusal is kept, see above).
+    assert_eq!(
+        run["error_code"], "native_challenge_producer_unavailable",
+        "{run}"
+    );
     for step in run["steps"].as_array().unwrap().iter().skip(5) {
         assert_eq!(
             step["state"], "pending",
@@ -451,8 +460,11 @@ fn after_a_member_relaunch_the_run_passes_the_capability_report_check_without_a_
         "{run}"
     );
     // S4c-a item 3: past the report check the model-free run ends where the build needs the
-    // native challenge producer (Metal, Qwen3-0.6B only), as the test above.
-    assert_eq!(run["error_code"], "chain_compile_failed", "{run}");
+    // native challenge producer (Metal, Qwen3-0.6B only), by that name, as the test above.
+    assert_eq!(
+        run["error_code"], "native_challenge_producer_unavailable",
+        "{run}"
+    );
     let report = member.status()["join_flow"]["last_report"].clone();
     assert_eq!(report["purpose"], "periodic", "{report}");
     assert_eq!(report["state"], "delivered", "{report}");
