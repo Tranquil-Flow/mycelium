@@ -755,6 +755,57 @@ fn chat_row(
     ))
 }
 
+/// Lane CAP measurement (opt-in, `MYCELIUM_TEN_MEASURE_CHATS=<n>`; not a gate row): after the
+/// run's chat row, one 128-token answer, then 256-token answers on the reference prompt until one
+/// does not complete or `n` were sent. Per chat: time to the first piece, mean time per later
+/// piece, the page's terminal and error, both workers' resident memory after it. A send the page
+/// rate-limits (4 per minute per client) is retried after a pause and counted.
+fn measure_chats(mac: &Mac, ev: &Evidence, run: &str, binary: &Path) {
+    let Some(n) = std::env::var("MYCELIUM_TEN_MEASURE_CHATS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    else {
+        return;
+    };
+    let began = Instant::now();
+    for i in 0..n {
+        let tokens = if i == 0 { 128 } else { 256 };
+        let label = format!("{run}_measure_{i}_{tokens}");
+        let mut limited = 0;
+        let (last, pieces) = loop {
+            let (last, pieces) = chat(mac, ev, &label, tokens);
+            if last["send_status"] == 429 && limited < 8 {
+                limited += 1;
+                std::thread::sleep(Duration::from_secs(16));
+                continue;
+            }
+            break (last, pieces);
+        };
+        let ttft = pieces.first().map(|p| p.1);
+        let per_token = (pieces.len() > 1).then(|| {
+            (pieces.last().unwrap().1 - pieces[0].1) as f64 / (pieces.len() - 1) as f64
+        });
+        let completed = last["terminal"] == "completed";
+        ev.note(
+            "measure_chat",
+            json!({"label": label, "asked": tokens, "pieces": pieces.len(), "ttft_ms": ttft,
+                "mean_ms_per_later_piece": per_token, "wall_ms": pieces.last().map(|p| p.1),
+                "terminal": last["terminal"], "error": last["error"], "rate_limited_retries": limited,
+                "since_measure_start_ms": ms(began), "workers_after": workers(binary),
+                "text": pieces.iter().map(|p| p.0.as_str()).collect::<String>(), "last": last}),
+        );
+        if !completed {
+            let (_, state) = chat_call(mac, "POST", "/chat/api/state", &json!({}));
+            ev.note(
+                "measure_end",
+                json!({"after_chats": i, "page_state": state, "owner_run": mac.status()["owner_run"]}),
+            );
+            return;
+        }
+    }
+    ev.note("measure_end", json!({"after_chats": n, "all_completed": true}));
+}
+
 // ---------------------------------------------------------------- the gate -----------------
 
 /// The native workers of a serving run: this process's descendants running the native program's
@@ -924,6 +975,8 @@ fn ten_rows_with_the_real_model_on_the_lan() {
                     "loopback_udp": sockets().into_iter().filter(|s| s.contains("UDP") && s.contains("127.0.0.1")).collect::<Vec<_>>()}));
                 if let Err(e) = chat_row(&owner.mac, &ev, run, &codec) {
                     failures.push(e);
+                } else if run == "run1" {
+                    measure_chats(&owner.mac, &ev, run, &binary);
                 }
                 if let Err(e) = stop_row(&owner, &member, &ev, run, &binary, &lan) {
                     failures.push(e);
