@@ -138,6 +138,9 @@ pub struct InputArtifact {
     source: Prepared,
     request: BuildRequest,
     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// The run directory, exclusively locked while this artifact lives: a retirement pass
+    /// ([`retire_dead_runs`]) never touches a run whose custody is held (lane PHY item 1).
+    _custody: fs::File,
 }
 impl InputArtifact {
     pub fn bind_cancellation(
@@ -840,7 +843,10 @@ fn reconcile_storage_temporaries(runs: &Path, committed: &Map<String, Value>) ->
                 Some(next) => ["bytes", "run_dev", "run_ino"]
                     .iter()
                     .any(|key| next[*key] != row[*key]),
-                None => !member_shard::refund_matches(runs, run, row),
+                None => {
+                    !member_shard::refund_matches(runs, run, row)
+                        && !owner_retire::refund_matches(runs, run, row)
+                }
             })
         {
             return Err(bad);
@@ -1057,6 +1063,7 @@ fn emit_mode(
             Err(_) => return Err(Error("compiler_directory_invalid")),
         }
     }
+    let custody = owner_retire::custody(&output, directory_identity)?;
     let documents = BTreeMap::from([
         (
             "compile-start.private.json".into(),
@@ -1084,6 +1091,7 @@ fn emit_mode(
         source: source.clone(),
         request: request.clone(),
         cancel: None,
+        _custody: custody,
     };
     artifact.validate()?;
     Ok(artifact)

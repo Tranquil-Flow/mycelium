@@ -926,6 +926,9 @@ impl Chain for Composed {
         }
         // A fresh `RunContext` for the page's chats too (lane CHAT, owner_run.py:392-399).
         super::chat::new_run(&self.work.host);
+        // Before this run reserves anything: the charges of runs that ended without retiring
+        // (a lost process, an older build) are released (lane PHY item 1).
+        super::retire_dead_runs(&self.work.host);
         self.inner
             .new_run(run, deployment, reason, ceiling, binding);
     }

@@ -48,10 +48,20 @@ fn dead_owner_run(owner: &Path, run: &str) {
 }
 fn entries(owner: &Path) -> Vec<String> {
     let limit = private_state::private_json_limit().unwrap();
-    private_state::load(&owner.join("chain-runs/compiler-storage.private.json"), limit)
-        .unwrap()
-        .map(|ledger| ledger["entries"].as_object().unwrap().keys().cloned().collect())
-        .unwrap_or_default()
+    private_state::load(
+        &owner.join("chain-runs/compiler-storage.private.json"),
+        limit,
+    )
+    .unwrap()
+    .map(|ledger| {
+        ledger["entries"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect()
+    })
+    .unwrap_or_default()
 }
 struct Quiet;
 impl StepEnv for Quiet {
@@ -84,7 +94,13 @@ fn a_runs_teardown_retires_the_owners_dead_compile_runs() {
     assert!(teardown.is_ok(), "{teardown:?}");
     assert!(entries(&owner).is_empty(), "{:?}", entries(&owner));
     for run in ["died-at-step-6", "stopped"] {
-        assert!(!owner.join("chain-runs").join(run).join("stage-shards").exists());
+        assert!(
+            !owner
+                .join("chain-runs")
+                .join(run)
+                .join("stage-shards")
+                .exists()
+        );
     }
 }
 

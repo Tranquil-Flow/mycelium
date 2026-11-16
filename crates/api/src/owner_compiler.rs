@@ -528,6 +528,16 @@ impl<H: ChainHost> Compiler<H> {
         }
         Ok(())
     }
+    /// After [`Self::teardown`], hand over the ended run's compile output: its holder keeps the
+    /// run's custody (lane PHY item 1), and dropping it lets a retirement pass
+    /// (`compiler_inputs::retire_dead_runs`) remove the run's stage shards and refund its charge.
+    /// `None` before teardown (a live run keeps its own) or when the run produced none.
+    pub fn release_outputs(&mut self) -> Option<crate::compiler_inputs::InputArtifact> {
+        if !self.retired || self.worker.is_some() {
+            return None;
+        }
+        self.artifact.take()
+    }
 }
 impl<H: ChainHost> CompilePort for Compiler<H> {
     fn compile_context(&mut self) -> Result<CompileContext, PortError> {
