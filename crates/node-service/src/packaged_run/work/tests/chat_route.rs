@@ -1137,6 +1137,46 @@ fn room(port: u16, path: &str, body: &Value) -> Option<(u16, Value)> {
     )
 }
 
+/// chat.js's events loop for a room member through the relay, until its chat ends or the relay
+/// goes: `(tokens, last page, done)`. The first poll that read a token sends `first` the tokens
+/// read so far and that page's `done` (once).
+fn room_poller(
+    port: u16,
+    id: &Value,
+    first: &mpsc::Sender<(Vec<String>, Value)>,
+) -> (Vec<String>, Value, bool) {
+    let (mut after, mut tokens, mut last) = (json!(0), Vec::new(), Value::Null);
+    let mut receipt = Some(first);
+    loop {
+        let Some((code, events)) = room(
+            port,
+            "/chat/api/events",
+            &json!({"request_id": id, "after": after}),
+        ) else {
+            return (tokens, last, false);
+        };
+        if code != 200 {
+            return (tokens, events, false);
+        }
+        for t in events["tokens"].as_array().unwrap() {
+            tokens.push(t.as_str().unwrap().to_owned());
+        }
+        if !tokens.is_empty()
+            && let Some(first) = receipt.take()
+        {
+            first
+                .send((tokens.clone(), events["done"].clone()))
+                .unwrap_or_default();
+        }
+        after = events["next"].clone();
+        if events["done"] == true {
+            return (tokens, events, true);
+        }
+        last = events;
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 /// Lane CHATPAGE item 4 (REVIEW-laneCHATS-astra CHATS-02): Quit while a room member's chat
 /// streams through the relay and the serving run's route. The relay is the composition's own
 /// (`/api/network/start`, external provider on a loopback proxy port: `bind_public_routes` binds
@@ -1146,7 +1186,8 @@ fn room(port: u16, path: &str, body: &Value) -> Option<(u16, Value)> {
 /// the run closed first, `close_run_first`): it ends `Verified` within the Quit allowance (no
 /// hang), the held chat is cancelled through ONE gateway `DELETE` with `chat_cancelled`, the run
 /// is stopped, the relay no longer listens, the member's poller ends, and the relay's handler
-/// refuses a new send `application_closed` (Quit's gate is closing).
+/// refuses a new send `application_closed` (Quit's gate is closing). Quit begins only once the
+/// member's poller READ the first token through the relay (REVIEW-laneCHATPAGE-astra CP-02).
 #[test]
 fn quit_completes_while_a_relay_chat_streams_through_the_serving_run() {
     let fake = FakeGateway::start(Fake::ending(&["a"], End::Hold));
@@ -1191,31 +1232,24 @@ fn quit_completes_while_a_relay_chat_streams_through_the_serving_run() {
     assert_eq!(code, 200, "{sent}");
     fake.wait("the route streams its first token", |s| s.tokens_sent == 1);
     // The member's page keeps polling through the relay until its chat ends or the relay goes.
+    // CP-02 (REVIEW-laneCHATPAGE-astra): the fake's write is not the page's read, so the poller
+    // hands back a receipt of the first token it READ through the relay (`/chat/api/events`), and
+    // Quit begins only after that receipt (bounded); its end has its own bound below.
     let id = sent["request_id"].clone();
-    let poller = std::thread::spawn(move || {
-        let (mut after, mut tokens, mut last) = (json!(0), Vec::new(), Value::Null);
-        loop {
-            let Some((code, events)) = room(
-                port,
-                "/chat/api/events",
-                &json!({"request_id": id, "after": after}),
-            ) else {
-                return (tokens, last, false);
-            };
-            if code != 200 {
-                return (tokens, events, false);
-            }
-            for t in events["tokens"].as_array().unwrap() {
-                tokens.push(t.as_str().unwrap().to_owned());
-            }
-            after = events["next"].clone();
-            if events["done"] == true {
-                return (tokens, events, true);
-            }
-            last = events;
-            std::thread::sleep(Duration::from_millis(50));
-        }
+    let (first_tx, first) = mpsc::channel();
+    let (ended_tx, ended) = mpsc::channel();
+    std::thread::spawn(move || {
+        let outcome = room_poller(port, &id, &first_tx);
+        ended_tx.send(outcome).unwrap_or_default();
     });
+    let (read, done) = first
+        .recv_timeout(patience())
+        .expect("the member's page read the first token through the relay");
+    assert_eq!(
+        (read.as_slice(), &done),
+        (["a".to_owned()].as_slice(), &json!(false)),
+        "the page's first read through the relay: the held chat is still unfinished"
+    );
     // The owner's Stop through the relay: refused before any handler, and the run serves on.
     let refused = relay_call(
         port,
@@ -1271,7 +1305,9 @@ fn quit_completes_while_a_relay_chat_streams_through_the_serving_run() {
     );
     assert_eq!(verdict, Ok(Poll::Verified), "Quit after {took:?}");
     assert!(took < Duration::from_millis(allowance.millis()), "{took:?}");
-    let (tokens, last, done) = poller.join().expect("the member's poller ended");
+    let (tokens, last, done) = ended
+        .recv_timeout(patience())
+        .expect("the member's poller ended");
     assert_eq!(tokens, ["a"], "{last}");
     if done {
         assert_eq!(
