@@ -530,6 +530,32 @@ fn both_demo_stages_fit_the_owners_self_grant_at_the_contracts_serving_context()
         }
     }
 }
+/// Owner ruling 16 Nov 2026 (R2): the owner's fresh self-grant holds 5,000 commands. At 1,000 one
+/// run's own stage served the startup check and then about 995 tokens of answers before it refused
+/// mid-answer (REPORT-laneCAP measurement run: the fourth 256-token answer stopped after 60). 5,000
+/// is what a joined Mac's own page grants (`app.js` `max_commands:5000`) and what the compile
+/// offers every stage (`DemoChainMaxCommands`, demo_chain.py:220). It stays inside every bound on
+/// the figure: the standing consent's maximum (10,000, standing_consent.py:103, checked when the
+/// grant is written) and the worker limits' (`standing_limits`, at most 10,000).
+#[test]
+fn the_owners_fresh_self_grant_holds_five_thousand_commands() {
+    let f = Fixture::product_contributor();
+    let grant = standing_consent::load(&owner_ports::contributor_dir(&f.root.join("owner")))
+        .unwrap()
+        .expect("the contributor step's grant");
+    assert_eq!(grant["caps"]["max_commands"], json!(5000), "{grant:?}");
+    let count = |id: BudgetId| id.count().map(|n| n.get()).unwrap();
+    assert!(5000 <= count(BudgetId::PyMyceliumA13MacosStandingConsentMaxCommandsMaximumL103));
+    assert!(count(BudgetId::PyFinalMyceliumA13MacosDemoChainMaxCommandsL220C12) <= 5000);
+    let share = json!({"max_wall_seconds": 1800, "max_rss_bytes": 2_625_486_324u64,
+        "max_disk_bytes": 1_074_471_271u64});
+    assert_eq!(
+        standing_consent::standing_limits(&grant, Some(&share))
+            .map(|l| l["max_commands"].clone()),
+        Ok(json!(5000)),
+        "{grant:?}"
+    );
+}
 /// This Mac's private LAN address, as the `lan-real` gate step exports it (`ipconfig getifaddr
 /// en0`). Absent or not private: the test FAILS, it never skips.
 fn lan_ip() -> std::net::IpAddr {
