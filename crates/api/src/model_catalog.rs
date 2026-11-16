@@ -21,11 +21,17 @@ const RESIDENT_FACTOR: (u128, u128) = (501, 1000);
 /// float32 KV element size (every registered contract).
 const KV_BYTES_PER_ELEMENT: u128 = 4;
 /// The serving context of every registered model today, in tokens: one request's prompt plus its
-/// new tokens. v0.1.4's `DEMO_CONTEXT_TOKENS` (model_resources.py:72-76 @ f4e366e9: a 2,000-character
-/// prompt, a template under 100 tokens and 256 new tokens, rounded up to 4,096). Owner ruling 15 Nov:
-/// the stage capacity is this per-model setting; raising it is a contract value plus the memory
-/// consent that covers it, not a code change.
-const SERVING_CONTEXT_TOKENS: u64 = 4096;
+/// new tokens. Owner ruling 16 Nov 2026 (REPORT-laneCAP option 2): 2,356, v0.1.4's own derivation
+/// (model_resources.py:72-76 @ f4e366e9: a 2,000-character prompt, a template under 100 tokens and
+/// 256 new tokens) WITHOUT its rounding up to 4,096 (`DEMO_CONTEXT_TOKENS`). At 4,096 each stage
+/// worker's own reservation (backend-mlx `admission::requirements`: a single prefill of the whole
+/// context, quadratic in it) exceeds a 4 GB memory consent for every registered model (Qwen3-0.6B:
+/// 6.79 GB for layers [0,19], 5.99 GB for [19,28]; every other model's single-layer prefill
+/// scratch alone is above 4.6 GB), so every registered model gets 2,356. Divergence from the oracle
+/// recorded in `contracts/divergences.json`; oracle fixtures are compared at 4,096. Owner ruling
+/// 15 Nov: the stage capacity is this per-model setting; raising it is a contract value plus the
+/// memory consent that covers it (or chunked prefill, v0.2.x), not a code change.
+const SERVING_CONTEXT_TOKENS: u64 = 2356;
 /// Largest guard limit a member may run under, as a share of its RAM.
 const MEMBER_PEAK_MEMORY_FRACTION: (u128, u128) = (3, 4);
 const MEMORY_CAP_CHOICES: [(u128, u128); 3] = [(1, 2), (5, 8), (3, 4)];

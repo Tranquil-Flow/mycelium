@@ -3,10 +3,13 @@
 //! expected value in `fixtures/oracle_run_model.json` was produced by importing the read-only
 //! package at f4e366e9 and calling `run_model.document`, `model_resources.consent_document`
 //! and `DemoApp._choose_run_model` on Python 3.14.7 (`L10-evidence/r7-probe-run-model.py`).
+#[path = "support/oracle_context.rs"]
+mod oracle_context;
 use api::{
     model_catalog,
     preferences::run_model::{self, Facts},
 };
+use oracle_context::{ORACLE_CONTEXT_TOKENS, at_product_context};
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -29,42 +32,6 @@ fn outcome(r: Result<Value, api::schema::PublicError>) -> Value {
     match r {
         Ok(v) => json!({"ok": v}),
         Err(e) => json!({"err": {"status": e.status, "code": e.code}}),
-    }
-}
-/// The oracle's serving context (`model_resources.DEMO_CONTEXT_TOKENS`, model_resources.py:76 @
-/// f4e366e9): every fixture here was recorded at it, so parity is checked at it, passed
-/// explicitly. The product serves its model contract's context instead
-/// (`model_catalog::Model::serving_context_tokens`; the divergence is recorded in
-/// `contracts/divergences.json`); that value must never reach a fixture comparison.
-const ORACLE_CONTEXT_TOKENS: u64 = 4096;
-/// Every consent document inside an oracle result (`resources`): checked equal to the product's
-/// document computed at [`ORACLE_CONTEXT_TOKENS`], then replaced by the product's document at
-/// the contract's serving context, which is what the product returns. Everything else in the
-/// result is compared as recorded.
-fn at_product_context(value: &mut Value) {
-    match value {
-        Value::Object(map) => {
-            for (key, inner) in map.iter_mut() {
-                if key == "resources" && inner.get("storage_consent_ceiling_bytes").is_some() {
-                    let selected = inner["selected"]["model_id"]
-                        .as_str()
-                        .zip(inner["selected"]["resolved_commit"].as_str())
-                        .map(|(m, c)| (m.to_owned(), c.to_owned()));
-                    let selected = selected.as_ref().map(|(m, c)| (m.as_str(), c.as_str()));
-                    let memory = inner["device_memory_bytes"].as_u64();
-                    assert_eq!(
-                        *inner,
-                        model_catalog::consent_document_at(selected, memory, ORACLE_CONTEXT_TOKENS),
-                        "the consent document at the oracle's context equals the oracle's"
-                    );
-                    *inner = model_catalog::consent_document(selected, memory);
-                } else {
-                    at_product_context(inner);
-                }
-            }
-        }
-        Value::Array(items) => items.iter_mut().for_each(at_product_context),
-        _ => {}
     }
 }
 fn expected(case: &Value) -> Value {

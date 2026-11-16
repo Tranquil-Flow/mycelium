@@ -4,6 +4,8 @@
 //! through `PersistentBackend`; every other action is delegated untouched. Expected documents
 //! come from the executed oracle fixture (`L10-evidence/r7-probe-run-model.py`) and the round-6
 //! preference probe.
+#[path = "support/oracle_context.rs"]
+mod oracle_context;
 use api::{
     actions::{Action, Backend, Control},
     desktop::{Desktop, Service, Session},
@@ -235,21 +237,12 @@ fn run_model_choice_persists_and_returns_the_oracle_document() {
         .find(|c| c["label"] == "save_qwen3_8b")
         .unwrap();
     assert_eq!(case["device_memory_bytes"], json!(16 * GIB));
-    // The fixture's consent document was recorded at the oracle's serving context (4,096,
-    // `DEMO_CONTEXT_TOKENS`): parity is checked at it, passed explicitly; the product's document
-    // is the one at its model contract's serving context.
+    // The fixture's consent document was recorded at the oracle's serving context: parity is
+    // checked at it, passed explicitly; the product's document is the one at its model
+    // contract's serving context (`support/oracle_context.rs`).
     let mut expected = case["ok"].clone();
-    let resources = &expected["resources"];
-    let selected = (
-        resources["selected"]["model_id"].as_str().unwrap().to_owned(),
-        resources["selected"]["resolved_commit"].as_str().unwrap().to_owned(),
-    );
-    let selected = Some((selected.0.as_str(), selected.1.as_str()));
-    assert_eq!(
-        *resources,
-        api::model_catalog::consent_document_at(selected, Some(16 * GIB), 4096)
-    );
-    expected["resources"] = api::model_catalog::consent_document(selected, Some(16 * GIB));
+    assert!(expected["resources"].is_object());
+    oracle_context::at_product_context(&mut expected);
     assert_eq!(
         c.action("/api/run-model", &body(json!({"choice": "qwen3-8b"})))
             .unwrap(),
@@ -438,7 +431,11 @@ fn preference_observations_persist_over_real_rust_http() {
     let wire: Value =
         serde_json::from_str(include_str!("fixtures/oracle_wire_routes.json")).unwrap();
     let want_bytes = [
-        wire["routes"]["run_model_choose"]["golden_choose_0.6b_no_memory"].clone(),
+        json!(oracle_context::at_product_context_bytes(
+            wire["routes"]["run_model_choose"]["golden_choose_0.6b_no_memory"]
+                .as_str()
+                .unwrap()
+        )),
         wire["routes"]["fast_mode"]["choose_true"].clone(),
         wire["routes"]["fast_mode"]["choose_false"].clone(),
     ];

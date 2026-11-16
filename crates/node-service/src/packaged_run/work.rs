@@ -1144,10 +1144,12 @@ mod stage_tokens_tests {
 
 #[cfg(test)]
 mod stage_memory_tests {
-    //! Lane CAP item 2: at the serving context (4,096), the stage worker reserves more memory
-    //! than the owner's own 4 GB self-grant (`owner_ports.rs`): measured from the worker's
-    //! admission, 6,792,778,240 B for layers [0,19] and 5,992,888,832 B for [19,28]. The run
-    //! refuses that by name at the slices step instead of failing at the stage's prepare.
+    //! Lane CAP item 2: at the oracle's 4,096-token context (the contract's until the owner's
+    //! 16 Nov ruling), the stage worker reserves more memory than the owner's own 4 GB self-grant
+    //! (`owner_ports.rs`): measured from the worker's admission, 6,792,778,240 B for layers [0,19]
+    //! and 5,992,888,832 B for [19,28]. The run refuses that by name at the slices step instead of
+    //! failing at the stage's prepare. These tests drive the check at explicit token counts; the
+    //! contract's own figure is `work::tests::both_demo_stages_fit_the_owners_self_grant_…`.
     use super::*;
     const OWNER: u64 = 4_000_000_000;
     const JOINED: u64 = 8_589_934_592;
