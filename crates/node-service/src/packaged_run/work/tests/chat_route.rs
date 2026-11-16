@@ -500,7 +500,12 @@ fn page_status(services: &DesktopServices) -> Value {
         Box::new(move |reply| tx.send(reply).unwrap_or_default()),
     );
     let reply = rx.recv_timeout(patience()).expect("the status answers");
-    assert_eq!(reply.status, 200, "{}", String::from_utf8_lossy(&reply.body));
+    assert_eq!(
+        reply.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
     serde_json::from_slice(&reply.body).unwrap()
 }
 
@@ -528,7 +533,9 @@ fn the_owner_status_says_the_chat_is_available_while_the_run_serves() {
         "the status and the chat page read one service"
     );
     assert!(
-        chat["local_url"].as_str().is_some_and(|u| u.ends_with("/chat")),
+        chat["local_url"]
+            .as_str()
+            .is_some_and(|u| u.ends_with("/chat")),
         "{serving}"
     );
     assert_eq!(chat["share_url"], Value::Null, "no relay: {serving}");

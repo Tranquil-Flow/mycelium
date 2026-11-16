@@ -407,6 +407,33 @@ impl DesktopServices {
     fn routed_chat(&self) -> Option<&api::chat_service::ChatService> {
         self.chat_run.as_ref()
     }
+    /// `chat.chat_status(app)` (chat.py:521-529 @ f4e366e9, wired at app.py:1280 through
+    /// `_demo_status(self,'chat')`): owner only (`None` -> `null` for any other role); `available`
+    /// and `busy` from the route chat service's own `state()`, the one the chat page reads;
+    /// `local_url` = the app's origin + `/chat` while the app serves its pages (`app.server is not
+    /// None`: the window's custom protocol here, so until Quit begins); `share_url` = the relay's
+    /// origin + `/chat` when that origin is https. run.js:128-137 shows "Open the chat on this Mac"
+    /// and "Share with the room" only from this block. `None`: no route chat is composed (the
+    /// development shell), and the node's document stays as it is.
+    fn chat_status(&self, status: &Value) -> Option<Value> {
+        let chat = self.routed_chat()?;
+        if status["installation_role"] != "owner" {
+            return Some(Value::Null);
+        }
+        let state = chat.state();
+        let serves_pages = self.gate.lock().map(|gate| !gate.closing).unwrap_or(false);
+        let share_url = self
+            .network
+            .origin()
+            .filter(|origin| origin.starts_with("https://"))
+            .map(|origin| format!("{}/chat", origin.trim_end_matches('/')));
+        Some(json!({
+            "available": state["available"],
+            "busy": state["busy"],
+            "local_url": serves_pages.then(|| format!("{}/chat", desktop::channel::ORIGIN)),
+            "share_url": share_url,
+        }))
+    }
     /// `/chat/api/send` over the run's route (chat.py:300-340): the body checks (`chat_edge`),
     /// Quit's fence, then the service (one chat at a time under its own lock, chat.py:319-321).
     fn route_send(
@@ -582,6 +609,10 @@ impl DesktopServices {
                     self.authority.as_deref(),
                     &self.network,
                 );
+                // v0.1.4's `chat` block (`chat.chat_status`, lane CHATS item 1).
+                if let Some(chat) = self.chat_status(&status) {
+                    status["chat"] = chat;
+                }
                 Self::json(status)
             }
             ("POST", "/chat/api/state") if body == json!({}) => {
