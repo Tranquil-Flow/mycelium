@@ -1200,3 +1200,31 @@ fn a_policy_prompt_cancelled_before_its_work_ends_cancelled() {
     assert!(tokens.is_empty(), "the refusal was shown: {tokens:?}");
     assert_eq!(fake.seen(|s| s.posts.len()), 0, "an inference was posted");
 }
+
+// ------------------------- lane CHATFIX patch 2, CF-03: the route's ids of the page's tokens -----
+
+/// CF-03 (REVIEW-laneCHATFIX-astra): the route's gateway streams each token WITH its id
+/// (`token_id` in the SSE token event, `M16Requests`' events); the page shows text only (v0.1.4's
+/// chat events carry no ids). A TEST-ONLY tap on the HTTP gateway
+/// (`HttpRouteGateway::with_token_id_tap`) hands a probe the ids of the SAME request the page
+/// shows, one per token event, in order, while the chat's pieces stay exactly the gateway's text.
+#[test]
+fn the_http_gateways_test_tap_sees_the_route_id_of_each_streamed_token() {
+    let fake = FakeGateway::start(Script::completed(&["Hel", "lo", "!"]));
+    let ids: Arc<Mutex<Vec<Option<u64>>>> = Arc::default();
+    let tap: api::chat_service::TokenIdTap = {
+        let ids = ids.clone();
+        Arc::new(move |id| ids.lock().unwrap().push(id))
+    };
+    let gateway = HttpRouteGateway::new(fake.addr(), fake.bearer()).with_token_id_tap(tap);
+    let chat = service(run_over(Arc::new(gateway), Some(serving("run-1"))), None);
+    let sent = chat.send("local", prompt("hi", 3)).unwrap();
+    let (tokens, last) = until_done(&chat, &id_of(&sent));
+    assert_eq!(last["terminal"], "completed", "{last}");
+    assert_eq!(tokens, ["Hel", "lo", "!"]);
+    let first = fake_route_gateway::FIRST_TOKEN_ID;
+    assert_eq!(
+        *ids.lock().unwrap(),
+        [Some(first), Some(first + 1), Some(first + 2)]
+    );
+}
