@@ -16,6 +16,8 @@
 //!   helper, `node_service::tokenize`, which encodes exactly that way);
 //! * the stop ids (codec.py:135-139): `<|im_end|>` and `<|endoftext|>` of the checkpoint's
 //!   tokenizer, 151645 and 151643 for every registered model (executed, FX-CHATFIX-prompt-codec);
+//! * `policy_response` (codec.py:159-175): the fixed refusal for explicit credential theft, which
+//!   the gateway answers before any model work (backend.py:196-203);
 //! * the selection (`prompt_codec_from_deployment`, codec.py:270-287): by architecture, `qwen2` ->
 //!   Qwen2, `qwen3` -> Qwen3, anything else `unsupported_prompt_codec`. v0.2 reads the architecture
 //!   from the run model's contract (`model_catalog::Model::architecture`, v0.1.4's
@@ -111,6 +113,10 @@ impl PromptCodec {
     pub fn stop_token_ids(self) -> &'static [u32] {
         &QWEN_STOP_TOKEN_IDS
     }
+    /// `policy_response` (codec.py:159-175): both ported codecs share Qwen2's.
+    pub fn policy_response(self, prompt: &str) -> Option<&'static str> {
+        policy_response(prompt)
+    }
     /// `TEMPLATE.format(system=_SYSTEM, prompt=user)` (codec.py:154), verbatim.
     pub fn chat(self, user: &str) -> ChatPrompt {
         let mut chat = String::with_capacity(QWEN_SYSTEM.len() + user.len() + 128);
@@ -124,4 +130,61 @@ impl PromptCodec {
         }
         ChatPrompt(chat)
     }
+}
+
+/// The gateway's fixed answer to explicit credential theft (`codec.py:174`).
+pub const POLICY_REFUSAL: &str = "I can't assist with credential theft.";
+
+/// Characters other than A-Z whose full case fold contains an ASCII letter, and that fold
+/// (`str.casefold`, executed: node-service `tests/fixtures/chat-edge-casefold-oracle.json`). Every other
+/// non-ASCII character folds to text without an ASCII letter, so it cannot take part in a match
+/// against the ASCII markers below; it only has to stay a distinct, non-matching character.
+const ASCII_FOLDS: [(char, &str); 19] = [
+    ('\u{df}', "ss"),
+    ('\u{130}', "i\u{307}"),
+    ('\u{149}', "\u{2bc}n"),
+    ('\u{17f}', "s"),
+    ('\u{1f0}', "j\u{30c}"),
+    ('\u{1e96}', "h\u{331}"),
+    ('\u{1e97}', "t\u{308}"),
+    ('\u{1e98}', "w\u{30a}"),
+    ('\u{1e99}', "y\u{30a}"),
+    ('\u{1e9a}', "a\u{2be}"),
+    ('\u{1e9e}', "ss"),
+    ('\u{212a}', "k"),
+    ('\u{fb00}', "ff"),
+    ('\u{fb01}', "fi"),
+    ('\u{fb02}', "fl"),
+    ('\u{fb03}', "ffi"),
+    ('\u{fb04}', "ffl"),
+    ('\u{fb05}', "st"),
+    ('\u{fb06}', "st"),
+];
+
+/// `str.casefold` as far as the policy markers can observe it (see [`ASCII_FOLDS`]).
+pub fn fold(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c.is_ascii() {
+            out.push(c.to_ascii_lowercase());
+        } else if let Some((_, folded)) = ASCII_FOLDS.iter().find(|(from, _)| *from == c) {
+            out.push_str(folded);
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// `Qwen2PromptCodec.policy_response` (codec.py:159-175; Qwen3 inherits it): the fixed refusal
+/// for explicit credential theft, which v0.1.4's gateway emits as the only token before any model
+/// work (backend.py:196-203). Expected values: FX-L11-chat-edge (node-service `tests/chat_edge.rs`)
+/// and FX-CHATFIX-prompt-codec.
+pub fn policy_response(prompt: &str) -> Option<&'static str> {
+    let folded = fold(prompt);
+    let has = |markers: &[&str]| markers.iter().any(|m| folded.contains(m));
+    let credential = has(&["password", "credential", "login"]);
+    let explicit_abuse = folded.contains("steal")
+        || (folded.contains("phishing") && has(&["write", "create", "compose", "design"]));
+    (credential && explicit_abuse).then_some(POLICY_REFUSAL)
 }

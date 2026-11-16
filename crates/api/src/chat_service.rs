@@ -704,6 +704,7 @@ impl ChatService {
                 })
             })?;
         let chat_prompt = codec.chat(&prompt.text);
+        let policy = codec.policy_response(&prompt.text);
         let kept = count(BudgetId::PyMyceliumA13MacosChatMaxKeptRequestsL44)?;
         let (id, record_view) = {
             let mut state = self.state_lock();
@@ -750,7 +751,7 @@ impl ChatService {
         let worker_id = id.clone();
         let spawned = std::thread::Builder::new()
             .name("a13-chat".into())
-            .spawn(move || this.work(&worker_id, gateway, &chat_prompt));
+            .spawn(move || this.work(&worker_id, gateway, &chat_prompt, policy));
         let mut workers = self.inner.workers.lock().unwrap_or_else(|p| p.into_inner());
         workers.retain(|w| !w.is_finished());
         match spawned {
@@ -776,7 +777,15 @@ impl ChatService {
         }
     }
     /// `_work` (chat.py:342-398).
-    fn work(&self, id: &str, gateway: Arc<dyn RouteGateway>, prompt: &ChatPrompt) {
+    /// `policy`: the codec's fixed answer for this prompt, which v0.1.4's gateway emits as the only
+    /// token, then `completed`, before any model work (backend.py:196-203); the route is not asked.
+    fn work(
+        &self,
+        id: &str,
+        gateway: Arc<dyn RouteGateway>,
+        prompt: &ChatPrompt,
+        policy: Option<&'static str>,
+    ) {
         let _finally = Finally { service: self, id };
         let (run_id, max_new_tokens, cancel) = {
             let state = self.state_lock();
@@ -789,16 +798,24 @@ impl ChatService {
                 record.cancel.clone(),
             )
         };
-        let outcome = match self.ended_by_ceiling(run_id.as_deref()) {
-            Some(ended) => Err(GatewayError::new(ended)),
-            None => gateway.stream(prompt, max_new_tokens, &cancel, &mut |text| {
-                let stamp = self.inner.clock.now();
-                if let Some(record) = self.state_lock().requests.get_mut(id) {
-                    record.first_token_at.get_or_insert(stamp);
-                    record.last_token_at = Some(stamp);
-                    record.tokens.push(text.to_owned());
-                }
-            }),
+        let mut on_token = |text: &str| {
+            let stamp = self.inner.clock.now();
+            if let Some(record) = self.state_lock().requests.get_mut(id) {
+                record.first_token_at.get_or_insert(stamp);
+                record.last_token_at = Some(stamp);
+                record.tokens.push(text.to_owned());
+            }
+        };
+        let outcome = match (self.ended_by_ceiling(run_id.as_deref()), policy) {
+            (Some(ended), _) => Err(GatewayError::new(ended)),
+            (None, Some(answer)) => {
+                on_token(answer);
+                Ok(Streamed {
+                    terminal: Some("completed"),
+                    code: None,
+                })
+            }
+            (None, None) => gateway.stream(prompt, max_new_tokens, &cancel, &mut on_token),
         };
         let ended = match &outcome {
             Ok(streamed) if streamed.terminal == Some("failed") => {
