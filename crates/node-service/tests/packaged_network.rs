@@ -214,3 +214,36 @@ fn packaged_pending_code_becomes_a_window_when_the_relay_starts() {
     drop(core);
     std::fs::remove_dir_all(&state).unwrap_or_default();
 }
+
+/// Lane CHATS item 1 (ledger row 106 a): v0.1.4's `chat` status block (`chat.chat_status`,
+/// chat.py:521-529 @ f4e366e9, wired at app.py:1280 through `_demo_status(self,'chat')`): the
+/// owner's `/api/status` carries `available` and `busy` from the chat service's own `state()`, the
+/// page's `local_url` (the app's origin + `/chat`) and, once the relay runs on an https origin, the
+/// room's `share_url` (that origin + `/chat`). run.js shows "Open the chat on this Mac" and "Share
+/// with the room" only from this block; without it the page said "The chat opens when the route is
+/// serving." for a whole serving run. No run here: the service says not available.
+#[test]
+fn the_owner_status_carries_the_chat_block_with_the_relay_share_url() {
+    let state = state_root("chat-status");
+    let (core, mut cleanup) = packaged_core(&state);
+    let before = status(&core);
+    assert_eq!(before["installation_role"], "owner", "{before}");
+    assert_eq!(
+        before["chat"],
+        json!({"available": false, "busy": false,
+               "local_url": format!("{ORIGIN}/chat"), "share_url": null}),
+        "{before}"
+    );
+    let started = post(&core, "/api/network/start", network_body(free_port()));
+    assert_eq!(started.0, 200, "network start: {}", started.1);
+    let after = status(&core);
+    assert_eq!(
+        after["chat"],
+        json!({"available": false, "busy": false,
+               "local_url": format!("{ORIGIN}/chat"), "share_url": format!("{PUBLIC}/chat")}),
+        "{after}"
+    );
+    assert_eq!(quit(&mut cleanup), Ok(Poll::Verified));
+    drop(core);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}

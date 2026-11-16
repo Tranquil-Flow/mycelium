@@ -76,6 +76,15 @@ fn packaged_member_joins_with_consent_through_the_owners_window() {
         |v| v["authority"]["member_count"] == 2,
     );
     assert_eq!(seen["authority"]["membership_state"], "current", "{seen}");
+    // Lane CHATS item 1 (`chat.chat_status`, chat.py:521-523 @ f4e366e9): only the owner's status
+    // carries the chat block (its relay is https, so the room's link is in it); a joined Mac's is
+    // `null`, as v0.1.4's `None`.
+    assert_eq!(
+        seen["chat"]["share_url"],
+        json!(format!("{}/chat", macs::PUBLIC)),
+        "{seen}"
+    );
+    assert_eq!(after["chat"], Value::Null, "{after}");
     // Joined: a second join is `already_joined` (app.py:1747-1748).
     let again = member.post("/api/join/window", join_body(&member, &owner.link, 600));
     assert_eq!(
