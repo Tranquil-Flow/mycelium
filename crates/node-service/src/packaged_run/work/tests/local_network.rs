@@ -336,3 +336,110 @@ fn a_signed_address_the_runs_admission_refuses_is_not_probed() {
         assert!(probe.sent().is_empty(), "{label}: {:?}", probe.sent());
     }
 }
+
+/// What the slices step's shared half answers in [`the_slices_step_names_an_unanswered_dial_through_the_composed_wrapper`].
+enum Next {
+    Refuse,
+    Workflow,
+    Stop,
+    Raise,
+}
+
+/// Proves PHY-06 (lane PHY patch 2): the step-6 rename is protected through the production wrapper,
+/// `Composed::run_step("slices")`, with a REAL failed workflow: the joined Mac's work service is
+/// gone, so the workflow's dial gets no answer and the workflow fails with that open cause. The
+/// returned refusal is `local_network_permission_required` when the datagram to the joined Mac is
+/// blocked and `joined_mac_did_not_answer` (with its address) when it is reached; a refusal with no
+/// failed workflow, Stop and an exception pass unchanged with no datagram; teardown still runs.
+/// The seam stands for `Work::prepare` (the real `compose`) and the shared chain's slices step (the
+/// real `SlicesPort::node_slice_plans`), never for the rename.
+#[test]
+fn the_slices_step_names_an_unanswered_dial_through_the_composed_wrapper() {
+    let mut f = Fixture::on(lan_on_loopback());
+    let mut chain = Composed::new(&f.host, None, None);
+    let probe = Scripted::new(Answer::Blocked);
+    chain.work.probe = probe.clone();
+    let mut state = published(&mut f, &chain.work, "run-s6");
+    let wall = BudgetId::MemberChosenWall
+        .span(Entries::ZERO)
+        .unwrap()
+        .millis()
+        / 1000;
+    state.worker_wall_limits = state
+        .participants
+        .iter()
+        .cloned()
+        .map(|n| (n, wall))
+        .collect();
+    let member = member_addresses(&f, &chain.work, &state);
+    let mut plan = Some(f.plan(&state));
+    let composed = state.clone();
+    let next = Arc::new(Mutex::new(Next::Refuse));
+    let script = next.clone();
+    chain.slices_seam = Some(SlicesSeam {
+        prepare: Box::new(move |work, env| match plan.take() {
+            Some(plan) => work.compose(&composed, plan, Arc::new(NoCodec), env),
+            None => Ok(()),
+        }),
+        step: Box::new(move |work, _| match *script.lock().unwrap() {
+            Next::Refuse => Err(refused("member_consent_required")),
+            Next::Workflow => SlicesPort::node_slice_plans(&mut work.clone()).map(|_| ()),
+            Next::Stop => Err(StepError::Stopped),
+            Next::Raise => Err(StepError::Exception {
+                class: "TestRaised".into(),
+            }),
+        }),
+    });
+    let mut env = Env { at: Instant::now() };
+    // Another refusal with no failed workflow: unchanged, nothing probed.
+    let (code, _) = refusal(chain.run_step("slices", &mut env));
+    assert_eq!(code, "member_consent_required");
+    assert!(probe.sent().is_empty(), "{:?}", probe.sent());
+    // The joined Mac's work service is gone: the real workflow's dial gets no answer.
+    f.network.close_work();
+    *next.lock().unwrap() = Next::Workflow;
+    let (code, message) = refusal(chain.run_step("slices", &mut env));
+    let cause = lock(&chain.work.resident)
+        .work
+        .as_ref()
+        .and_then(|work| work.failure_cause());
+    assert!(
+        cause
+            .as_deref()
+            .is_some_and(api::local_network::dial_unanswered),
+        "the workflow failed on a dial without an answer: {cause:?}"
+    );
+    assert_eq!(code, PERMISSION_REQUIRED, "{message}");
+    assert!(
+        member.iter().all(|a| probe.sent().contains(a)),
+        "the joined Mac's address was probed: {:?}",
+        probe.sent()
+    );
+    // Reached: the joined Mac's silence, named with its address.
+    probe.answer(Answer::Sent);
+    let (code, message) = refusal(chain.run_step("slices", &mut env));
+    assert_eq!(code, JOINED_MAC_SILENT, "{message}");
+    assert!(message.contains(&member[0].ip().to_string()), "{message}");
+    // Stop and an exception pass unchanged, with no datagram.
+    let before = probe.sent().len();
+    *next.lock().unwrap() = Next::Stop;
+    let stopped = chain.run_step("slices", &mut env);
+    assert!(matches!(stopped, Err(StepError::Stopped)), "{stopped:?}");
+    *next.lock().unwrap() = Next::Raise;
+    let raised = chain.run_step("slices", &mut env);
+    assert!(
+        matches!(&raised, Err(StepError::Exception { class }) if class == "TestRaised"),
+        "{raised:?}"
+    );
+    assert_eq!(
+        probe.sent().len(),
+        before,
+        "Stop and an exception probe nothing"
+    );
+    // Teardown still runs: the failed workflow leaves the run (closed, or held as debt).
+    let closed = chain.teardown(true, &mut env);
+    assert!(
+        lock(&chain.work.resident).work.is_none(),
+        "teardown did not take the workflow: {closed:?}"
+    );
+}

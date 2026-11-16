@@ -1095,6 +1095,20 @@ pub(super) struct Composed {
     work: Work,
     compiler: SharedCompiler<PackagedRun>,
     program: Option<api::native_compiler::NativeProgram>,
+    /// PHY-06: a model-free witness replaces `Work::prepare` and the shared chain's slices step,
+    /// never the rename between them and the returned refusal.
+    #[cfg(test)]
+    slices_seam: Option<SlicesSeam>,
+}
+/// PHY-06 (lane PHY patch 2): the two halves of the slices step a model-free test supplies.
+#[cfg(test)]
+type SlicesHalf = Box<dyn FnMut(&Work, &mut dyn StepEnv) -> Result<(), StepError> + Send>;
+#[cfg(test)]
+pub(super) struct SlicesSeam {
+    /// Stands for `Work::prepare` (the compile's artifact into the run's composed work).
+    pub prepare: SlicesHalf,
+    /// Stands for the shared chain's slices step (`run_slices_step` over the work's ports).
+    pub step: SlicesHalf,
 }
 impl Composed {
     pub(super) fn new(
@@ -1110,7 +1124,30 @@ impl Composed {
             work,
             compiler,
             program,
+            #[cfg(test)]
+            slices_seam: None,
         }
+    }
+    /// The slices step's preparation: the compile's artifact into the run's composed work.
+    fn prepare_slices(&mut self, env: &mut dyn StepEnv) -> Result<(), StepError> {
+        #[cfg(test)]
+        if let Some(seam) = self.slices_seam.as_mut() {
+            return (seam.prepare)(&self.work, env);
+        }
+        let state = self
+            .inner
+            .state()
+            .ok_or_else(|| refused("compiler_run_changed"))?;
+        self.work
+            .prepare(state, env, &self.compiler, self.program.as_ref())
+    }
+    /// The shared chain's slices step over the composed work.
+    fn shared_slices(&mut self, env: &mut dyn StepEnv) -> Result<(), StepError> {
+        #[cfg(test)]
+        if let Some(seam) = self.slices_seam.as_mut() {
+            return (seam.step)(&self.work, env);
+        }
+        self.inner.run_step("slices", env)
     }
 }
 impl Chain for Composed {
@@ -1146,18 +1183,14 @@ impl Chain for Composed {
                 .local_network(state, matches!(step, "model" | "compile"))?;
         }
         if step == "slices" {
-            let state = self
-                .inner
-                .state()
-                .ok_or_else(|| refused("compiler_run_changed"))?;
-            self.work
-                .prepare(state, env, &self.compiler, self.program.as_ref())?;
-            // Lane PHY item 2 (c): a dial without an answer is named, not `managed_workflow_failed`.
-            return self.inner.run_step(step, env).map_err(|failed| {
-                match (&failed, self.work.named_step_failure()) {
-                    (StepError::Refused(_), Some(named)) => named,
-                    _ => failed,
-                }
+            // A preparation refusal is returned as it is (no workflow has run).
+            self.prepare_slices(env)?;
+            // Lane PHY item 2 (c): a refused step whose workflow failed on a dial without an
+            // answer is named, not `managed_workflow_failed`; Stop, an exception and every other
+            // refusal pass unchanged (only a refusal is probed).
+            return self.shared_slices(env).map_err(|failed| match failed {
+                StepError::Refused(_) => self.work.named_step_failure().unwrap_or(failed),
+                other => other,
             });
         }
         self.inner.run_step(step, env)
