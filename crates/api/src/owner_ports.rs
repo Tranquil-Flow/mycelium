@@ -53,6 +53,11 @@ pub struct ContributorState {
     pub session: Option<crate::member::Session>,
     /// The session's lease while the renewal loop has the session out on the wire.
     pub lease: Option<f64>,
+    /// The renewal holding `session` out on the wire, if any (lane FLK, [`crate::renewal`]).
+    pub flight: Option<crate::renewal::Flight>,
+    /// The seed refused this membership's renewal ([`crate::renewal::membership_refused`]): its
+    /// Session was not put back; readers refuse with this code until the contributor is replaced.
+    pub refused: Option<&'static str>,
 }
 
 /// What a host keeps for the owner run beside its authority: `DemoApp.local_contributor`,
@@ -110,6 +115,11 @@ pub trait RunHost: Clone + Send + Sync + 'static {
     /// producer it refuses (the run's cleanup wait then names the Mac).
     fn cleanup(&self, _node: &str, _request: &Value) -> Result<(), Failure> {
         Err(Failure::new("RuntimeError", "member_cleanup_unavailable"))
+    }
+    /// The wall clock the contributor's membership renewal reads ([`crate::app_host::now`]). A
+    /// test host may step it (lane FLK patch 3: a local lease-expiry check is no seed refusal).
+    fn renewal_clock(&self) -> f64 {
+        crate::app_host::now()
     }
 }
 
@@ -226,6 +236,8 @@ pub fn start_local_contributor<H: RunHost>(host: &H) -> Result<Json, PublicError
             signer: Arc::new(signer),
             session,
             lease,
+            flight: None,
+            refused: None,
         });
     });
     Ok(jobj! {
@@ -287,6 +299,12 @@ fn grant_self_consent(dir: &std::path::Path, node: &str, policy: &Value) -> Resu
 }
 
 /// One pass of the contributor's half of `DemoApp._renew_loop` (`contributor.renew()`).
+///
+/// The Session leaves the contributor for the seed round trip as a recorded renewal flight
+/// ([`crate::renewal`], lane FLK FLK-02): the pass lands it through [`ContributorFlight`], which
+/// puts the Session back only into the same flight (never over a replaced contributor or a later
+/// flight), keeps a Session the seed refused out ([`crate::renewal::membership_refused`]), and on
+/// unwind ends the flight without a Session, so no reader keeps standing on its snapshot.
 pub fn renew_contributor<H: RunHost>(host: &H) {
     let taken = host.with(|c| {
         if c.closed || !c.authority.running || c.left || c.authority.target {
@@ -297,33 +315,89 @@ pub fn renew_contributor<H: RunHost>(host: &H) {
             return None;
         };
         let session = state.session.take()?;
-        Some((c.authority.root.clone(), runtime, session))
+        let flight = crate::renewal::Flight::begin();
+        let id = flight.id;
+        state.flight = Some(flight);
+        Some((c.authority.root.clone(), runtime, session, id))
     });
-    let Some((root, runtime, mut session)) = taken else {
+    let Some((root, runtime, mut session, id)) = taken else {
         return;
     };
+    let flight = ContributorFlight {
+        host,
+        id,
+        landed: false,
+    };
     let dir = contributor_dir(&root);
+    let mut refused = None;
     if let Ok((signer, _, _)) = identity(&dir) {
         let options = runtime.options();
         let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();
+        let clock = || host.renewal_clock();
         let env = crate::peer::JoinEnv {
             signer: &signer,
-            clock: &now,
+            clock: &clock,
             random_hex: &random_hex,
             seed: &options,
         };
-        if let Err(error) = crate::peer::renew(&dir, true, Some(&mut session), &env) {
-            eprintln!("contributor renew: {}", error.code);
+        if let Err(failure) = crate::peer::renew_with_origin(&dir, true, Some(&mut session), &env)
+        {
+            eprintln!("contributor renew: {}", failure.error.code);
+            // Only the seed's own refusal keeps the Session out (FLK2-02); a code raised on this
+            // Mac (a lease the local wall clock reads as past) puts it back, as at the base.
+            refused = crate::renewal::membership_refused(&failure).then_some(failure.error.code);
         }
     }
-    host.with(|c| {
-        if let Some(state) = c.run.contributor.as_mut()
-            && state.session.is_none()
-        {
-            state.lease = session.lease_expires_at();
-            state.session = Some(session);
+    flight.land(session, refused);
+}
+/// A contributor renewal's flight, owned by the renewal pass from its take to its put-back.
+struct ContributorFlight<'a, H: RunHost> {
+    host: &'a H,
+    id: u64,
+    landed: bool,
+}
+impl<H: RunHost> ContributorFlight<'_, H> {
+    /// The put-back: only into this same flight. A transport or local failure puts the Session
+    /// back as before; a seed refusal of the membership does not, and is recorded.
+    fn land(mut self, session: crate::member::Session, refused: Option<&'static str>) {
+        let id = self.id;
+        self.host.with(|c| {
+            let Some(state) = c.run.contributor.as_mut() else {
+                return;
+            };
+            if state.flight.as_ref().map(|f| f.id) != Some(id) {
+                return;
+            }
+            state.flight = None;
+            if let Some(code) = refused {
+                state.refused = Some(code);
+                return;
+            }
+            if state.session.is_none() {
+                state.lease = session.lease_expires_at();
+                state.session = Some(session);
+            }
+        });
+        // Only once the put-back ran: an unwind inside it still ends the flight in `drop`.
+        self.landed = true;
+    }
+}
+impl<H: RunHost> Drop for ContributorFlight<'_, H> {
+    /// A pass that never reached its put-back (its thread unwinds): the flight ends without a
+    /// Session, as a missing Session was before the snapshot fallback existed.
+    fn drop(&mut self) {
+        if self.landed {
+            return;
         }
-    });
+        let id = self.id;
+        self.host.with(|c| {
+            if let Some(state) = c.run.contributor.as_mut()
+                && state.flight.as_ref().map(|f| f.id) == Some(id)
+            {
+                state.flight = None;
+            }
+        });
+    }
 }
 
 /// `app._stop_local_contributor()`: the membership stays retained, the live session ends.
@@ -774,13 +848,11 @@ impl<H: RunHost> ReportsPort for OwnerPorts<H> {
             })
             .collect()
     }
+    /// The owner's authority node, from where it is stable: `owner_node` is recorded with the owner's
+    /// membership, not read from `owner_session`, which `app_host::renew_owner` takes out for every
+    /// heartbeat (lane FLK, FLK-03: the owner's row then counted as a joined Mac).
     fn own_node_id(&mut self) -> Option<String> {
-        self.host.with(|c| {
-            c.authority
-                .owner_session
-                .as_ref()
-                .map(|s| s.node_id().to_owned())
-        })
+        self.host.with(|c| c.authority.owner_node.clone())
     }
     fn member_identity(&mut self, node: &str) -> Value {
         let member = self

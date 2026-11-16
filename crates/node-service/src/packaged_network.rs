@@ -137,6 +137,15 @@ fn lock<T>(cell: &Mutex<T>) -> MutexGuard<'_, T> {
     // Plain values and handles: a panicked holder cannot leave them half-written.
     cell.lock().unwrap_or_else(PoisonError::into_inner)
 }
+/// A member renewal pass on the wire ([`Network::renew_member`]): ends on every exit, unwinding
+/// included, and wakes a leave waiting for it.
+struct RenewalPass<'a>(&'a Network);
+impl Drop for RenewalPass<'_> {
+    fn drop(&mut self) {
+        *lock(&self.0.renewing) = false;
+        self.0.renewed.notify_all();
+    }
+}
 /// `public_relay.status().get('public_origin')` as the library's authority view reads it.
 struct Origin(Option<String>);
 impl RelayOrigin for Origin {
@@ -263,26 +272,23 @@ impl Network {
     /// over this host's member cell (its seed path, `_left`).
     pub fn renew_member(&self, authority: &Mutex<Authority>) {
         // Marked before the pass reads `_left`: a leave that set it either sees this pass and
-        // waits for it, or this pass sees `_left` and does not start.
+        // waits for it, or this pass sees `_left` and does not start. Cleared by `RenewalPass`'s
+        // drop, so a pass that unwinds never leaves a leave waiting on it (lane FLK, FLK-02).
         *lock(&self.renewing) = true;
+        let _pass = RenewalPass(self);
         app_host::renew_member(&self.cell(authority));
         self.sync_work_session(authority);
         if membership_state(authority).as_deref() != Some("current") {
             self.close_work();
         }
-        *lock(&self.renewing) = false;
-        self.renewed.notify_all();
     }
     /// The leave's `disconnect` after `_left` (member_leave.py:237-252 @ f4e366e9: its
     /// `peer.set_contribution_enabled` takes the lock a renewal holds across its seed round
     /// trip): a pass already on the wire ends first, so no lease moves once the leave answered.
-    /// Bounded by the member seed's request budget (peer.py:117), its heartbeat and answer.
+    /// Bounded by the member seed's request budget (peer.py:117), its heartbeat and answer
+    /// (`api::renewal::allowance`, also a renewal flight's deadline).
     fn await_renewal_pass(&self) {
-        let bound = budgets::BudgetId::PyMyceliumA13MacosPeerRemotemacmemberInitTimeoutL117
-            .span(budgets::Entries::ZERO)
-            .map_or(std::time::Duration::ZERO, |span| {
-                std::time::Duration::from_millis(span.millis()) * 2
-            });
+        let bound = api::renewal::allowance();
         let renewing = lock(&self.renewing);
         let (renewing, _) = self
             .renewed
@@ -339,7 +345,12 @@ pub fn membership_state(authority: &Mutex<Authority>) -> Option<String> {
     if !target {
         return app_host::membership_state(authority);
     }
-    let status = joined_member::target_status(&lock(authority));
+    target_membership_state(&lock(authority))
+}
+/// A joined target's own `membership_state` (`TargetApplication.status()`) over an authority the
+/// caller already holds.
+fn target_membership_state(a: &Authority) -> Option<String> {
+    let status = joined_member::target_status(a);
     match status.get("membership_state") {
         Some(Json::Str(state)) => Some(state.clone()),
         _ => None,
@@ -827,6 +838,10 @@ pub struct PackagedMember {
     seams: MemberSeams,
     lifecycle: Arc<Mutex<()>>,
     slot: Mutex<MemberSlot>,
+    /// TEST ONLY (lane FLK, FLK-01): run once inside [`MemberHost::accept_context`], after it
+    /// read this Mac's membership state, so a test can start a renewal exactly there.
+    #[cfg(test)]
+    pub(crate) inside_accept_context: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 impl PackagedMember {
     pub fn new(
@@ -840,6 +855,8 @@ impl PackagedMember {
             seams,
             lifecycle: Arc::default(),
             slot: Mutex::default(),
+            #[cfg(test)]
+            inside_accept_context: Mutex::default(),
         })
     }
     fn state(&self) -> api::member_agent::HostState {
@@ -919,15 +936,45 @@ impl api::member_agent::MemberHost for PackagedMember {
     /// `auto_step_context()` (app.py:1168-1172): the binding only while this Mac is a target
     /// whose membership is `current`; the saved resource policy; the member's join seam.
     fn accept_context(&self) -> Option<api::member_agent::AcceptContext> {
-        let root = lock(&self.authority).root.clone();
-        let current = membership_state(&self.authority).as_deref() == Some("current");
-        let binding = current
-            .then(|| app_host::membership_binding(&self.network.cell(&self.authority)))
-            .flatten()
-            .map(|b| {
-                json!({"swarm_id": b.swarm_id, "node_id": b.node_id,
+        // The renewal loop holds the live Session for one seed heartbeat
+        // (`app_host::renew_member`, `session_view` set meanwhile). For exactly that flight the
+        // work session keeps the preceding snapshot (`Network::sync_work_session`), the same
+        // membership: its binding stands in. Without it every standing pass that ran during a
+        // renewal closed this Mac's work service (`member_agent` closes work without a binding),
+        // and the owner's run kept dialling the closed address (lane FLK, rows 6-7).
+        // The membership state, the live Session or the in-flight snapshot are read in ONE
+        // acquisition of the authority (lane FLK patch 2, FLK-01): a renewal that starts between
+        // separate reads would leave "current" without its binding and close the work service.
+        // Lock order authority -> work session, as `Network::sync_work_session`. An owner host
+        // has no joined Session (`session` is a target's), so it never has a binding here.
+        let (root, binding) = {
+            let a = lock(&self.authority);
+            let current =
+                a.target && target_membership_state(&a).as_deref() == Some("current");
+            let binding = match &a.session {
+                _ if !current => None,
+                Some(session) => api::peer::membership_binding(Some(session)),
+                // FLK-02: only a renewal flight that still stands in (not one that unwound or ran
+                // past its deadline: the base closed the work service then, and so does this).
+                None if a
+                    .member_flight
+                    .as_ref()
+                    .is_some_and(api::renewal::Flight::stands_in) =>
+                {
+                    api::peer::membership_binding(lock(&self.network.work_session).as_ref())
+                }
+                None => None,
+            };
+            (a.root.clone(), binding)
+        };
+        #[cfg(test)]
+        if let Some(hook) = lock(&self.inside_accept_context).take() {
+            hook();
+        }
+        let binding = binding.map(|b| {
+            json!({"swarm_id": b.swarm_id, "node_id": b.node_id,
                 "seed_key_digest": b.seed_key_digest})
-            });
+        });
         Some(api::member_agent::AcceptContext {
             policy: api::preferences::resource_policy::read(&root)
                 .ok()

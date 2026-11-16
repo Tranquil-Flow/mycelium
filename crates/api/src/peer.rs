@@ -723,9 +723,27 @@ pub fn renew(
     session: Option<&mut Session>,
     env: &JoinEnv,
 ) -> Result<Json, PublicError> {
-    let client = require_current(root, started, session.as_deref())?;
+    renew_with_origin(root, started, session, env).map_err(|failure| failure.error)
+}
+/// [`renew`], with where a failure was raised (lane FLK patch 3, FLK2-02): [`Origin::Seed`] only
+/// for the seed's own answer to the heartbeat ([`SeedError::answered`]); everything before the
+/// request (the Session's lease against `env.clock`, `require_current`) and every local check of
+/// the answer is [`Origin::Local`]. The membership renewals classify refusals by it
+/// ([`crate::renewal::membership_refused`]).
+///
+/// [`Origin::Seed`]: crate::renewal::Origin::Seed
+/// [`Origin::Local`]: crate::renewal::Origin::Local
+pub fn renew_with_origin(
+    root: &Path,
+    started: bool,
+    session: Option<&mut Session>,
+    env: &JoinEnv,
+) -> Result<Json, crate::renewal::Failure> {
+    use crate::renewal::{Failure, Origin};
+    let client =
+        require_current(root, started, session.as_deref()).map_err(Failure::local)?;
     let Some(session) = session else {
-        return Err(peer("peer_membership_missing"));
+        return Err(Failure::local(peer("peer_membership_missing")));
     };
     // `RemoteMacMember._clock` raises `peer_clock_invalid` at the read of a non-finite value; the session
     // calls then fail on that value, and the failure is replaced by the source's error.
@@ -755,10 +773,17 @@ pub fn renew(
     let id_source = || format!("member-message-{}", (env.random_hex)(16));
     let heartbeat = session
         .heartbeat(env.signer, &clock, &id_source, "RUNNING", 0)
-        .map_err(member_error)?;
+        .map_err(|error| Failure::local(member_error(error)))?;
     let renewal = client
         .send_heartbeat(&heartbeat, &clock)
-        .map_err(seed_error)?;
+        .map_err(|error| Failure {
+            origin: if error.answered() {
+                Origin::Seed
+            } else {
+                Origin::Local
+            },
+            error: seed_error(error),
+        })?;
     session
         .accept_lease_renewal(
             &renewal,
@@ -767,9 +792,9 @@ pub fn renew(
                 .as_str()
                 .unwrap_or_default(),
         )
-        .map_err(member_error)?;
-    remove_quietly(&root.join(DISPOSITION_FILE))?; // `_clear_disposition`
-    membership_result_live_lazy(root, Some(session), &clock)
+        .map_err(|error| Failure::local(member_error(error)))?;
+    remove_quietly(&root.join(DISPOSITION_FILE)).map_err(Failure::local)?; // `_clear_disposition`
+    membership_result_live_lazy(root, Some(session), &clock).map_err(Failure::local)
 }
 
 /// `RemoteMacMember.membership_binding()` of a live session.

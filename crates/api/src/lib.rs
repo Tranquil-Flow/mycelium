@@ -61,6 +61,7 @@ pub mod product_routes;
 pub mod qr;
 pub mod registry;
 pub mod relay;
+pub mod renewal;
 pub mod requests;
 pub mod resources;
 pub mod run_exchange;

@@ -43,8 +43,14 @@ impl Network {
     pub fn sync_work_session(&self, authority: &Mutex<Authority>) {
         let a = lock(authority);
         // A renewal temporarily moves the Session out. Retain the preceding snapshot only
-        // during that flight; its lease still bounds the resident dispatch admission.
-        if a.session.is_some() || a.session_view.is_none() {
+        // during that flight, and only while it stands in (lane FLK, `api::renewal`: not after
+        // it unwound, ran past its deadline or was refused); its lease still bounds the resident
+        // dispatch admission.
+        let in_flight = a
+            .member_flight
+            .as_ref()
+            .is_some_and(api::renewal::Flight::stands_in);
+        if a.session.is_some() || !in_flight {
             *lock(&self.work_session) = a.session.clone();
         }
     }

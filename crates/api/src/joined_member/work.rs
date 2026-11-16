@@ -383,9 +383,75 @@ pub fn control_loop(
     status: &Status,
     stop: &AtomicBool,
 ) -> Result<()> {
+    // Lane FLK: the member says when its control endpoint starts accepting, refuses a
+    // connection, is away from its accept long enough for an owner's connect to time out, and
+    // stops accepting (one line each, with the reason; public short ids only).
+    let short = me.fmt_short();
+    match host.address() {
+        Ok(address) => eprintln!(
+            "member_control_accepting endpoint={short} mode={:?} sockets={:?}",
+            host.mode(),
+            address.ip_addrs().collect::<Vec<_>>()
+        ),
+        Err(e) => eprintln!(
+            "member_control_accepting endpoint={short} mode={:?} address={e:?}",
+            host.mode()
+        ),
+    }
+    let ended = control_loop_inner(rt, clock, host, trust, me, dispatcher, signer, status, stop);
+    match &ended {
+        Ok(()) => eprintln!("member_control_stopped endpoint={short} reason=stop_requested"),
+        Err(code) => eprintln!("member_control_stopped endpoint={short} reason={code}"),
+    }
+    ended
+}
+/// A served connection that kept the loop away from its accept for longer than one owner poll
+/// (the owner's connect allowance is `SidecarLocalHandshake`): what it was doing, phase by phase.
+struct Away {
+    command: String,
+    receive: Duration,
+    handle: Duration,
+    respond: Duration,
+    close_wait: Duration,
+    closed_by_peer: bool,
+}
+#[allow(clippy::too_many_arguments)]
+fn control_loop_inner(
+    rt: &tokio::runtime::Runtime,
+    clock: &HostClock,
+    host: &mut LoopbackHost<'_>,
+    trust: &OwnerTrust,
+    me: iroh::EndpointId,
+    dispatcher: &Dispatcher,
+    signer: &Identity,
+    status: &Status,
+    stop: &AtomicBool,
+) -> Result<()> {
+    let short = me.fmt_short();
+    let report_after = Duration::from_millis(
+        B::OwnerPoll
+            .span(Entries::ZERO)
+            .map_err(|_| "budget_unavailable")?
+            .millis(),
+    );
     let mut last = 0u64;
     let mut admitted: Option<iroh::EndpointId> = None;
+    // Direct LAN: the receive filter's drops and the pre-send filter's refusals, reported when
+    // they change (an owner Initial dropped before iroh is a connect that can only time out).
+    let mut filtered = (0u64, 0u64);
     while !stop.load(Ordering::SeqCst) {
+        if let (Some(dropped), Some(refused)) =
+            (host.lan_dropped_datagrams(), host.lan_refused_datagrams())
+            && (dropped, refused) != filtered
+        {
+            eprintln!(
+                "member_control_filter endpoint={short} dropped_in={dropped} (+{}) refused_out={refused} (+{}) learned={:?}",
+                dropped.saturating_sub(filtered.0),
+                refused.saturating_sub(filtered.1),
+                host.lan_learned_hosts()
+            );
+            filtered = (dropped, refused);
+        }
         // Direct LAN: the transport admits only the announced key; a new pin replaces it. A
         // cleared pin keeps the last key at the transport while no command is admitted.
         if let OwnerTrust::Announced(_) = trust
@@ -398,14 +464,28 @@ pub fn control_loop(
             admitted = Some(owner);
         }
         // Bounded accept so the stop flag is observed within one owner poll.
-        let Ok(connection) = host.accept(clock, until(clock, B::OwnerPoll)?) else {
-            continue;
+        let connection = match host.accept(clock, until(clock, B::OwnerPoll)?) {
+            Ok(connection) => connection,
+            Err(transport::Error::Expired) => continue,
+            Err(e) => {
+                eprintln!("member_control_refused endpoint={short} reason=accept_{e:?}");
+                continue;
+            }
         };
+        let served = Instant::now();
         let Ok(owner) = trust.owner() else {
+            eprintln!(
+                "member_control_refused endpoint={short} from={} reason=no_owner_pin",
+                connection.remote_id().fmt_short()
+            );
             connection.close(2u32.into(), b"no owner pin");
             continue;
         };
         if connection.remote_id() != owner {
+            eprintln!(
+                "member_control_refused endpoint={short} from={} reason=unpinned_control_owner",
+                connection.remote_id().fmt_short()
+            );
             connection.close(2u32.into(), b"unpinned control owner");
             continue;
         }
@@ -417,12 +497,27 @@ pub fn control_loop(
         let Ok(mut receiver) =
             NodeControlReceiver::new(connection.clone(), rt, clock, fence, || fence)
         else {
+            eprintln!(
+                "member_control_refused endpoint={short} from={} reason=control_channel_refused",
+                connection.remote_id().fmt_short()
+            );
             connection.close(2u32.into(), b"control channel refused");
             continue;
         };
+        let mut away = Away {
+            command: String::new(),
+            receive: Duration::ZERO,
+            handle: Duration::ZERO,
+            respond: Duration::ZERO,
+            close_wait: Duration::ZERO,
+            closed_by_peer: false,
+        };
         // The owner client makes one connection per call.
-        if let Ok(delivery) = receiver.receive(until(clock, B::RouterClose)?) {
+        let received = receiver.receive(until(clock, B::RouterClose)?);
+        away.receive = served.elapsed();
+        if let Ok(delivery) = received {
             let command: Value = serde_json::from_slice(delivery.bytes()).unwrap_or(Value::Null);
+            let handling = Instant::now();
             let answer = match admit_command(
                 trust,
                 connection.remote_id(),
@@ -433,10 +528,16 @@ pub fn control_loop(
             ) {
                 Ok((sequence, request)) => {
                     last = sequence;
+                    away.command = request["command"].as_str().unwrap_or_default().to_owned();
                     handle(dispatcher, status, request)
                 }
-                Err(code) => json!({"ok":false,"code":code}),
+                Err(code) => {
+                    away.command = format!("refused:{code}");
+                    json!({"ok":false,"code":code})
+                }
             };
+            away.handle = handling.elapsed();
+            let responding = Instant::now();
             match member_control::sign_reply(signer, &command, answer)
                 .ok()
                 .and_then(|r| serde_json::to_vec(&r).ok())
@@ -448,6 +549,7 @@ pub fn control_loop(
                 }
                 None => eprintln!("member_control_reply_unsigned"),
             }
+            away.respond = responding.elapsed();
         }
         let wait = Duration::from_millis(
             B::RouterClose
@@ -456,11 +558,28 @@ pub fn control_loop(
                 .millis(),
         );
         // The client closes after reading the response; bounded wait, then close.
+        let closing = Instant::now();
         if rt
             .block_on(async { tokio::time::timeout(wait, connection.closed()).await })
             .is_err()
         {
             connection.close(0u32.into(), b"control call served");
+        } else {
+            away.closed_by_peer = true;
+        }
+        away.close_wait = closing.elapsed();
+        if served.elapsed() > report_after {
+            eprintln!(
+                "member_control_away endpoint={short} from={} command={} away_ms={} receive_ms={} handle_ms={} respond_ms={} close_wait_ms={} closed_by_peer={}",
+                connection.remote_id().fmt_short(),
+                away.command,
+                served.elapsed().as_millis(),
+                away.receive.as_millis(),
+                away.handle.as_millis(),
+                away.respond.as_millis(),
+                away.close_wait.as_millis(),
+                away.closed_by_peer
+            );
         }
     }
     Ok(())
