@@ -225,7 +225,7 @@ function render(value) {
   rung('Application',value.running ? 'Started · foreground only' : 'Stopped · private state retained');
   if(value.network?.provider==='cloudflare'){
     const relay=value.network;
-    rung('Public relay',relay.state==='stopped' ? 'Temporary relay stopped.'
+    rung('Public relay',relay.state==='stopped' ? 'Temporary relay stopped. Press “Start public relay” to open a new one; it gets a new address, so each joined Mac must be reconnected to it.'
       : relay.renewal_stopped==='relay_renewal_cap_reached'
         ? `24-hour renewal cap reached; the temporary relay closes in ${relay.expires_in_seconds} seconds.`
         : `Temporary relay renews while your swarm is serving, at most 24 hours; ${relay.renewals} renewals. Current window: ${relay.expires_in_seconds} seconds left. When serving stops, it closes at the current deadline. A published swarm stays reachable while idle.`);
@@ -233,6 +233,7 @@ function render(value) {
   rung('Membership',a.membership_state ?? a.membership ?? a.state ?? 'Not joined');
   rung('Generation',a.membership_generation ?? a.generation);
   rung('Lease',a.lease_state ?? a.lease_expires_at ?? 'Unknown');
+  if(target && (value.renewal_error || value.recovery_error))rung('Owner relay',`Cannot reach the owner’s swarm (${String(value.recovery_error || value.renewal_error).replaceAll('_',' ')}). The owner’s temporary relay closes 30 minutes after it starts unless a run is serving, and a relay started again gets a new address. Keep Mycelium open, ask the owner to start the relay again and to reconnect this Mac to the new address; until then this Mac takes no part in runs.`);
   const capabilityStates={self_report_accepted:'Self-report accepted · not independently qualified',
     not_reported:'Not reported',stale:'Stale · report again'};
   rung('Capability',capabilityStates[a.capability_state] ?? 'Not independently qualified');
@@ -533,7 +534,8 @@ function renderJoinFlow(value,target,a){
   const owner=!target;
   $('invite-owner').hidden=!owner;
   $('join-target').hidden=owner && !!a.swarm_created;
-  const relayUp=!!value.network?.public_origin;
+  // A relay whose window ran out keeps its origin in the status: it is not up (lane PHY item 3).
+  const relayUp=!!value.network?.public_origin && value.network?.state!=='stopped';
   $('relay-start').hidden=!owner || relayUp;
   $('own-address').hidden=!owner || relayUp;
   $('relay-order-note').hidden=!owner || relayUp;
