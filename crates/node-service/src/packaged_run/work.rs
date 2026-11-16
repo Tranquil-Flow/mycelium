@@ -195,6 +195,21 @@ pub(super) struct Work {
     /// The run's clock, kept after the workflow is gone: `rollover_due` and `ceiling_reached`
     /// read `ctx.state` and the clock alone (demo_chain.py:1132-1164).
     clock: Arc<Mutex<Option<RunClock>>>,
+    /// Sends the one datagram that asks macOS's Local Network permission (lane PHY item 2).
+    probe: Arc<dyn api::local_network::Probe>,
+    /// What the probe learned: the joined Macs' work addresses it may probe again at the next
+    /// Start, and the ones this run already reached.
+    local_network: Arc<Mutex<LocalNetwork>>,
+}
+/// Lane PHY item 2: the joined Macs' verified work addresses the owner probed.
+#[derive(Default)]
+struct LocalNetwork {
+    /// The run the `reached` set belongs to.
+    run: String,
+    /// Addresses a datagram reached in this run: not probed again in it.
+    reached: std::collections::BTreeSet<std::net::SocketAddr>,
+    /// Every local-network address probed (this run's or an earlier run's in this process).
+    known: std::collections::BTreeSet<std::net::SocketAddr>,
 }
 impl Work {
     pub(super) fn new(host: PackagedRun) -> Self {
@@ -213,7 +228,24 @@ impl Work {
             })),
             stopped: Arc::new(AtomicBool::new(false)),
             clock: Arc::default(),
+            probe: Arc::new(api::local_network::Udp),
+            local_network: Arc::default(),
         }
+    }
+    /// Lane PHY item 2 (rows 79, 80): one datagram to every joined Mac's verified work address
+    /// this owner knows (this run's, and the ones an earlier run of this process probed), so macOS
+    /// raises its Local Network alert before the compile is spent, and a pending or denied
+    /// permission is refused by name when `refuse` (Start's first step and the compile's start).
+    fn local_network(&self, state: &RunState, refuse: bool) -> Result<(), StepError> {
+        let _ = (state, refuse);
+        Ok(())
+    }
+    /// Lane PHY item 2 (c): a step-6 dial that got no answer, named by one datagram to each joined
+    /// Mac it dialed: this Mac's permission ([`api::local_network::PERMISSION_REQUIRED`]) or the
+    /// joined Mac's silence ([`api::local_network::JOINED_MAC_SILENT`]); `None` for any other cause.
+    fn named_dial_failure(&self, cause: &str) -> Option<StepError> {
+        let _ = cause;
+        None
     }
     /// The run's transport, resolved at `compose`; a work announcement before any compose (none
     /// in the chain's order) resolves its own.

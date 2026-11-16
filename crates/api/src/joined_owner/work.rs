@@ -481,6 +481,10 @@ const REPLY_TIMEOUT: &str = "member_reply_timeout";
 struct Flow {
     state: &'static str,
     error: Option<String>,
+    /// The open cause behind a closed `error` (`managed_workflow_failed`): not in the state
+    /// document (whose shape is v0.1.4's), read by the host to name a step-6 dial that got no
+    /// answer (lane PHY item 2, rows 79, 80).
+    cause: Option<String>,
     version: u64,
     transferred: Vec<Value>,
     epoch: u64,
@@ -643,6 +647,15 @@ impl Shared {
         Ok(())
     }
 }
+/// The workflow failed with `r`: v0.1.4 keeps the raised exception's text beside the closed code
+/// (workflow.py:337-343 `raise`): an open code is written to stderr, and kept as the flow's cause.
+fn fail(f: &mut Flow, r: &Refusal) {
+    if !owner_run::machine::closed_code(&r.0) {
+        eprintln!("owner_work_failed: {}", r.0);
+    }
+    f.state = FAILED;
+    f.error = Some(closed(r));
+}
 /// A closed code survives as the workflow's error code, anything else is
 /// `managed_workflow_failed` (workflow.py:337-343).
 fn closed(r: &Refusal) -> String {
@@ -740,6 +753,7 @@ impl OwnerWork {
                 flow: Mutex::new(Flow {
                     state: PREPARED,
                     error: None,
+                    cause: None,
                     version: 0,
                     transferred: Vec::new(),
                     epoch: 0,
@@ -866,6 +880,11 @@ impl OwnerWork {
     /// The workflow state document (as `workflow_state`).
     pub fn state(&self) -> Value {
         Shared::snapshot(&self.shared.lock())
+    }
+    /// The open cause of a failed workflow whose state document carries only the closed code
+    /// (lane PHY item 2); `None` while it has not failed.
+    pub fn failure_cause(&self) -> Option<String> {
+        self.shared.lock().cause.clone()
     }
     /// Wait (bounded by `within`) until `done` holds for the workflow state;
     /// returns the last state read.
@@ -1582,15 +1601,7 @@ impl Worker {
             f.startup = None;
             f.cleanup_error = cleanup;
             match failure {
-                Some(r) => {
-                    // v0.1.4 keeps the raised exception's text beside the closed code
-                    // (workflow.py:337-343 `raise`): an open code is written to stderr.
-                    if !owner_run::machine::closed_code(&r.0) {
-                        eprintln!("owner_work_failed: {}", r.0);
-                    }
-                    f.state = FAILED;
-                    f.error = Some(closed(&r));
-                }
+                Some(r) => fail(f, &r),
                 None => f.state = STOPPED,
             }
         });
@@ -2237,6 +2248,7 @@ mod serving_fence_tests {
             flow: Mutex::new(Flow {
                 state,
                 error: None,
+                cause: None,
                 version: 0,
                 transferred: Vec::new(),
                 epoch: 1,
@@ -2396,5 +2408,58 @@ mod serving_fence_tests {
             assert_eq!(result, want, "{state} {startup:?} {current}");
             assert_eq!(published, usize::from(want.is_ok()), "{state} {startup:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod failure_cause_tests {
+    //! Lane PHY item 2: the open cause of a failed workflow stays readable beside the closed code.
+    use super::*;
+
+    fn flow() -> Flow {
+        Flow {
+            state: STARTING,
+            error: None,
+            cause: None,
+            version: 0,
+            transferred: Vec::new(),
+            epoch: 0,
+            route: None,
+            gateway: None,
+            serve_reports: Vec::new(),
+            expires_at: None,
+            cleanup_error: None,
+            member_cleanup: Vec::new(),
+            transferred_all: false,
+            retired: None,
+            startup: None,
+            challenge_request: None,
+            challenge_limit: 0,
+            challenge_count: 0,
+            challenge: None,
+        }
+    }
+
+    /// Proves: an open dial failure is closed to `managed_workflow_failed` in the state document
+    /// (v0.1.4's shape, unchanged) and its open code is kept as the cause; a closed code is both.
+    #[test]
+    fn a_failed_workflow_keeps_its_open_cause_beside_the_closed_code() {
+        let mut f = flow();
+        fail(
+            &mut f,
+            &Refusal("control_call_failed:control_connect_timeout".into()),
+        );
+        assert_eq!(f.state, FAILED);
+        assert_eq!(f.error.as_deref(), Some("managed_workflow_failed"));
+        assert_eq!(
+            f.cause.as_deref(),
+            Some("control_call_failed:control_connect_timeout")
+        );
+        let document = Shared::snapshot(&f);
+        assert!(document.get("cause").is_none(), "{document}");
+        let mut f = flow();
+        fail(&mut f, &Refusal("member_consent_required".into()));
+        assert_eq!(f.error.as_deref(), Some("member_consent_required"));
+        assert_eq!(f.cause.as_deref(), Some("member_consent_required"));
     }
 }
