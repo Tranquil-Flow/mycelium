@@ -81,26 +81,6 @@ fn refusal(result: Result<(), StepError>) -> (String, String) {
         other => panic!("expected a named refusal, got {other:?}"),
     }
 }
-/// A Runner env whose Stop is already pressed: a step that is reached returns at once.
-struct Stopping;
-impl StepEnv for Stopping {
-    fn progress(&mut self, _: &str) {}
-    fn stopped(&self) -> bool {
-        true
-    }
-    fn now(&mut self) -> f64 {
-        100.0
-    }
-    fn wall(&mut self) -> f64 {
-        app_host::now()
-    }
-    fn set_result(&mut self, _: &str, _: Value) {}
-    fn record_exception(&mut self, _: &str, _: &str) {}
-    fn pause(&mut self, _: f64) -> bool {
-        true
-    }
-}
-
 /// Proves: (a) and (b) before the compile. An early step sends ONE datagram to the joined Mac's
 /// verified work address (which raises the alert) and never refuses; the compile's start refuses a
 /// pending permission by name, saying which Mac and what to allow; once allowed it passes, and an
@@ -167,13 +147,10 @@ fn a_new_run_whose_members_are_not_verified_yet_sends_nothing_and_is_never_refus
         None,
         None,
     );
-    for step in ["model", "compile"] {
-        let result = chain.run_step(step, &mut Stopping);
-        assert!(
-            !matches!(&result, Err(StepError::Refused(e)) if e.code == PERMISSION_REQUIRED),
-            "{step}: {result:?}"
-        );
-    }
+    // The new run as the chain holds it at Start (`model`) and at the compile's start: the probe
+    // pass of both refusing steps (`Composed::run_step` hands it this state).
+    let current = chain.inner.state().cloned().expect("the new run");
+    assert!(chain.work.local_network(&current, true).is_ok());
     // The new run with the joined Mac named but not yet verified for it (it has not published).
     let mut fresh = RunState::new("run-ln3", "dep-run-ln3", owner_run::Reason::Start);
     fresh.participants = earlier.participants.clone();
