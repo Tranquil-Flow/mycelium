@@ -1,0 +1,36 @@
+{
+  "oracle": "f4e366e98a1f705dfaf182897044500d290dbd7f",
+  "_comment": [
+    "Product figures that deliberately differ from the v0.1.4 oracle, each with its source on both",
+    "sides, the ruling and the reason, so the difference is evidence rather than drift. Fixtures",
+    "recorded from the oracle are still compared at the oracle's figure, passed explicitly by the",
+    "tests named under parity_tests; the product's figure is checked against this record by",
+    "api/tests/run_model_document.rs."
+  ],
+  "diverged": {
+    "serving_context_tokens": {
+      "oracle_value": 4096,
+      "oracle_source": "mycelium_a13_macos/model_resources.py:72-76 DEMO_CONTEXT_TOKENS: a prompt of at most 2,000 characters, a template under 100 tokens and at most 256 new tokens = 2,356, rounded up to 4,096",
+      "product_value": 2356,
+      "product_source": "crates/api/src/model_catalog.rs SERVING_CONTEXT_TOKENS, the contract value of every registered model",
+      "ruling": "owner, 16 Nov 2026 (REPORT-laneCAP, option 2): v0.2.0 serves 2,356 tokens; chunked prefill, which would bring 4,096 back inside a 4 GB consent, is v0.2.x work",
+      "reason": "Each stage worker reserves memory for a single prefill of the whole serving context (backend-mlx admission::requirements, quadratic in the context). At 4,096 that is 6,792,778,240 B for layers [0,19] and 5,992,888,832 B for [19,28] of Qwen3-0.6B, above the owner's 4,000,000,000 B self-grant, so no packaged run could serve. At 2,356 both fit (3.06 GB / 2.55 GB). Every other registered model's single-layer stage already exceeds 4 GB at 4,096 by the prefill scratch alone, so all registered models serve 2,356.",
+      "follows_it": [
+        "the compile's memory plan (kv_bytes and max_rss per stage) and BuildRequest::serving_context_tokens",
+        "every stage's prepare tokens and the route's refusal above them (joined_route_context_exceeds_worker)",
+        "the slices step's stage_memory_consent_below_context check",
+        "the chat page's limits.context_tokens and its chat_context_too_long message",
+        "the consent document's whole-model member figures (kv_bytes, load_peak_bytes, max_rss_bytes)",
+        "node-service/data/qwen2-planning.json resources.context_tokens (the headless path, pinned equal)"
+      ],
+      "parity_tests": [
+        "planner/tests/chain_compile.rs ORACLE_CONTEXT_TOKENS (the compile, rows 1-5)",
+        "planner/tests/source_plan.rs (fixture BuildRequest)",
+        "owner-run/tests/support/compile_double.rs (fixture ModelContract)",
+        "api/tests/run_model_document.rs ORACLE_CONTEXT_TOKENS (consent document, whole-model members, run-model documents)",
+        "api/tests/persistent_backend.rs (run-model action)"
+      ],
+      "unchanged": "budgets M16LiveKvContextTokens (4,096) is the M16 ledger's KV capacity floor, not a context limit: it reserves at least 4,096 tokens of KV, more than 2,356 needs"
+    }
+  }
+}

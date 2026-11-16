@@ -1079,7 +1079,7 @@ mod challenge_tokens_tests {
 #[cfg(test)]
 mod stage_tokens_tests {
     //! Lane CAP: a stage is prepared for the serving context the compile planned (the model
-    //! contract's, 4,096 for the demo model), never for the startup check's own length (35 + 4),
+    //! contract's, `model_catalog::Model::serving_context_tokens`), never for the startup check's own length (35 + 4),
     //! which left no room for any product chat (`joined_route_context_exceeds_worker`, D6). The
     //! startup check stays one request inside that capacity.
     fn request(context: u64) -> planner::chain_compile::BuildRequest {
@@ -1107,13 +1107,18 @@ mod stage_tokens_tests {
         )
         .expect("the demo model is registered");
         let contract = api::owner_compiler::model_contract(model);
-        assert_eq!(contract.serving_context_tokens, 4096);
+        assert_eq!(
+            contract.serving_context_tokens,
+            model.serving_context_tokens()
+        );
         let tokens = super::stage_tokens(&request(contract.serving_context_tokens), &oracle())
             .expect("the startup check fits the context");
         assert_eq!(
-            tokens, 4096,
+            tokens as u64,
+            model.serving_context_tokens(),
             "the contract's context, not the startup check's length"
         );
+        assert_ne!(tokens, super::challenge_tokens(&oracle()).unwrap());
         // Whatever the compile planned is what the stage gets (no second figure).
         assert_eq!(
             super::stage_tokens(&request(1000), &oracle()).unwrap(),

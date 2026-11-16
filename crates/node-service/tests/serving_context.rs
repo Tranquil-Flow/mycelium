@@ -24,10 +24,32 @@ fn the_headless_planning_document_states_the_contracts_serving_context() {
     );
 }
 
+/// Owner ruling 16 Nov 2026 (REPORT-laneCAP option 2): v0.2.0 serves 2,356 tokens, v0.1.4's own
+/// derivation (model_resources.py:72-76 @ f4e366e9) before it rounded up to 4,096. At 4,096 the
+/// stage worker's own reservation exceeds a 4 GB memory consent for every registered model, so
+/// every one of them gets it (the 15 Nov figure was 4,096 for all).
 #[test]
 fn every_registered_model_serves_the_ruled_context() {
-    // Owner ruling 15 Nov: 4,096 tokens for every registered model today.
     for model in api::model_catalog::registered() {
-        assert_eq!(model.serving_context_tokens(), 4096, "{}", model.model_id);
+        assert_eq!(model.serving_context_tokens(), 2356, "{}", model.model_id);
     }
+}
+
+/// The ruled figure's own derivation, on this product's page limits: a prompt of at most
+/// `ChatMaxPromptChars` (2,000) characters, v0.1.4's template allowance (under 100 tokens) and at
+/// most `ChatMaxNewTokensCap` (256) new tokens. The pinned tokenizer is byte-level BPE (at most one
+/// token per UTF-8 byte) and v0.2 encodes the page text without a template, so every ASCII prompt
+/// the page accepts fits with the largest answer; only multi-byte text can need more than the
+/// remaining 2,100 tokens, and the page refuses that by name (`chat_context_too_long`).
+#[test]
+fn a_full_ascii_page_prompt_and_the_largest_answer_fit_the_demo_models_context() {
+    let count = |id: budgets::BudgetId| id.count().map(|n| n.get()).unwrap();
+    let prompt_bytes = count(budgets::BudgetId::ChatMaxPromptChars);
+    let new_tokens = count(budgets::BudgetId::ChatMaxNewTokensCap);
+    let model = api::model_catalog::by_run_model_name("qwen3-0.6b").expect("the demo model");
+    assert!(
+        prompt_bytes + 100 + new_tokens <= model.serving_context_tokens(),
+        "{prompt_bytes} + 100 + {new_tokens} > {}",
+        model.serving_context_tokens()
+    );
 }

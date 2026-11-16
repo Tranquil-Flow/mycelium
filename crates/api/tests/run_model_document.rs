@@ -34,8 +34,8 @@ fn outcome(r: Result<Value, api::schema::PublicError>) -> Value {
 /// The oracle's serving context (`model_resources.DEMO_CONTEXT_TOKENS`, model_resources.py:76 @
 /// f4e366e9): every fixture here was recorded at it, so parity is checked at it, passed
 /// explicitly. The product serves its model contract's context instead
-/// (`model_catalog::Model::serving_context_tokens`); that value must never reach a fixture
-/// comparison.
+/// (`model_catalog::Model::serving_context_tokens`; the divergence is recorded in
+/// `contracts/divergences.json`); that value must never reach a fixture comparison.
 const ORACLE_CONTEXT_TOKENS: u64 = 4096;
 /// Every consent document inside an oracle result (`resources`): checked equal to the product's
 /// document computed at [`ORACLE_CONTEXT_TOKENS`], then replaced by the product's document at
@@ -243,4 +243,28 @@ fn choose_matches_choose_run_model_for_every_oracle_trial() {
         assert!(leftovers.is_empty(), "{} left {leftovers:?}", case["label"]);
         fs::remove_dir_all(dir).unwrap();
     }
+}
+
+/// Owner ruling 16 Nov 2026: the product serves 2,356 tokens where v0.1.4 served 4,096. The
+/// divergence is recorded with both sources and the ruling, and the record is the product's
+/// figure for every registered model and the oracle's figure these fixtures were recorded at.
+#[test]
+fn the_serving_context_divergence_from_the_oracle_is_recorded() {
+    let record: Value =
+        serde_json::from_str(include_str!("../contracts/divergences.json")).unwrap();
+    assert_eq!(record["oracle"], oracle()["oracle"]);
+    let context = &record["diverged"]["serving_context_tokens"];
+    assert_eq!(context["oracle_value"], json!(ORACLE_CONTEXT_TOKENS));
+    for key in ["oracle_source", "product_source", "ruling", "reason"] {
+        assert!(context[key].as_str().is_some_and(|s| !s.is_empty()), "{key}");
+    }
+    for model in model_catalog::registered() {
+        assert_eq!(
+            json!(model.serving_context_tokens()),
+            context["product_value"],
+            "{}",
+            model.model_id
+        );
+    }
+    assert_ne!(context["product_value"], context["oracle_value"]);
 }

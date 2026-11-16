@@ -323,7 +323,7 @@ fn a_request_above_the_serving_context_is_refused_naming_the_limit() {
     let chat = service(run_over(http(&fake), Some(serving("run-1"))), None);
     assert_eq!(
         chat.state()["limits"]["context_tokens"],
-        json!(4096),
+        json!(api::model_catalog::serving_context_for("Qwen/Qwen3-0.6B").unwrap()),
         "the page states the model contract's serving context"
     );
     let sent = chat.send("local", prompt("hi", 256)).unwrap();
