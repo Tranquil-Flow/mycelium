@@ -1010,6 +1010,15 @@ impl RunClose {
             }
         };
     }
+    /// The close thread ended: the run was joined (its teardown, `stopped` included, ran), the
+    /// runs closed and the contributor stopped, whatever they answered. Not before [`Self::begin`].
+    pub fn ended(&self) -> bool {
+        match &self.closing {
+            Closing::NotStarted => false,
+            Closing::Running { worker, .. } => worker.is_finished(),
+            Closing::Done(_) => true,
+        }
+    }
     /// Quit's deadline arrived (`Cleanup::expire`): the workflow Stop is issued now unless it was
     /// (`Pending` while the close thread is issuing it). The rest is left to the process exit.
     pub fn expire(&mut self) -> Result<Poll, CleanupError> {

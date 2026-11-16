@@ -27,7 +27,11 @@ use api::{
     app_status, joined_member,
     persistent::RelayState,
     preferences::private_state,
-    relay::{EndpointHost, Hooks, OwnerRelay, Probe, Proxy, RichHandler, SeedBackend, StartGuard},
+    relay::{
+        BackendError, BackendReply, EndpointHost, Hooks, OwnerRelay, Probe, Proxy, RichHandler,
+        SeedBackend, StartGuard,
+    },
+    run_exchange::RunExchange,
     schema::{PublicError, Raised},
     seed::SeedOptions,
     windows::PendingWindows,
@@ -35,11 +39,13 @@ use api::{
 };
 use serde_json::{Map, Value, json};
 use std::{
+    collections::BTreeMap,
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex, MutexGuard, OnceLock, PoisonError,
+        Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak,
         atomic::{AtomicBool, Ordering},
     },
+    time::{Duration, Instant},
 };
 
 /// How the relay is made: `Hooks::production` beside the executable in the app, a test's own clock
@@ -136,6 +142,78 @@ pub struct Network {
     /// the run's chat service with the relay's client key (lane CHATS item 2). `None` until the
     /// composition gives one (`DesktopServices::with_chat_run`).
     relay_chat: Mutex<Option<RichHandler>>,
+    /// What the joined Macs reading the owner's exchange through this host's relay were last
+    /// answered ([`Network::stopped_unread`], lane CHATPAGE patch 2, CP-01).
+    relay_reads: Arc<RelayReads>,
+}
+/// Lane CHATPAGE patch 2 (REVIEW-laneCHATPAGE-astra CP-01): the owner's run-exchange answers the
+/// relay carried, per joined Mac (`target_node_id`): the announcement's phase and run, and when.
+/// Quit reads it to give a `stopped` announcement its chance to be read before the relay closes
+/// (`packaged::WindowQuit`). Only the owner's own seed answers pass here; nothing is verified or
+/// trusted from them beyond telling Quit what the relay already carried.
+#[derive(Default)]
+struct RelayReads {
+    last: Mutex<BTreeMap<String, (Value, Value, Instant)>>,
+    /// The exchange the relay's seed answers from (weak: the relay never keeps the seed alive).
+    exchange: Mutex<Weak<RunExchange>>,
+}
+/// The relay's seed hop, watched: an exchange `read`/`report` the seed answered is recorded in
+/// [`RelayReads`] before the relay writes it to the member's connection (in-flight connections
+/// finish after the relay's close, `Proxy::close`).
+struct WatchedSeed {
+    inner: Arc<dyn SeedBackend>,
+    reads: Arc<RelayReads>,
+}
+impl SeedBackend for WatchedSeed {
+    fn request(
+        &self,
+        method: &str,
+        path: &str,
+        content_type: &str,
+        body: &[u8],
+    ) -> Result<BackendReply, BackendError> {
+        let reply = self.inner.request(method, path, content_type, body)?;
+        let exchange = [
+            api::run_exchange_routes::PATH_READ,
+            api::run_exchange_routes::PATH_REPORT,
+        ];
+        if reply.status == 200
+            && exchange.contains(&path)
+            && let Ok(answer) = serde_json::from_slice::<Value>(&reply.body)
+            && let Some(node) = answer["statement"]["target_node_id"].as_str()
+        {
+            let announcement = &answer["statement"]["announcement"];
+            lock(&self.reads.last).insert(
+                node.to_owned(),
+                (
+                    announcement["phase"].clone(),
+                    announcement["run_id"].clone(),
+                    Instant::now(),
+                ),
+            );
+        }
+        Ok(reply)
+    }
+}
+/// How long Quit keeps the relay for a `stopped` announcement nobody read yet (CP-01): one
+/// standing-loop cycle of a joined Mac as the relay carries it, its wait between passes
+/// (`_standing_loop`'s `self.closed.wait(2)`, app.py:1203 @ f4e366e9) plus one relay request's own
+/// timeout (`RelayServer.process_request`'s `settimeout`, public_relay.py:66). A joined Mac that
+/// read nothing through the relay for that long is not waited for. v0.1.4 adds no wait of its own:
+/// its relay simply outlives the run's join (app.py:1818-1850); this is the bounded form of that
+/// window. `ZERO` if a budget is invalid (no hold).
+pub fn stopped_read_chance() -> Duration {
+    use budgets::{BudgetId as B, Entries};
+    [
+        B::PyMyceliumA13MacosAppDemoappStandingLoopSelfClosedWaitL1203,
+        B::PyMyceliumA13MacosPublicRelayRelayserverProcessRequestRequestSettimeoutL66,
+    ]
+    .into_iter()
+    .try_fold(Duration::ZERO, |total, id| {
+        id.span(Entries::ZERO)
+            .map(|span| total + Duration::from_millis(span.millis()))
+    })
+    .unwrap_or(Duration::ZERO)
 }
 fn lock<T>(cell: &Mutex<T>) -> MutexGuard<'_, T> {
     // Plain values and handles: a panicked holder cannot leave them half-written.
@@ -182,7 +260,41 @@ impl Network {
             work_closed: AtomicBool::new(false),
             serving: std::sync::Arc::new(AtomicBool::new(false)),
             relay_chat: Mutex::new(None),
+            relay_reads: Arc::default(),
         })
+    }
+    /// `backend` (the owner's seed hop) watched for the run exchange's answers ([`RelayReads`]).
+    fn watched_seed(
+        &self,
+        backend: Option<Arc<dyn SeedBackend>>,
+        exchange: Option<&Arc<RunExchange>>,
+    ) -> Option<Arc<dyn SeedBackend>> {
+        *lock(&self.relay_reads.exchange) = exchange.map_or_else(Weak::new, Arc::downgrade);
+        backend.map(|inner| {
+            Arc::new(WatchedSeed {
+                inner,
+                reads: self.relay_reads.clone(),
+            }) as Arc<dyn SeedBackend>
+        })
+    }
+    /// CP-01: the joined Macs that read the owner's exchange through this relay within the last
+    /// [`stopped_read_chance`] and were not yet answered the current `stopped` announcement (its
+    /// run); `0` while the current announcement is not `stopped`.
+    pub fn stopped_unread(&self) -> usize {
+        let Some(exchange) = lock(&self.relay_reads.exchange).upgrade() else {
+            return 0;
+        };
+        let current = exchange.announcement(None).to_value();
+        if current["phase"] != "stopped" {
+            return 0;
+        }
+        let recent = stopped_read_chance();
+        lock(&self.relay_reads.last)
+            .values()
+            .filter(|(phase, run, at)| {
+                at.elapsed() < recent && (*phase != "stopped" || *run != current["run_id"])
+            })
+            .count()
     }
     /// The chat the relay's `/chat` and `/chat/api/*` answer from (`bind_chat`, app.py:1073-1077),
     /// bound at every relay start ([`EndpointHost::bind_public_routes`]). The packaged composition
@@ -282,7 +394,9 @@ impl Network {
             let a = lock(authority);
             (a.seed.clone(), a.owner_authority().is_some())
         };
-        lock(&self.relay).bind_seed(joined_member::seed_backend(seed, swarm));
+        let exchange = seed.as_ref().map(|seed| seed.exchange.clone());
+        let backend = joined_member::seed_backend(seed, swarm);
+        lock(&self.relay).bind_seed(self.watched_seed(backend, exchange.as_ref()));
     }
     /// One pass of `_renew_loop` for a joined target (`authority.renew()` = `RemoteMacMember.renew`)
     /// over this host's member cell (its seed path, `_left`).
@@ -446,7 +560,9 @@ impl EndpointHost for Endpoint<'_> {
     }
     fn seed_backend(&self) -> Option<Arc<dyn SeedBackend>> {
         let a = lock(&self.authority);
-        joined_member::seed_backend(a.seed.clone(), a.owner_authority().is_some())
+        let exchange = a.seed.as_ref().map(|seed| seed.exchange.clone());
+        let backend = joined_member::seed_backend(a.seed.clone(), a.owner_authority().is_some());
+        self.network.watched_seed(backend, exchange.as_ref())
     }
     fn set_running(&mut self) {
         lock(&self.authority).running = true;
@@ -746,7 +862,7 @@ impl RelayClose {
         }
     }
     /// The relay's own close budgets, summed.
-    fn allowance() -> Result<std::time::Duration, desktop::lifecycle::CleanupError> {
+    pub fn allowance() -> Result<std::time::Duration, desktop::lifecycle::CleanupError> {
         use budgets::{BudgetId as B, Entries};
         [
             B::PyMyceliumA13MacosPublicRelayTemporaryhttpsrelayCloseSelfProcessWaitL446,
@@ -761,7 +877,16 @@ impl RelayClose {
                 .map_err(|_| desktop::lifecycle::CleanupError::InvalidBudget)
         })
     }
-    /// Start the close at once (Quit's begin).
+    /// The close was started ([`Self::begin`]).
+    pub fn started(&self) -> bool {
+        !matches!(self.closing, RelayClosing::NotStarted)
+    }
+    /// [`Network::stopped_unread`] of the relay this step closes.
+    pub fn stopped_unread(&self) -> usize {
+        self.network.stopped_unread()
+    }
+    /// Start the close now (Quit, once the run's teardown announced `stopped` and that had its
+    /// chance to be read, `packaged::WindowQuit`).
     pub fn begin(&mut self) {
         if !matches!(self.closing, RelayClosing::NotStarted) {
             return;
@@ -789,9 +914,8 @@ impl RelayClose {
             }
         };
     }
-    /// `None` while the close runs, else its result (kept).
+    /// `None` until the close was started and while it runs, else its result (kept).
     pub fn poll(&mut self) -> Option<Result<(), desktop::lifecycle::CleanupError>> {
-        self.begin();
         match std::mem::replace(&mut self.closing, RelayClosing::Done(Ok(()))) {
             RelayClosing::Running { worker, until }
                 if !worker.is_finished() && std::time::Instant::now() < until =>
@@ -816,7 +940,10 @@ impl RelayClose {
                 self.closing = RelayClosing::Done(result);
                 Some(result)
             }
-            RelayClosing::NotStarted => None,
+            RelayClosing::NotStarted => {
+                self.closing = RelayClosing::NotStarted;
+                None
+            }
             RelayClosing::Done(result) => {
                 self.closing = RelayClosing::Done(result);
                 Some(result)
