@@ -152,16 +152,18 @@ impl WindowQuit {
         if !due && !ended {
             return;
         }
+        // The joined Macs that read through the relay within one chance before the run's close
+        // ended are waited for until they read `stopped`, for one chance from that end at most.
+        let chance = crate::packaged_network::stopped_read_chance();
+        let since = *self.run_ended.get_or_insert(now);
         let unread = if self.run.is_some() {
-            self.relay.stopped_unread()
+            self.relay
+                .stopped_unread(since.checked_sub(chance).unwrap_or(since))
         } else {
             0
         };
-        if unread > 0 && !due {
-            let since = *self.run_ended.get_or_insert(now);
-            if now < since + crate::packaged_network::stopped_read_chance() {
-                return;
-            }
+        if unread > 0 && !due && now < since + chance {
+            return;
         }
         if unread > 0 {
             eprintln!("owner_stop_announce_unread: {unread}");

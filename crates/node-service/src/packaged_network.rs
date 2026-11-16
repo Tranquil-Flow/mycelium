@@ -277,10 +277,11 @@ impl Network {
             }) as Arc<dyn SeedBackend>
         })
     }
-    /// CP-01: the joined Macs that read the owner's exchange through this relay within the last
-    /// [`stopped_read_chance`] and were not yet answered the current `stopped` announcement (its
-    /// run); `0` while the current announcement is not `stopped`.
-    pub fn stopped_unread(&self) -> usize {
+    /// CP-01: the joined Macs that read the owner's exchange through this relay since `active`
+    /// (Quit: one [`stopped_read_chance`] before the run's close ended) and were not yet answered
+    /// the current `stopped` announcement (its run); `0` while the current announcement is not
+    /// `stopped`.
+    pub fn stopped_unread(&self, active: Instant) -> usize {
         let Some(exchange) = lock(&self.relay_reads.exchange).upgrade() else {
             return 0;
         };
@@ -288,11 +289,10 @@ impl Network {
         if current["phase"] != "stopped" {
             return 0;
         }
-        let recent = stopped_read_chance();
         lock(&self.relay_reads.last)
             .values()
             .filter(|(phase, run, at)| {
-                at.elapsed() < recent && (*phase != "stopped" || *run != current["run_id"])
+                *at >= active && (*phase != "stopped" || *run != current["run_id"])
             })
             .count()
     }
@@ -882,8 +882,8 @@ impl RelayClose {
         !matches!(self.closing, RelayClosing::NotStarted)
     }
     /// [`Network::stopped_unread`] of the relay this step closes.
-    pub fn stopped_unread(&self) -> usize {
-        self.network.stopped_unread()
+    pub fn stopped_unread(&self, active: Instant) -> usize {
+        self.network.stopped_unread(active)
     }
     /// Start the close now (Quit, once the run's teardown announced `stopped` and that had its
     /// chance to be read, `packaged::WindowQuit`).
