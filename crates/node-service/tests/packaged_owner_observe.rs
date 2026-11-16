@@ -407,8 +407,9 @@ fn a_second_start_in_one_process_passes_observe_again() {
 /// Lane CHATPAGE patch 2, CP-03 (merge-chat2 ten-row gate `20261116T222718Z-gate`, run2 row 3
 /// `two_macs_required`, "1 of 2 Macs reported" after 180 s): the gate's two-run shape, model-free.
 /// Run 1 passes observe (the owner's managed mailbox now exists) and ends; its teardown announces
-/// `stopped` (lane CHATPAGE item 3, demo_chain.py:1381-1390 @ f4e366e9) and the joined Mac's card
-/// reads it; the owner's Stop; then the next Start. The joined Mac must report into run 2 as it
+/// `stopped` (lane CHATPAGE item 3, demo_chain.py:1381-1390 @ f4e366e9), which the owner's next
+/// action may refresh to `idle`; the joined Mac's card reads that end; the owner's Stop; then the
+/// next Start. The joined Mac must report into run 2 as it
 /// did into run 1: v0.1.4's agent reads the next run's announcement after `stopped` and reports
 /// its descriptor (demo_target.py:437-470), and a standing acceptor with no offer to read never
 /// keeps it from doing so (the owner's `_member_guard`, managed_control.py:909-941, checks the
@@ -442,11 +443,13 @@ fn after_a_runs_stopped_announcement_the_joined_mac_reports_into_the_next_run() 
     // The gate's Stop (the run already ended here: an idempotent Stop).
     let (code, stopped) = owner.mac.post("/api/demo/stop", json!({}));
     println!("CP-03 run 1 Stop: {code} {stopped}");
+    // The joined Mac read the run's end: `stopped`, or `idle` once the owner's next action
+    // refreshed the exchange over it (`owner_ports::ensure_exchange`, over idle/stopped only).
     let card = until_within(
-        "the joined Mac's card reads run 1 stopped",
-        millis(B::Collect),
+        "the joined Mac's card reads run 1's end",
+        millis(B::PyMyceliumA13MacosAppDemoappStandingLoopSelfClosedWaitL1203) * 10,
         || member.status()["demo_target"].clone(),
-        |c| c["phase"] == "stopped" && c["run_id"] == first["run_id"],
+        |c| c["phase"] == "stopped" || c["phase"] == "idle",
     );
     println!("CP-03 member card after run 1: {card}");
     let (code, started) = owner.mac.post("/api/demo/start", json!({}));
