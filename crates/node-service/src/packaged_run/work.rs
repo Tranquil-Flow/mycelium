@@ -200,6 +200,13 @@ pub(super) struct Work {
     /// What the probe reached in the current run (never a target list: see [`LocalNetwork`]).
     local_network: Arc<Mutex<LocalNetwork>>,
 }
+/// RED stub (PHY-03): the wildcard address of `to`'s family, as the probe binds today.
+fn unspecified(to: std::net::SocketAddr) -> std::net::IpAddr {
+    match to {
+        std::net::SocketAddr::V4(_) => std::net::Ipv4Addr::UNSPECIFIED.into(),
+        std::net::SocketAddr::V6(_) => std::net::Ipv6Addr::UNSPECIFIED.into(),
+    }
+}
 /// Lane PHY item 2, patch 2 (PHY-02): what one run's probes reached. Targets are never cached:
 /// every pass reads them afresh from this run's current, verified member records
 /// (`Inbox::get` -> `joined::verify`: current enrollment, lease, generation, run and share
@@ -279,7 +286,7 @@ impl Work {
                 continue;
             }
             let to = target.2;
-            let answer = self.probe.send(to);
+            let answer = self.probe.send(unspecified(to), to);
             eprintln!("local_network_probe:{to}:{answer:?}");
             match answer {
                 Answer::Sent => {
@@ -321,7 +328,7 @@ impl Work {
             .collect();
         let mut silent = None;
         for to in dialed {
-            let answer = self.probe.send(to);
+            let answer = self.probe.send(unspecified(to), to);
             eprintln!("local_network_probe:{to}:{answer:?} after {cause}");
             match answer {
                 Answer::Blocked => {

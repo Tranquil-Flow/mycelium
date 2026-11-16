@@ -70,14 +70,15 @@ pub fn is_local_network(ip: IpAddr) -> bool {
 
 /// Sends the one datagram (the seam a test replaces).
 pub trait Probe: Send + Sync {
-    fn send(&self, to: SocketAddr) -> Answer;
+    /// One datagram from `from` (this run's selected local address) to `to`.
+    fn send(&self, from: IpAddr, to: SocketAddr) -> Answer;
 }
 
 /// The app's probe: one one-byte UDP datagram from an unbound port to `to`. A QUIC endpoint drops
 /// a datagram that short unread; the closed port's ICMP reply comes from the kernel, not the app.
 pub struct Udp;
 impl Probe for Udp {
-    fn send(&self, to: SocketAddr) -> Answer {
+    fn send(&self, _from: IpAddr, to: SocketAddr) -> Answer {
         if !is_local_network(to.ip()) {
             return Answer::NotLocal;
         }
@@ -167,7 +168,12 @@ mod tests {
         ] {
             let ip: IpAddr = ip.parse().unwrap();
             assert!(!is_local_network(ip), "{ip}");
-            assert_eq!(Udp.send((ip, 9).into()), Answer::NotLocal, "{ip}");
+            let from = if ip.is_ipv4() {
+                IpAddr::from(Ipv4Addr::UNSPECIFIED)
+            } else {
+                IpAddr::from(Ipv6Addr::UNSPECIFIED)
+            };
+            assert_eq!(Udp.send(from, (ip, 9).into()), Answer::NotLocal, "{ip}");
         }
     }
 
@@ -181,6 +187,6 @@ mod tests {
             .parse()
             .unwrap();
         assert!(is_local_network(ip), "{ip}");
-        assert_eq!(Udp.send((ip, 9).into()), Answer::Sent);
+        assert_eq!(Udp.send(ip, (ip, 9).into()), Answer::Sent);
     }
 }

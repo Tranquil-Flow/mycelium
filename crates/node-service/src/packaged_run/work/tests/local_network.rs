@@ -10,10 +10,10 @@ use super::*;
 use api::local_network::{Answer, JOINED_MAC_SILENT, PERMISSION_REQUIRED, Probe};
 use std::net::SocketAddr;
 
-/// The seam: answers what the test says and records every datagram's address.
+/// The seam: answers what the test says and records every datagram's (from, to).
 struct Scripted {
     answer: Mutex<Answer>,
-    sent: Mutex<Vec<SocketAddr>>,
+    sent: Mutex<Vec<(std::net::IpAddr, SocketAddr)>>,
 }
 impl Scripted {
     fn new(answer: Answer) -> Arc<Self> {
@@ -26,12 +26,25 @@ impl Scripted {
         *self.answer.lock().unwrap() = answer;
     }
     fn sent(&self) -> Vec<SocketAddr> {
-        self.sent.lock().unwrap().clone()
+        self.sent
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(_, to)| *to)
+            .collect()
+    }
+    fn from(&self) -> Vec<std::net::IpAddr> {
+        self.sent
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(from, _)| *from)
+            .collect()
     }
 }
 impl Probe for Scripted {
-    fn send(&self, to: SocketAddr) -> Answer {
-        self.sent.lock().unwrap().push(to);
+    fn send(&self, from: std::net::IpAddr, to: SocketAddr) -> Answer {
+        self.sent.lock().unwrap().push((from, to));
         *self.answer.lock().unwrap()
     }
 }
@@ -81,13 +94,24 @@ fn refusal(result: Result<(), StepError>) -> (String, String) {
         other => panic!("expected a named refusal, got {other:?}"),
     }
 }
+/// The owner's and the joined Mac's work transports on a LAN-shaped choice: bound to 127.0.0.1
+/// under an explicit-peer policy that admits only 127.0.0.1, so the run has an admitted LAN path
+/// (`NetworkChoice(Some(..))`) and every address `allows` accepts is on this Mac.
+fn lan_on_loopback() -> WorkNetwork {
+    let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
+    WorkNetwork::Fixed(NetworkChoice(Some((
+        loopback,
+        runtime::iroh_host::LanPolicy::with_explicit(vec![loopback]).unwrap(),
+    ))))
+}
+
 /// Proves: (a) and (b) before the compile. An early step sends ONE datagram to the joined Mac's
 /// verified work address (which raises the alert) and never refuses; the compile's start refuses a
 /// pending permission by name, saying which Mac and what to allow; once allowed it passes, and an
 /// address already reached in this run gets no further datagram.
 #[test]
 fn a_pending_permission_is_asked_early_and_refuses_the_compile_by_name() {
-    let mut f = Fixture::new();
+    let mut f = Fixture::on(lan_on_loopback());
     let mut ports = PackagedChainPorts::new(&f.host, None, None);
     let probe = Scripted::new(Answer::Blocked);
     ports.work.probe = probe.clone();
@@ -96,6 +120,14 @@ fn a_pending_permission_is_asked_early_and_refuses_the_compile_by_name() {
     assert!(!addresses.is_empty());
     assert!(ports.work.local_network(&state, false).is_ok());
     assert_eq!(probe.sent(), addresses, "one datagram per verified address");
+    assert!(
+        probe
+            .from()
+            .iter()
+            .all(|from| *from == std::net::IpAddr::from([127, 0, 0, 1])),
+        "sent from the run's selected local address: {:?}",
+        probe.from()
+    );
     let (code, message) = refusal(ports.work.local_network(&state, true));
     assert_eq!(code, PERMISSION_REQUIRED);
     assert!(
@@ -112,17 +144,6 @@ fn a_pending_permission_is_asked_early_and_refuses_the_compile_by_name() {
         reached,
         "a reached address is not probed again"
     );
-}
-
-/// The owner's and the joined Mac's work transports on a LAN-shaped choice: bound to 127.0.0.1
-/// under an explicit-peer policy that admits only 127.0.0.1, so the run has an admitted LAN path
-/// (`NetworkChoice(Some(..))`) and every address `allows` accepts is on this Mac.
-fn lan_on_loopback() -> WorkNetwork {
-    let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
-    WorkNetwork::Fixed(NetworkChoice(Some((
-        loopback,
-        runtime::iroh_host::LanPolicy::with_explicit(vec![loopback]).unwrap(),
-    ))))
 }
 
 /// Proves PHY-02 (lane PHY patch 2): a new run takes its probe targets from ITS verified members
@@ -194,7 +215,7 @@ fn a_revoked_members_address_is_not_probed() {
 /// dial's cause and where to allow it; any other failure is left as it was, with no datagram.
 #[test]
 fn a_step_6_dial_without_an_answer_is_named_on_the_mac_that_must_allow_it() {
-    let mut f = Fixture::new();
+    let mut f = Fixture::on(lan_on_loopback());
     let mut ports = PackagedChainPorts::new(&f.host, None, None);
     let probe = Scripted::new(Answer::Blocked);
     ports.work.probe = probe.clone();
@@ -233,4 +254,80 @@ fn a_step_6_dial_without_an_answer_is_named_on_the_mac_that_must_allow_it() {
     );
     assert_eq!(probe.sent().len(), before, "no datagram for another cause");
     ports.work.teardown().unwrap();
+}
+
+/// Proves PHY-03 (lane PHY patch 2): the probe obeys the run's work-transport admission. A run
+/// whose own reading of this Mac's interfaces finds no single private network (`local_only:*`)
+/// has no admitted LAN path: it sends no datagram and is not refused for Local Network; its
+/// compose then refuses it by name as at the base, from the SAME resolution (one reading).
+#[test]
+fn a_run_whose_network_resolves_local_only_sends_no_probe() {
+    use api::lan_interface::{AMBIGUOUS_PRIVATE_INTERFACES, Selection};
+    let reads = Arc::new(AtomicUsize::new(0));
+    let counted = reads.clone();
+    let owner = WorkNetwork::Read(
+        Arc::new(move || {
+            counted.fetch_add(1, Ordering::SeqCst);
+            Selection::LocalOnly(AMBIGUOUS_PRIVATE_INTERFACES)
+        }),
+        runtime::iroh_host::LanPolicy::private_only(),
+    );
+    let mut f = Fixture::on_each(owner, lan_on_loopback());
+    let ports = PackagedChainPorts::new(&f.host, None, None);
+    let probe = Scripted::new(Answer::Blocked);
+    let mut work = ports.work.clone();
+    work.probe = probe.clone();
+    let state = published(&mut f, &work, "run-lo1");
+    assert!(!member_addresses(&f, &work, &state).is_empty());
+    assert!(work.local_network(&state, false).is_ok());
+    assert!(work.local_network(&state, true).is_ok());
+    assert!(probe.sent().is_empty(), "{:?}", probe.sent());
+    let mut env = Env { at: Instant::now() };
+    let (code, _) = refusal(work.compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env));
+    assert_eq!(code, "owner_work_network_unavailable");
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        1,
+        "the probe and the compose read the run's network once"
+    );
+}
+
+/// Proves PHY-03: a signed member address the run's transport would not dial is not probed: an
+/// address of the other family than the run's bound address, and one outside an exact-host policy.
+#[test]
+fn a_signed_address_the_runs_admission_refuses_is_not_probed() {
+    let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
+    let v6 = std::net::IpAddr::from(std::net::Ipv6Addr::LOCALHOST);
+    let other = std::net::IpAddr::from([127, 0, 0, 2]);
+    for (label, choice) in [
+        (
+            "wrong family",
+            NetworkChoice(Some((
+                v6,
+                runtime::iroh_host::LanPolicy::with_explicit(vec![v6]).unwrap(),
+            ))),
+        ),
+        (
+            "outside the exact hosts",
+            NetworkChoice(Some((
+                loopback,
+                runtime::iroh_host::LanPolicy::with_explicit(vec![other]).unwrap(),
+            ))),
+        ),
+    ] {
+        let mut f = Fixture::on_each(WorkNetwork::Fixed(choice.clone()), lan_on_loopback());
+        let ports = PackagedChainPorts::new(&f.host, None, None);
+        let probe = Scripted::new(Answer::Blocked);
+        let mut work = ports.work.clone();
+        work.probe = probe.clone();
+        let state = published(&mut f, &work, "run-adm");
+        let signed = member_addresses(&f, &work, &state);
+        assert!(!signed.is_empty(), "{label}");
+        assert!(
+            signed.iter().all(|a| !choice.allows(*a)),
+            "{label}: {signed:?}"
+        );
+        assert!(work.local_network(&state, true).is_ok(), "{label}");
+        assert!(probe.sent().is_empty(), "{label}: {:?}", probe.sent());
+    }
 }
