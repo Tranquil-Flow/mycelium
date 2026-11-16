@@ -48,8 +48,11 @@ pub enum Answer {
     Failed(i32),
 }
 
+/// How soon a refused send must fail to read as the permission (PHY-04).
+pub const IMMEDIATE: std::time::Duration = std::time::Duration::from_millis(100);
+
 /// One `send_to`'s result as an [`Answer`].
-pub fn classify(sent: std::io::Result<usize>) -> Answer {
+pub fn classify(sent: std::io::Result<usize>, _elapsed: std::time::Duration) -> Answer {
     match sent {
         Ok(_) => Answer::Sent,
         Err(e) if e.raw_os_error() == Some(libc::EHOSTUNREACH) => Answer::Blocked,
@@ -87,7 +90,7 @@ impl Probe for Udp {
             return Answer::NotLocal;
         }
         match UdpSocket::bind(SocketAddr::new(from, 0)) {
-            Ok(socket) => classify(socket.send_to(&[0], to)),
+            Ok(socket) => classify(socket.send_to(&[0], to), std::time::Duration::ZERO),
             Err(e) => Answer::Failed(e.raw_os_error().unwrap_or(0)),
         }
     }
@@ -96,7 +99,7 @@ impl Probe for Udp {
 const SETTINGS: &str = "System Settings › Privacy & Security › Local Network";
 
 /// The page message of [`PERMISSION_REQUIRED`]: which Mac, what to allow, where.
-pub fn owner_message() -> String {
+pub fn owner_message(_ip: IpAddr) -> String {
     format!(
         "macOS does not let Mycelium reach the joined Mac on your network yet. On THIS Mac (the \
          owner's), answer Allow on the alert asking whether Mycelium may find devices on your local \
@@ -127,20 +130,58 @@ mod tests {
     use super::*;
     use std::net::{Ipv4Addr, Ipv6Addr};
 
-    /// Proves: the measured signature (EHOSTUNREACH = pending/denied; anything else is not it).
+    /// Proves: the measured signature (an IMMEDIATE EHOSTUNREACH = pending/denied; anything else
+    /// is not it). PHY-04: a slow EHOSTUNREACH (an ARP wait, a router's ICMP answer) is a network
+    /// fault, never read as the permission.
     #[test]
     fn only_an_immediate_host_unreachable_reads_as_a_blocked_permission() {
+        use std::time::Duration;
         let err = |n| Err(std::io::Error::from_raw_os_error(n));
-        assert_eq!(classify(Ok(1)), Answer::Sent);
-        assert_eq!(classify(err(libc::EHOSTUNREACH)), Answer::Blocked);
+        let at_once = Duration::ZERO;
+        assert_eq!(classify(Ok(1), at_once), Answer::Sent);
+        assert_eq!(classify(err(libc::EHOSTUNREACH), at_once), Answer::Blocked);
         assert_eq!(
-            classify(err(libc::EHOSTDOWN)),
+            classify(
+                err(libc::EHOSTUNREACH),
+                IMMEDIATE - Duration::from_millis(1)
+            ),
+            Answer::Blocked
+        );
+        for slow in [IMMEDIATE, Duration::from_secs(3)] {
+            assert_eq!(
+                classify(err(libc::EHOSTUNREACH), slow),
+                Answer::Failed(libc::EHOSTUNREACH),
+                "{slow:?}"
+            );
+        }
+        assert_eq!(
+            classify(err(libc::EHOSTDOWN), at_once),
             Answer::Failed(libc::EHOSTDOWN)
         );
         assert_eq!(
-            classify(err(libc::ENETUNREACH)),
+            classify(err(libc::ENETUNREACH), at_once),
             Answer::Failed(libc::ENETUNREACH)
         );
+    }
+
+    /// Proves PHY-04: the refusal names what the evidence shows, not a certainty: macOS has not
+    /// allowed Local Network for Mycelium on this Mac OR this Mac has no route to the joined Mac,
+    /// the first being the likely cause on a fresh install.
+    #[test]
+    fn the_permission_refusal_names_the_evidence_not_a_certainty() {
+        let ip: IpAddr = "10.160.112.128".parse().unwrap();
+        let message = owner_message(ip);
+        for part in [
+            "THIS Mac",
+            "has not allowed",
+            "Local Network",
+            "or this Mac has no route to the joined Mac at 10.160.112.128",
+            "likely",
+            "fresh install",
+            SETTINGS,
+        ] {
+            assert!(message.contains(part), "{part}: {message}");
+        }
     }
 
     /// Proves: the probe never leaves the private local network (no loopback, public, broadcast or

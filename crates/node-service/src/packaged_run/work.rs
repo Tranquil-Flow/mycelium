@@ -317,9 +317,9 @@ impl Work {
             }
         }
         match blocked {
-            Some(_) if refuse => Err(owner_run::OwnerRunError::with(
+            Some(to) if refuse => Err(owner_run::OwnerRunError::with(
                 api::local_network::PERMISSION_REQUIRED,
-                Some(&api::local_network::owner_message()),
+                Some(&api::local_network::owner_message(to.ip())),
                 None,
             )
             .into()),
@@ -364,7 +364,7 @@ impl Work {
                     return Some(
                         owner_run::OwnerRunError::with(
                             api::local_network::PERMISSION_REQUIRED,
-                            Some(&api::local_network::owner_message()),
+                            Some(&api::local_network::owner_message(to.ip())),
                             None,
                         )
                         .into(),

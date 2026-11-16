@@ -134,6 +134,11 @@ fn a_pending_permission_is_asked_early_and_refuses_the_compile_by_name() {
         message.contains("THIS Mac") && message.contains("Local Network"),
         "{message}"
     );
+    // PHY-04: the evidence, not a certainty: this Mac's permission OR no route to that Mac.
+    assert!(
+        message.contains("no route") && message.contains(&addresses[0].ip().to_string()),
+        "{message}"
+    );
     probe.answer(Answer::Sent);
     assert!(ports.work.local_network(&state, true).is_ok());
     let reached = probe.sent().len();
