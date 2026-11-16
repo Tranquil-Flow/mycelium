@@ -363,14 +363,38 @@ impl Work {
         let Some((from, _)) = network.0.clone() else {
             return None;
         };
-        let dialed: Vec<std::net::SocketAddr> = resident
-            .bindings
+        let (Some((run, deployment)), bindings) = (resident.run.clone(), resident.bindings.clone())
+        else {
+            return None;
+        };
+        drop(resident);
+        let seed = self.host.with(|c| c.authority.seed.clone())?;
+        // PHY-02 residual (lane PHY patch 3): only a binding that is STILL this run's current
+        // verified member is probed: a fresh `Inbox::get` (current enrollment, lease, generation,
+        // run, deployment, owner and share binding, expiry) under the run's resident network,
+        // answering the same registration and address compose bound. A member revoked, expired
+        // or re-addressed since compose gets no datagram and cannot decide the returned error.
+        let dialed: Vec<std::net::SocketAddr> = bindings
             .iter()
             .filter(|v| Some(v.node_id()) != local.as_deref())
+            .filter(|v| {
+                seed.work_members
+                    .get(
+                        &seed.coordinator,
+                        v.node_id(),
+                        self.owner.public(),
+                        &run,
+                        &deployment,
+                        &|a| network.allows(a),
+                    )
+                    .is_ok_and(|current| {
+                        current.registration() == v.registration()
+                            && current.address() == v.address()
+                    })
+            })
             .flat_map(|v| v.address().ip_addrs().copied().collect::<Vec<_>>())
             .filter(|address| network.allows(*address))
             .collect();
-        drop(resident);
         let mut silent = None;
         for to in dialed {
             let answer = self.probe.send(from, to);
