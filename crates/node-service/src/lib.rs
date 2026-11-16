@@ -8,7 +8,6 @@ pub mod app_host;
 pub mod artifact;
 pub mod chat_edge;
 #[cfg(any(feature = "desktop-shell", feature = "packaged"))]
-pub mod chat_template;
 #[cfg(feature = "iroh-loopback")]
 pub mod control;
 #[cfg(any(feature = "desktop-shell", feature = "packaged"))]

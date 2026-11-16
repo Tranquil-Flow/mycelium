@@ -235,7 +235,7 @@ fn chat_send_hands_the_native_service_the_v014_qwen2_chatml_of_the_user_prompt()
 fn the_probe_question_is_the_recorded_oracle_question() {
     let fixture: Value = serde_json::from_str(TEMPLATE_FIXTURE).unwrap();
     assert_eq!(
-        node_service::chat_template::ORACLE_USER_PROMPT,
+        api::prompt_codec::ORACLE_USER_PROMPT,
         fixture["cases"][0]["user"]
     );
 }
@@ -250,7 +250,9 @@ fn the_chat_envelope_tokenises_to_the_v014_codec_ids() {
     for case in fixture["cases"].as_array().unwrap() {
         let user = case["user"].as_str().unwrap();
         let ids: Vec<u32> = serde_json::from_value(case["ids"].clone()).unwrap();
-        let prompt = node_service::chat_template::qwen2_chat_prompt(user);
+        let prompt = api::prompt_codec::PromptCodec::Qwen2
+            .chat(user)
+            .into_string();
         assert_eq!(
             codec.encode(prompt, false).unwrap().get_ids(),
             ids,
@@ -1072,7 +1074,10 @@ fn the_invite_qr_route_is_served_by_the_host() {
     let (_private, host) = host();
     let reply = answered_within(&host, "GET", "/api/pair/window/qr/ZZZZ.svg", json!({}))
         .expect("the QR route must answer rather than hang");
-    assert_ne!(reply.status, 404, "the QR route must be served, not unknown");
+    assert_ne!(
+        reply.status, 404,
+        "the QR route must be served, not unknown"
+    );
     let body = String::from_utf8_lossy(&reply.body);
     assert!(
         body.contains("pairing_window_unknown") || body.contains("authority_state_invalid"),

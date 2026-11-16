@@ -198,9 +198,9 @@ fn every_executed_send_case_gets_the_oracles_status_body_and_driver_request() {
             );
             assert_eq!(
                 prompt,
-                node_service::chat_template::qwen2_chat_prompt(
-                    wanted[0]["prompt"].as_str().unwrap()
-                ),
+                api::prompt_codec::PromptCodec::Qwen2
+                    .chat(wanted[0]["prompt"].as_str().unwrap())
+                    .into_string(),
                 "{name}"
             );
         } else {

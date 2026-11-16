@@ -279,7 +279,7 @@ fn probe_calls() -> Vec<ProbeCall> {
     let script = PROBE
         .replace(
             "__PROMPT_JSON__",
-            &serde_json::to_string(node_service::chat_template::ORACLE_USER_PROMPT).unwrap(),
+            &serde_json::to_string(api::prompt_codec::ORACLE_USER_PROMPT).unwrap(),
         )
         .replace("Number(__TOKENS_JSON__)", &tokens.to_string());
     let lines: Vec<&str> = script.lines().map(str::trim).collect();

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Line-framed local tokenizer helper over the product's `tokenizers` crate and
 //! the selected snapshot's `tokenizer.json`. Private stdin/stdout only; no
-//! template, trimming or added special tokens (the caller sends finished ChatML).
+//! template, trimming or added special tokens (the caller sends finished ChatML, made by the one
+//! prompt-codec seam `api::prompt_codec`).
 use crate::loopback::Result;
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
