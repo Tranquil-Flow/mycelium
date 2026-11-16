@@ -666,14 +666,15 @@ pub(crate) fn build_selected(
 /// against the recorded reference's identity as the compile checks it), takes the prompt ids
 /// `prompt`, and runs greedy for at most `new_tokens`, ending BEFORE the first id in `stops`, as
 /// the route does (v0.1.4 route.py:5094-5098). It is [`build_selected`]'s own step loop with one
-/// stage over `[0, total)` instead of one per member. Returns the generated ids (no stop id).
+/// stage over `[0, total)` instead of one per member. Returns the generated ids (no stop id) and,
+/// separately, the stop id that ended them (`None`: the `new_tokens` cap ended them).
 pub fn single_process_greedy(
     program: &NativeProgram,
     checkpoint: &Path,
     prompt: &[u32],
     new_tokens: usize,
     stops: &[u32],
-) -> Result<Vec<u32>> {
+) -> Result<Greedy> {
     let cancel = Arc::new(AtomicBool::new(false));
     let stopped = || cancel.load(Ordering::SeqCst);
     let config = ProgramSelection::Explicit(Some(program.clone()))
@@ -708,7 +709,7 @@ pub fn single_process_greedy(
     let root = source.parent().ok_or(Error("native_path_invalid"))?;
     let mut worker = worker::Worker::start(&config, &prepare, cancel.clone(), root)?;
     let mut tokens = Vec::new();
-    let mut stepped = || -> Result<()> {
+    let mut stepped = || -> Result<Option<u32>> {
         let mut input = json!(prompt);
         for _ in 0..new_tokens {
             let (reply, body) = worker.request(&json!({"command":"step","tokens":input}), &[])?;
@@ -717,18 +718,25 @@ pub fn single_process_greedy(
             }
             let token = worker::greedy(&body)?;
             if stops.contains(&token) {
-                break;
+                return Ok(Some(token));
             }
             tokens.push(token);
             input = json!([token]);
         }
-        Ok(())
+        Ok(None)
     };
     let outcome = stepped();
     let closed = worker.close();
-    outcome?;
+    let stop = outcome?;
     closed?;
-    Ok(tokens)
+    Ok(Greedy { ids: tokens, stop })
+}
+/// [`single_process_greedy`]'s answer: the generated ids, and the stop id that ended them
+/// (`None`: the cap did). The route never emits its stop id, so only the reference records it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Greedy {
+    pub ids: Vec<u32>,
+    pub stop: Option<u32>,
 }
 
 fn emit(

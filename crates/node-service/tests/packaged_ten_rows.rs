@@ -724,6 +724,31 @@ fn reference_pieces(codec: &api::joined_owner::codec::NativeCodec, n: usize) -> 
 fn shows_stop(piece: &str) -> bool {
     piece.contains("<|im_end|>") || piece.contains("<|endoftext|>")
 }
+/// A route token id that is one of the run codec's stop ids (the route never emits one).
+fn is_stop_id(id: &Option<u64>) -> bool {
+    id.is_some_and(|id| {
+        RUN_CODEC
+            .stop_token_ids()
+            .iter()
+            .any(|stop| u64::from(*stop) == id)
+    })
+}
+/// The route's ids of the page's chat tokens (lane CHATFIX patch 2, CF-03): the TEST-ONLY tap
+/// (`RunConfig::chat_token_id_tap`) on the owner's route gateway records the `token_id` of each
+/// token event of the SAME request the page shows, in order (`None`: an event without an id).
+/// The service runs one chat at a time (`chat_busy`), so [`RouteIds::take`] right before and
+/// right after one chat brackets exactly that chat's ids.
+#[derive(Clone, Default)]
+struct RouteIds(Arc<Mutex<Vec<Option<u64>>>>);
+impl RouteIds {
+    fn tap(&self) -> api::chat_service::TokenIdTap {
+        let ids = self.0.clone();
+        Arc::new(move |id| ids.lock().unwrap().push(id))
+    }
+    fn take(&self) -> Vec<Option<u64>> {
+        std::mem::take(&mut *self.0.lock().unwrap())
+    }
+}
 /// The run's chat row. Lane CHATFIX: the page's chat wraps what the user types in the run model's
 /// envelope (`api::prompt_codec`, v0.1.4's codec), so the row types the oracle QUESTION, not the
 /// recorded workload's ChatML (system "You are a helpful assistant.", no think block: that is the
@@ -766,41 +791,54 @@ fn chat_row(mac: &Mac, ev: &Evidence, label: &str) -> Result<(), String> {
 /// with fewer pieces than it asked for: the route stops only at a stop id or the cap, and never
 /// emits the stop id) and contain `Paris`. On rv40 the raw prompt ran to the cap
 /// (` The capital of France is Paris. The answer is Paris. ...`). Evidence: the prompt's ids (the
-/// product tokenizer helper over the seam's text; equal to v0.1.4's codec ids, checked at setup)
-/// and the answer's pieces with their ids. The page shows text only (v0.1.4's chat events carry no
-/// ids), so the answer ids are each piece re-encoded by the same helper, labelled so: equal to the
-/// route's ids for whole-character pieces; the probe compares route and reference exactly.
+/// product tokenizer helper over the seam's text; equal to v0.1.4's codec ids, checked at setup),
+/// the answer's pieces and, separately, the ROUTE'S OWN ids of the same request (`ids`, the run
+/// config's tap on the route gateway; lane CHATFIX patch 2, CF-03): one id per piece, none a stop
+/// id. The route never emits the id that ended the answer, so the row records how it ended
+/// (`ended`), not that id; the probe records the reference's terminating id.
 fn answer_row(
     mac: &Mac,
     ev: &Evidence,
     label: &str,
     codec: &api::joined_owner::codec::NativeCodec,
+    ids: &RouteIds,
 ) -> Result<(), String> {
+    ids.take();
     let (last, pieces) = chat(mac, ev, &format!("{label}_answer"), FRANCE, CHAT_TOKENS);
+    let route_ids = ids.take();
     let got: Vec<String> = pieces.iter().map(|p| p.0.clone()).collect();
     let text = got.concat();
     let prompt_ids = codec.encode(RUN_CODEC.chat(FRANCE).as_str()).ok();
-    let piece_ids: Vec<Value> = got.iter().map(|p| json!(codec.encode(p).ok())).collect();
+    let one_id_per_piece = route_ids.len() == got.len() && route_ids.iter().all(Option::is_some);
     let at_stop = last["terminal"] == "completed" && (got.len() as u64) < CHAT_TOKENS;
-    let ok = at_stop && text.contains("Paris") && !got.iter().any(|p| shows_stop(p));
+    let ok = at_stop
+        && one_id_per_piece
+        && !route_ids.iter().any(is_stop_id)
+        && text.contains("Paris")
+        && !got.iter().any(|p| shows_stop(p));
+    let ended = if at_stop {
+        "stop id (not emitted by the route)"
+    } else {
+        "cap or failure"
+    };
     ev.row(
         json!({"row": format!("{label} answer (France, {CHAT_TOKENS} tokens)"),
         "result": if ok { "passed" } else { "failed" },
         "wall_ms": pieces.last().map(|p| p.1), "ttft_ms": pieces.first().map(|p| p.1),
-        "ended": if at_stop { "stop id" } else { "cap or failure" }, "pieces": got.len(),
+        "ended": ended, "pieces": got.len(),
         "text": text, "prompt_ids": prompt_ids, "answer_pieces": got,
-        "answer_piece_ids_reencoded": piece_ids,
+        "answer_route_ids": route_ids, "one_route_id_per_piece": one_id_per_piece,
         "status_line": {"terminal": last["terminal"], "error": last["error"]}}),
     );
     if ok {
         Ok(())
     } else {
         Err(format!(
-            "answer {label}: ended={} terminal={} error={} pieces={} text={text:?}",
-            if at_stop { "stop id" } else { "cap or failure" },
+            "answer {label}: ended={ended} terminal={} error={} pieces={} route_ids={} text={text:?}",
             last["terminal"],
             last["error"],
-            got.len()
+            got.len(),
+            route_ids.len()
         ))
     }
 }
@@ -1059,6 +1097,7 @@ fn ten_rows_with_the_real_model_on_the_lan() {
     );
 
     let repository = cached::CachedRepository::start();
+    let route_ids = RouteIds::default();
     let (owner, member) = pair(
         &base,
         &repository,
@@ -1066,6 +1105,7 @@ fn ten_rows_with_the_real_model_on_the_lan() {
             sidecar: Some(repository::sidecar_file(&base)),
             native_program: Some(program.clone()),
             observe_test_double: Some(Arc::new(observe_test_double::HostIdentityTestDouble::over)),
+            chat_token_id_tap: Some(route_ids.tap()),
             ..RunConfig::default()
         },
         &program,
@@ -1090,7 +1130,7 @@ fn ten_rows_with_the_real_model_on_the_lan() {
                 let chatted = chat_row(&owner.mac, &ev, run);
                 if run == "run1" {
                     // Lane CHATFIX item 4: the answer-content row, while run 1 serves.
-                    if let Err(e) = answer_row(&owner.mac, &ev, run, &codec) {
+                    if let Err(e) = answer_row(&owner.mac, &ev, run, &codec, &route_ids) {
                         failures.push(e);
                     }
                     if chatted.is_ok() {
@@ -1165,12 +1205,16 @@ fn ten_rows_with_the_real_model_on_the_lan() {
 /// worker of the admitted program holding all 28 layers of the pinned checkpoint, fed the seam's
 /// prompt ids (`RUN_CODEC.chat(question)` through the product tokenizer helper), greedy, ending
 /// before a stop id as the route does. The reference runs first, before any host loads the model.
-/// The page shows text pieces only (v0.1.4's chat events carry no ids), so each reference id is
-/// decoded to its piece by the same helper and the two are compared piece by piece: a byte-level
-/// BPE id has exactly one byte string, so equal pieces are equal ids except where two different
-/// tokens each hold an incomplete UTF-8 sequence (both decode to U+FFFD); the evidence keeps the
-/// reference ids. Per question it reports `identical over N` or the first divergent index (in
-/// `probe.json` of the run directory and the TEN log), and fails when any question differs.
+/// Lane CHATFIX patch 2 (CF-03): the comparison is by TOKEN ID. The page shows text only (v0.1.4's
+/// chat events carry no ids), so the owner's run config carries the TEST-ONLY tap on its route
+/// gateway (`RunConfig::chat_token_id_tap`), which records the route's own `token_id` of each
+/// token of the SAME request the page shows; those ids and their count are compared with the
+/// reference ids directly (decoded pieces are kept as secondary evidence only: different ids can
+/// decode to the same U+FFFD). The route never emits the id that ended its answer, so the
+/// reference's terminating stop id (`reference_stop`, `None` = the cap) is recorded separately and
+/// only the way each ended is compared. Per question it reports `identical ids over N` or the first
+/// divergent id index (in `probe.json` of the run directory and the TEN log), and fails when any
+/// question differs, an id is missing, or the endings disagree.
 /// Run like the gate (see the module documentation), with this test's name instead.
 #[test]
 #[ignore = "real Metal + cached Qwen3-0.6B + this Mac's private LAN address; MYCELIUM_TEN_PACKAGED_EXECUTABLE, MYCELIUM_PINNED_PAYLOAD_APP, MYCELIUM_TEN_RUN_DIR, MYCELIUM_BOOTSTRAP_TEST_CONFIG"]
@@ -1223,17 +1267,20 @@ fn probe_route_chat_against_a_single_process_reference() {
         )
         .unwrap_or_else(|e| panic!("single-process reference for {question:?}: {}", e.0));
         let pieces: Vec<String> = reference
+            .ids
             .iter()
             .map(|t| codec.decode(*t).unwrap())
             .collect();
         ev.note(
             "probe_reference",
-            json!({"question": question, "prompt_ids": ids, "ids": reference,
-                "pieces": pieces, "text": pieces.concat(), "ms": ms(began)}),
+            json!({"question": question, "prompt_ids": ids, "ids": reference.ids,
+                "stop": reference.stop, "pieces": pieces, "text": pieces.concat(),
+                "ms": ms(began)}),
         );
         references.push((question, reference, pieces));
     }
     let repository = cached::CachedRepository::start();
+    let route_ids = RouteIds::default();
     let (owner, member) = pair(
         &base,
         &repository,
@@ -1241,6 +1288,7 @@ fn probe_route_chat_against_a_single_process_reference() {
             sidecar: Some(repository::sidecar_file(&base)),
             native_program: Some(program.clone()),
             observe_test_double: Some(Arc::new(observe_test_double::HostIdentityTestDouble::over)),
+            chat_token_id_tap: Some(route_ids.tap()),
             ..RunConfig::default()
         },
         &program,
@@ -1251,6 +1299,7 @@ fn probe_route_chat_against_a_single_process_reference() {
     match ten_rows(&owner.mac, &member, &ev, "probe") {
         Ok(_) => {
             for (i, (question, reference, expected)) in references.iter().enumerate() {
+                route_ids.take();
                 let (last, pieces) = chat(
                     &owner.mac,
                     &ev,
@@ -1258,24 +1307,40 @@ fn probe_route_chat_against_a_single_process_reference() {
                     question,
                     CHAT_TOKENS,
                 );
+                let ids = route_ids.take();
                 let route: Vec<String> = pieces.iter().map(|p| p.0.clone()).collect();
-                let first = route
+                let wanted: Vec<Option<u64>> =
+                    reference.ids.iter().map(|t| Some(u64::from(*t))).collect();
+                let first = ids
                     .iter()
-                    .zip(expected)
+                    .zip(&wanted)
                     .position(|(a, b)| a != b)
-                    .or((route.len() != expected.len()).then(|| route.len().min(expected.len())));
+                    .or((ids.len() != wanted.len()).then(|| ids.len().min(wanted.len())));
                 let verdict = match first {
-                    None => format!("identical over {}", route.len()),
-                    Some(index) => format!("first divergent index {index}"),
+                    None => format!("identical ids over {}", ids.len()),
+                    Some(index) => format!("first divergent id index {index}"),
                 };
+                let one_id_per_piece = ids.len() == route.len();
+                let route_at_stop =
+                    last["terminal"] == "completed" && (ids.len() as u64) < CHAT_TOKENS;
+                let endings_agree = route_at_stop == reference.stop.is_some();
+                let pieces_equal = &route == expected;
                 let line = json!({"question": question, "verdict": verdict,
-                    "first_divergent_index": first, "route_pieces": route,
-                    "reference_pieces": expected, "reference_ids": reference,
+                    "first_divergent_index": first, "route_ids": ids,
+                    "reference_ids": reference.ids, "reference_stop": reference.stop,
+                    "route_ended": if route_at_stop { "stop id (not emitted by the route)" } else { "cap or failure" },
+                    "endings_agree": endings_agree, "one_route_id_per_piece": one_id_per_piece,
+                    "route_pieces": route, "reference_pieces": expected,
+                    "pieces_equal": pieces_equal,
                     "route_terminal": last["terminal"], "route_error": last["error"]});
                 ev.note("probe_compare", line.clone());
-                if first.is_some() || last["terminal"] != "completed" {
+                if first.is_some()
+                    || !one_id_per_piece
+                    || !endings_agree
+                    || last["terminal"] != "completed"
+                {
                     failures.push(format!(
-                        "{question:?}: {verdict}, terminal {}",
+                        "{question:?}: {verdict}, ids per piece {one_id_per_piece}, endings agree {endings_agree}, terminal {}",
                         last["terminal"]
                     ));
                 }
