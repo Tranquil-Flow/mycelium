@@ -183,6 +183,7 @@ function rung(label, value) {
   const dd=document.createElement('dd'); dd.textContent=String(value ?? 'Unknown');
   $('ladder').append(dt,dd);
 }
+let modelPointedAt=null;
 function render(value) {
   latest=value; connected=true; $('private').hidden=false;
   const a=value.authority;
@@ -257,6 +258,15 @@ function render(value) {
   const acquisition=value.acquisition;
   const downloading=acquisition && !['idle','prepared','failed','cancelled','closed'].includes(acquisition.state);
   const canDownload=value.running && a.membership_state==='current' && !!value.resource_policy;
+  // One chat path, through the run's route (owner ruling 14 Nov): the card's one-Mac prompt is gone
+  // and the card stays hidden; its model download is the owner's model-prepare step, so it shows
+  // only when the owner's last run stopped asking for it (`prepare_model`) or while that download runs.
+  const ownerRun=value.owner_run;
+  const prepareModel=ownerRun?.state==='failed' && ownerRun.error_fix?.action==='prepare_model';
+  $('inference').hidden=!(!target && (prepareModel || downloading));
+  if(!target && prepareModel && modelPointedAt!==ownerRun.run_id){
+    modelPointedAt=ownerRun.run_id;$('acquisition').scrollIntoView({block:'center'});$('acquisition').classList.add('needs-attention');
+  }
   $('download-weights').disabled=busy || !canDownload || downloading || acquisition?.state==='prepared' || !$('download-consent').checked;
   $('cancel-download').disabled=busy || !downloading;
   $('download-hint').textContent=downloading || acquisition?.state==='prepared' ? ''
@@ -295,11 +305,11 @@ async function refresh(announce=true) {
     if (announce) notice('Connected to your private local installation. Serving remains separately qualified.');
   } catch(error) {
     if (error.message==='open_from_native_launcher') {
-      connected=false;$('private').hidden=true;clearPairing();$('output').textContent='';
+      connected=false;$('private').hidden=true;clearPairing();
       notice('This browser is not authorized. Open the application’s private launch file to begin. No pairing or inference data is available here.');
     } else {
       connected=false;latest=null;$('private').hidden=true;
-      clearPairing();$('output').textContent='';
+      clearPairing();
       notice('Connection unavailable. No state is assumed current. Reconnect from the launcher; private identity remains on your Mac.');
     }
   }
@@ -330,7 +340,6 @@ async function perform(path, body, success) {
   finally{
     busy=false;
     for(const button of document.querySelectorAll('button'))button.disabled=false;
-    $('submit').disabled=true;
     if(latest&&connected)render(latest);
   }
 }
@@ -450,7 +459,6 @@ $('pair-request').addEventListener('click',async()=>{
     showRequest(value);
   }catch(error){notice(`Pairing request not completed: ${humanError(error.message)}`);}
 });
-$('infer-form').addEventListener('submit',(event)=>event.preventDefault());
 function showRequest(value){
   $('pairing-details').open=true;
   $('pair-output').textContent=JSON.stringify(value,null,2);$('pair-output').hidden=false;

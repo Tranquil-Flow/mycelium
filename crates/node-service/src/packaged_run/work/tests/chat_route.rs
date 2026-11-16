@@ -259,15 +259,15 @@ impl Page {
         );
         let state = f.root.join("app-state");
         let dirs = crate::packaged::prepare_dirs(&state).unwrap();
-        let services = DesktopServices::new(
-            NodeService::new(
-                Arc::new(NoNative),
-                "chat-route-page".into(),
-                crate::native::development_qualification().unwrap(),
-            ),
-            NonZeroUsize::new(4).unwrap(),
-            &dirs.private,
+        let node = NodeService::new(
+            Arc::new(NoNative),
+            "chat-route-page".into(),
+            crate::native::development_qualification().unwrap(),
         );
+        // The packaged composition publishes the node's first status before the window's first
+        // request (`DesktopServices::packaged_with_run`); the page's status reads it.
+        api::actions::Backend::publish(&mut node.clone()).unwrap();
+        let services = DesktopServices::new(node, NonZeroUsize::new(4).unwrap(), &dirs.private);
         let services = chat_run(services, &config, dirs.chat_timing.clone()).unwrap();
         Self {
             services,
@@ -484,6 +484,140 @@ fn a_failed_run_ends_the_route_chat_owner_run_failed() {
     assert_eq!(failed["error_code"], "managed_workflow_missing", "{failed}");
     assert_eq!(fake.seen(|s| s.deletes), 1);
     not_ready(&page, "chat_not_ready");
+    page.close();
+}
+
+/// The page's own `GET /api/status` (what run.js renders the Chat box from).
+fn page_status(services: &DesktopServices) -> Value {
+    let (tx, rx) = mpsc::sync_channel(1);
+    services.submit(
+        ServiceRequest {
+            method: "GET".into(),
+            target: "/api/status".into(),
+            headers: Vec::new(),
+            body: Vec::new(),
+        },
+        Box::new(move |reply| tx.send(reply).unwrap_or_default()),
+    );
+    let reply = rx.recv_timeout(patience()).expect("the status answers");
+    assert_eq!(
+        reply.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&reply.body)
+    );
+    serde_json::from_slice(&reply.body).unwrap()
+}
+
+/// Lane CHATS item 1 (ledger row 106 a; v0.1.4 `chat.chat_status`, chat.py:521-529 @ f4e366e9):
+/// while the run serves, the owner's status says the chat is available, from the SAME
+/// `ChatService::state()` the chat page reads, with the page's `local_url`; no relay runs, so no
+/// `share_url`. Before the run and after its Stop the block says not available. This is what
+/// run.js turns into "Open the chat on this Mac" (run.js:128-137).
+#[test]
+fn the_owner_status_says_the_chat_is_available_while_the_run_serves() {
+    let fake = FakeGateway::start(Fake::completed(&["Hel", "lo"]));
+    let page = Page::new(&fake);
+    let idle = page_status(&page.services);
+    assert_eq!(idle["installation_role"], "owner", "{idle}");
+    assert_eq!(idle["chat"]["available"], false, "{idle}");
+    page.start();
+    page.serving();
+    let serving = page_status(&page.services);
+    let chat = &serving["chat"];
+    assert_eq!(chat["available"], true, "{serving}");
+    assert_eq!(chat["busy"], false, "{serving}");
+    assert_eq!(
+        chat["available"],
+        page.chat_state()["available"],
+        "the status and the chat page read one service"
+    );
+    assert!(
+        chat["local_url"]
+            .as_str()
+            .is_some_and(|u| u.ends_with("/chat")),
+        "{serving}"
+    );
+    assert_eq!(chat["share_url"], Value::Null, "no relay: {serving}");
+    page.stop();
+    page.until("the run stopped", |s| s["state"] == "stopped");
+    let stopped = page_status(&page.services);
+    assert_eq!(stopped["chat"]["available"], false, "{stopped}");
+    page.close();
+}
+
+/// Lane CHATS item 2 (v0.1.4 `_bind_public_routes`, app.py:1073-1077 @ f4e366e9): the handler the
+/// relay's `/chat/*` call is the run's own chat service with the relay's client key, so a room
+/// member's chat goes through the serving run's route, as the owner's page does: the state says
+/// available, a send streams exactly the gateway's tokens through the relay's events, and a
+/// stopped run answers the service's own `chat_not_ready`.
+#[test]
+fn the_relay_chat_reaches_the_serving_runs_route() {
+    let fake = FakeGateway::start(Fake::completed(&["Hel", "lo"]));
+    let page = Page::new(&fake);
+    let relay = page
+        .services
+        .network()
+        .relay_chat()
+        .expect("the composition binds the relay's chat");
+    let call = |path: &str, body: Value| {
+        let answer = relay(
+            "POST",
+            path,
+            &[
+                ("X-Mycelium-Chat".into(), "1".into()),
+                ("Content-Type".into(), "application/json".into()),
+                ("Cf-Connecting-Ip".into(), "203.0.113.7".into()),
+            ],
+            &serde_json::to_vec(&body).unwrap(),
+        )
+        .expect("the relay chat answers");
+        assert_eq!(answer.kind, "application/json");
+        (
+            u16::try_from(answer.status).unwrap(),
+            serde_json::from_slice::<Value>(&answer.raw).unwrap(),
+        )
+    };
+    let (code, idle) = call("/chat/api/state", json!({}));
+    assert_eq!((code, &idle["available"]), (200, &json!(false)), "{idle}");
+    page.start();
+    page.serving();
+    let (code, serving) = call("/chat/api/state", json!({}));
+    assert_eq!(
+        (code, &serving["available"]),
+        (200, &json!(true)),
+        "{serving}"
+    );
+    let (code, sent) = call(
+        "/chat/api/send",
+        json!({"prompt": "hi", "max_new_tokens": 8}),
+    );
+    assert_eq!(code, 200, "{sent}");
+    let end = Instant::now() + patience();
+    let (mut after, mut tokens) = (json!(0), Vec::new());
+    loop {
+        let (code, page_events) = call(
+            "/chat/api/events",
+            json!({"request_id": sent["request_id"], "after": after}),
+        );
+        assert_eq!(code, 200, "{page_events}");
+        for t in page_events["tokens"].as_array().unwrap() {
+            tokens.push(t.as_str().unwrap().to_owned());
+        }
+        after = page_events["next"].clone();
+        if page_events["done"] == true {
+            break;
+        }
+        assert!(Instant::now() < end, "the relay chat never ended");
+        std::thread::yield_now();
+    }
+    assert_eq!(tokens, ["Hel", "lo"], "exactly the gateway's tokens");
+    page.stop();
+    page.until("the run stopped", |s| s["state"] == "stopped");
+    assert_eq!(
+        call("/chat/api/send", json!({"prompt": "hi"})),
+        (503, json!({"error": "chat_not_ready"}))
+    );
     page.close();
 }
 

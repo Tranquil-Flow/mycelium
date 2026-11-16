@@ -27,7 +27,7 @@ use api::{
     app_status, joined_member,
     persistent::RelayState,
     preferences::private_state,
-    relay::{EndpointHost, Hooks, OwnerRelay, Probe, Proxy, SeedBackend, StartGuard},
+    relay::{EndpointHost, Hooks, OwnerRelay, Probe, Proxy, RichHandler, SeedBackend, StartGuard},
     schema::{PublicError, Raised},
     seed::SeedOptions,
     windows::PendingWindows,
@@ -132,6 +132,10 @@ pub struct Network {
     /// a relay may extend its window only then. The packaged host has no swarm publisher yet, so the
     /// published-listing half of the v0.1.4 predicate has nothing to read; it arrives with one.
     serving: std::sync::Arc<AtomicBool>,
+    /// The owner's chat behind the relay (`_bind_public_routes`'s `bind_chat`, app.py:1073-1077):
+    /// the run's chat service with the relay's client key (lane CHATS item 2). `None` until the
+    /// composition gives one (`DesktopServices::with_chat_run`).
+    relay_chat: Mutex<Option<RichHandler>>,
 }
 fn lock<T>(cell: &Mutex<T>) -> MutexGuard<'_, T> {
     // Plain values and handles: a panicked holder cannot leave them half-written.
@@ -177,11 +181,23 @@ impl Network {
             native_program: config.native_program,
             work_closed: AtomicBool::new(false),
             serving: std::sync::Arc::new(AtomicBool::new(false)),
+            relay_chat: Mutex::new(None),
         })
+    }
+    /// The chat the relay's `/chat` and `/chat/api/*` answer from (`bind_chat`, app.py:1073-1077),
+    /// bound at every relay start ([`EndpointHost::bind_public_routes`]). The packaged composition
+    /// gives it before the window opens (`packaged::compose` -> `chat_run`), so before any relay.
+    pub fn bind_relay_chat(&self, handler: Option<RichHandler>) {
+        *lock(&self.relay_chat) = handler;
+    }
+    /// The handler [`Network::bind_relay_chat`] keeps (what the relay's `/chat` routes call).
+    pub fn relay_chat(&self) -> Option<RichHandler> {
+        lock(&self.relay_chat).clone()
     }
     /// The signal `_relay_is_serving` answers from: the run chain raises it for the length of a run.
     pub fn set_serving(&self, serving: bool) {
-        self.serving.store(serving, std::sync::atomic::Ordering::SeqCst);
+        self.serving
+            .store(serving, std::sync::atomic::Ordering::SeqCst);
     }
     /// The probe a relay reads when it decides whether its window may extend. Cloned into the relay's
     /// lifetime thread, so it shares the flag rather than borrowing this host.
@@ -435,7 +451,9 @@ impl EndpointHost for Endpoint<'_> {
     fn set_running(&mut self) {
         lock(&self.authority).running = true;
     }
-    /// `_bind_public_routes`: the pairing windows, the member-report inbox and the link probe.
+    /// `_bind_public_routes` (app.py:1070-1079): the pairing windows, the member-report inbox and
+    /// the link probe, and the owner's chat (`bind_chat`, :1073-1077, lane CHATS item 2). The
+    /// swarm entry (:1078-1079) is not bound: the packaged host has no published swarm gateway.
     fn bind_public_routes(&mut self, proxy: &Arc<Proxy>) {
         let authority = self.authority.clone();
         proxy.bind_local(Some(joined_member::public_route::<Managed>(Arc::new(
@@ -444,6 +462,7 @@ impl EndpointHost for Endpoint<'_> {
                 (a.windows.clone(), a.seed.clone())
             },
         ))));
+        proxy.bind_chat(self.network.relay_chat());
     }
     /// `_materialize_pending_windows`: codes asked for before the relay exist from now on.
     fn materialize_pending_windows(&mut self) {
@@ -949,8 +968,7 @@ impl api::member_agent::MemberHost for PackagedMember {
         // has no joined Session (`session` is a target's), so it never has a binding here.
         let (root, binding) = {
             let a = lock(&self.authority);
-            let current =
-                a.target && target_membership_state(&a).as_deref() == Some("current");
+            let current = a.target && target_membership_state(&a).as_deref() == Some("current");
             let binding = match &a.session {
                 _ if !current => None,
                 Some(session) => api::peer::membership_binding(Some(session)),
@@ -1118,7 +1136,10 @@ mod serving_probe_tests {
         let probe = network.serving_probe();
         assert!(!probe().expect("probe"), "no run has started");
         network.set_serving(true);
-        assert!(probe().expect("probe"), "an active run may extend the window");
+        assert!(
+            probe().expect("probe"),
+            "an active run may extend the window"
+        );
         network.set_serving(false);
         assert!(!probe().expect("probe"), "the run ended");
         let _ = std::fs::remove_dir_all(&root);

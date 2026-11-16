@@ -4,6 +4,7 @@
 //! `/chat/api/send`, its events and Stop go through the serving root
 //! ([`crate::router_port::Serving`]: the oracle-checked request gateway over the node service).
 mod chat_boundary;
+mod relay_chat;
 use crate::{
     app_host::{FastModeDefault, FastModeProcess, HostLoop, PackagedHost, Publishing},
     router_port::{self, Serving, ServingActions},
@@ -236,6 +237,37 @@ pub struct DesktopServices {
     started: std::time::Instant,
     capacity: NonZeroUsize,
 }
+/// `/chat/api/send` over the run's route (chat.py:300-340) for `client` (the page's `local`, or
+/// the relay's `relay:<address>` key, `chat.client_key`): the body checks (`chat_edge`), Quit's
+/// fence, then the service (rate limits per client and for the swarm, one chat at a time under
+/// its own lock, chat.py:285-298, 319-321).
+fn send_routed(
+    gate: &Mutex<Gate>,
+    chat: &api::chat_service::ChatService,
+    client: &str,
+    body: &Value,
+) -> Result<Value, api::chat::ChatError> {
+    let refused = |error: PublicError| api::chat::ChatError {
+        error,
+        retry_after: None,
+    };
+    let plan = crate::chat_edge::plan(body).map_err(refused)?;
+    if gate
+        .lock()
+        .map_err(|_| refused(err("desktop_poisoned")))?
+        .closing
+    {
+        return Err(refused(err("application_closed")));
+    }
+    chat.send(
+        client,
+        api::chat_service::Prompt {
+            text: plan.prompt,
+            max_new_tokens: plan.max_new_tokens,
+            clamped: plan.clamped,
+        },
+    )
+}
 impl DesktopServices {
     /// `private` is the packaged private state root: the preference files, the recorded action
     /// failure and every later persisted action state live there.
@@ -390,6 +422,12 @@ impl DesktopServices {
             timing,
         )?;
         self.run_chats = Some(api::chat_service::RunChats::new(Arc::new(chat.clone())));
+        // The relay's `/chat` reaches this same service (`_bind_public_routes`, app.py:1073-1077).
+        self.network.bind_relay_chat(Some(relay_chat::handler(
+            chat.clone(),
+            self.gate.clone(),
+            self.authority.clone(),
+        )));
         self.chat_run = Some(chat);
         Ok(self)
     }
@@ -407,34 +445,41 @@ impl DesktopServices {
     fn routed_chat(&self) -> Option<&api::chat_service::ChatService> {
         self.chat_run.as_ref()
     }
-    /// `/chat/api/send` over the run's route (chat.py:300-340): the body checks (`chat_edge`),
-    /// Quit's fence, then the service (one chat at a time under its own lock, chat.py:319-321).
+    /// `chat.chat_status(app)` (chat.py:521-529 @ f4e366e9, wired at app.py:1280 through
+    /// `_demo_status(self,'chat')`): owner only (`None` -> `null` for any other role); `available`
+    /// and `busy` from the route chat service's own `state()`, the one the chat page reads;
+    /// `local_url` = the app's origin + `/chat` while the app serves its pages (`app.server is not
+    /// None`: the window's custom protocol here, so until Quit begins); `share_url` = the relay's
+    /// origin + `/chat` when that origin is https. run.js:128-137 shows "Open the chat on this Mac"
+    /// and "Share with the room" only from this block. `None`: no route chat is composed (the
+    /// development shell), and the node's document stays as it is.
+    fn chat_status(&self, status: &Value) -> Option<Value> {
+        let chat = self.routed_chat()?;
+        if status["installation_role"] != "owner" {
+            return Some(Value::Null);
+        }
+        let state = chat.state();
+        let serves_pages = self.gate.lock().map(|gate| !gate.closing).unwrap_or(false);
+        let share_url = self
+            .network
+            .origin()
+            .filter(|origin| origin.starts_with("https://"))
+            .map(|origin| format!("{}/chat", origin.trim_end_matches('/')));
+        Some(json!({
+            "available": state["available"],
+            "busy": state["busy"],
+            "local_url": serves_pages.then(|| format!("{}/chat", desktop::channel::ORIGIN)),
+            "share_url": share_url,
+        }))
+    }
+    /// `/chat/api/send` over the run's route (chat.py:300-340) for the owner's own page, the one
+    /// local client (`chat.client_key(..., via_relay=False)` is `local`): [`send_routed`].
     fn route_send(
         &self,
         chat: &api::chat_service::ChatService,
         body: &Value,
     ) -> Result<Value, api::chat::ChatError> {
-        let refused = |error: PublicError| api::chat::ChatError {
-            error,
-            retry_after: None,
-        };
-        let plan = crate::chat_edge::plan(body).map_err(refused)?;
-        if self
-            .gate
-            .lock()
-            .map_err(|_| refused(err("desktop_poisoned")))?
-            .closing
-        {
-            return Err(refused(err("application_closed")));
-        }
-        chat.send(
-            "local",
-            api::chat_service::Prompt {
-                text: plan.prompt,
-                max_new_tokens: plan.max_new_tokens,
-                clamped: plan.clamped,
-            },
-        )
+        send_routed(&self.gate, chat, "local", body)
     }
     fn with_host(
         node: NodeService,
@@ -582,6 +627,10 @@ impl DesktopServices {
                     self.authority.as_deref(),
                     &self.network,
                 );
+                // v0.1.4's `chat` block (`chat.chat_status`, lane CHATS item 1).
+                if let Some(chat) = self.chat_status(&status) {
+                    status["chat"] = chat;
+                }
                 Self::json(status)
             }
             ("POST", "/chat/api/state") if body == json!({}) => {
