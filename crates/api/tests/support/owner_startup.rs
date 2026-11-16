@@ -349,6 +349,39 @@ fn product_stop_tokens_do_not_truncate_the_startup_challenge() {
     work.teardown().unwrap();
 }
 
+/// Lane CHATFIX item 2 (ledger row 112 a): a product chat ends at the run model's stop ids
+/// (`<|im_end|>` 151645, `<|endoftext|>` 151643: `Qwen2PromptCodec._stop_token_ids`,
+/// codec.py:135-139, set on the route by `route.set_stop_token_ids`, supervisor.py:1952-1955) and
+/// the stop token itself is never emitted: v0.1.4's route stops BEFORE `sink.emit` for a stop id
+/// (route.py:5094-5098; its codec decodes one to "", codec.py:177-179), so the page never shows
+/// `<|im_end|>`. Model-free: the final stage scripts the ids; the challenge (stop ids off for it)
+/// still sees all four.
+#[test]
+fn a_product_chat_ends_at_a_stop_id_and_never_emits_it() {
+    for stop in api::prompt_codec::QWEN_STOP_TOKEN_IDS {
+        let expected = [11, stop, 13, 14];
+        let mut s = swarm(2);
+        let (mut work, members, _) = challenged(
+            &mut s,
+            Some(challenge(&expected)),
+            scripts_emitting(&expected),
+        );
+        let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
+        let serving = activate_until_settled(&mut work);
+        assert_eq!(serving["state"], "api_running", "{stop}: {serving}");
+        let all = chat(&work.gateway().unwrap());
+        assert_eq!(token_ids(&all), [11], "{stop}: {all:?}");
+        assert!(
+            all.iter().all(|e| !e["text"]
+                .as_str()
+                .is_some_and(|t| t.contains("<|im_end|>") || t.contains("<|endoftext|>"))),
+            "{stop}: {all:?}"
+        );
+        assert_eq!(all.last().unwrap()["type"], "completed", "{stop}: {all:?}");
+        work.teardown().unwrap();
+    }
+}
+
 /// Proves: B-RUN-10 (lane Q, a member that dies mid-challenge: the route's own error ends the
 /// challenge (v0.1.4: a controller error -> `startup_route_rejected:<code>`, whose public code is
 /// the controller's, supervisor.py:3812-3814, 3920-3938; published by `_startup_failure`), the
