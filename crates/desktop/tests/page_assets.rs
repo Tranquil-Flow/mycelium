@@ -90,14 +90,39 @@ fn after_the_relay_window_closes_the_owner_can_start_a_relay_again_from_the_page
 /// and v0.1.4's page read that field nowhere: the joined Mac's page showed nothing while every poll
 /// got HTTP 530. The page now names the case on the joined Mac.
 ///
-/// Patch 2 (PHY-05): `renewal_error` is recorded by ANY failed renewal pass
-/// (`api::app_status::Recorded::renewal`), including a transient or local one that keeps the live
-/// Session and its work service (`api/src/app_host.rs`). So the line says only what the state
-/// shows: while this Mac's membership is still current it reads "renewal failed, retrying", with
-/// no claim that this Mac takes no part and no restart/reconnect advice; only a membership that is
-/// no longer current gets the instruction to have the owner start the relay again and reconnect.
+/// Patch 3 (PHY-05 residual): the line says only what the membership state shows, over the full
+/// matrix `peer::status_membership` projects (`crates/api/src/peer.rs`: `current`, `retained`,
+/// `absent`, a lease-`expired` session, and the terminal dispositions `expired`, `revoked`,
+/// `stale`, `unknown`). `renewal_error` is recorded by ANY failed renewal pass, and a reachable
+/// owner can answer `revoked`/`stale`, so only an expired membership gets the restart/reconnect
+/// advice (v0.2 records no confirmed-unreachable owner origin: `recovery_error` is not a reachability
+/// verdict). Revoked/stale: the owner ended or replaced this Mac's membership and must add it
+/// again. Retained: renewal is retrying. Unknown, and any state the page does not know: not known
+/// yet. (Replaces patch 2's test, which accepted ONE message for every non-current state.)
 #[test]
-fn a_joined_macs_relay_line_says_only_what_its_membership_shows() {
+fn a_joined_macs_relay_line_follows_the_full_membership_state_matrix() {
+    const PEER_RS: &str = include_str!("../../api/src/peer.rs");
+    const MATRIX: [&str; 7] = [
+        "current", "retained", "absent", "expired", "revoked", "stale", "unknown",
+    ];
+    // The matrix is the source's: every state is a literal of peer.rs and every terminal
+    // disposition is in the matrix.
+    for state in MATRIX {
+        assert!(
+            PEER_RS.contains(&format!("\"{state}\"")),
+            "peer.rs has no `{state}`"
+        );
+    }
+    let terminal = PEER_RS
+        .lines()
+        .find(|l| l.starts_with("const TERMINAL_STATES"))
+        .expect("peer.rs lost TERMINAL_STATES");
+    for state in terminal.split('"').skip(1).step_by(2) {
+        assert!(
+            MATRIX.contains(&state),
+            "a terminal state the page does not map: {state}"
+        );
+    }
     let script = script_without_comments(APP_JS);
     let line = script
         .lines()
@@ -105,45 +130,111 @@ fn a_joined_macs_relay_line_says_only_what_its_membership_shows() {
         .expect(
             "app.js never shows renewal_error: a joined Mac whose owner relay closed shows nothing",
         );
-    let (condition, _) = line
-        .split_once('`')
-        .unwrap_or_else(|| panic!("the line has no message: {line}"));
     assert!(
-        condition.contains("target") && condition.contains("value.renewal_error"),
+        line.contains("target") && line.contains("value.renewal_error"),
         "{line}"
     );
-    assert!(
-        condition
-            .replace(' ', "")
-            .ends_with("a.membership_state==='current'?"),
-        "the relay line must depend on whether this Mac's membership is still current: {line}"
-    );
-    let messages: Vec<&str> = line.split('`').skip(1).step_by(2).collect();
-    assert_eq!(
-        messages.len(),
-        2,
-        "one message per membership state: {line}"
-    );
-    let (retrying, lapsed) = (messages[0].to_lowercase(), messages[1].to_lowercase());
-    assert!(
-        retrying.contains("renewal") && retrying.contains("retr"),
-        "{retrying}"
-    );
-    for claim in [
-        "takes no part",
+    const ADVICE: [&str; 4] = [
         "start the relay again",
         "reconnect",
         "restart",
-    ] {
-        assert!(
-            !retrying.contains(claim),
-            "a single failed renewal with a current membership claims `{claim}`: {retrying}"
+        "new address",
+    ];
+    let advises = |m: &str| ADVICE.iter().find(|a| m.contains(*a)).copied();
+    for state in MATRIX.into_iter().chain(["", "some_new_state"]) {
+        let message = relay_message(&script, line, state).to_lowercase();
+        match state {
+            "current" => {
+                assert!(
+                    message.contains("retr") && message.contains("current"),
+                    "{state}: {message}"
+                );
+                assert!(!message.contains("takes no part"), "{state}: {message}");
+            }
+            "retained" => {
+                assert!(
+                    message.contains("renewal") && message.contains("retr"),
+                    "{state}: {message}"
+                );
+                assert!(!message.contains("takes no part"), "{state}: {message}");
+            }
+            "expired" => {
+                assert!(
+                    message.contains("expired")
+                        && message.contains("start the relay again")
+                        && message.contains("new address"),
+                    "{state}: {message}"
+                );
+                continue;
+            }
+            "revoked" | "stale" => assert!(
+                message.contains("ended or replaced") && message.contains("again"),
+                "{state}: {message}"
+            ),
+            "absent" => assert!(message.contains("no membership"), "{state}: {message}"),
+            _ => assert!(message.contains("not known yet"), "{state:?}: {message}"),
+        }
+        assert_eq!(
+            advises(&message),
+            None,
+            "only an expired membership gets the restart/reconnect advice; `{state}` does: {message}"
         );
+        assert!(!message.contains("cannot reach"), "{state}: {message}");
     }
-    assert!(
-        lapsed.contains("no longer current")
-            && lapsed.contains("start the relay again")
-            && lapsed.contains("new address"),
-        "{lapsed}"
-    );
+}
+
+/// The message the relay line shows for `state`: the page's state map (`relayLine` names an entry
+/// of `relayAdvice`, `?? '<key>'` for any other state), or the single ternary on
+/// `membership_state==='current'` the page had before patch 3.
+fn relay_message(script: &str, line: &str, state: &str) -> String {
+    let Some(map) = script.lines().find(|l| l.contains("const relayLine={")) else {
+        let messages: Vec<&str> = line.split('`').skip(1).step_by(2).collect();
+        assert!(
+            line.replace(' ', "")
+                .contains("a.membership_state==='current'?")
+                && messages.len() == 2,
+            "the relay line has neither a state map nor the current/other ternary: {line}"
+        );
+        return messages[if state == "current" { 0 } else { 1 }].to_owned();
+    };
+    let body = map
+        .split_once('{')
+        .and_then(|(_, rest)| rest.split_once('}'))
+        .map(|(body, _)| body)
+        .unwrap_or_else(|| panic!("unreadable relayLine: {map}"));
+    let pairs: Vec<(&str, &str)> = body
+        .split(',')
+        .map(|pair| {
+            let (key, value) = pair.split_once(':').unwrap_or_else(|| panic!("{pair}"));
+            (key.trim(), value.trim().trim_matches('\''))
+        })
+        .collect();
+    let fallback = line
+        .split_once("?? '")
+        .and_then(|(_, rest)| rest.split_once('\''))
+        .map(|(key, _)| key)
+        .unwrap_or_else(|| panic!("the relay line has no fallback for another state: {line}"));
+    let key = pairs
+        .iter()
+        .find(|(k, _)| *k == state)
+        .map_or(fallback, |(_, v)| *v);
+    let advice = script
+        .split_once("const relayAdvice={")
+        .and_then(|(_, rest)| rest.split_once("};"))
+        .map(|(body, _)| body)
+        .expect("app.js has no relayAdvice");
+    let mut parts = advice.split('`');
+    while let Some(name) = parts.next() {
+        let Some(text) = parts.next() else { break };
+        if name
+            .trim()
+            .trim_start_matches(',')
+            .trim()
+            .trim_end_matches(':')
+            == key
+        {
+            return text.to_owned();
+        }
+    }
+    panic!("relayAdvice has no `{key}` (for state `{state}`)")
 }
