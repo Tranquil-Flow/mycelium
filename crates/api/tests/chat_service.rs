@@ -10,6 +10,7 @@ use api::chat_service::{
     ChatService, ChatTeardown, Clock, GatewayError, HttpRouteGateway, MonotonicClock, Prompt,
     RequestCancel, RouteGateway, RunChats, RunRoute, Streamed, Teardown, TimingFile,
 };
+use api::prompt_codec::ChatPrompt;
 use budgets::{BudgetId as B, Entries};
 use fake_route_gateway::{End, FakeGateway, Script};
 use serde_json::{Value, json};
@@ -171,7 +172,12 @@ fn a_chat_streams_the_gateways_tokens_into_its_events_with_the_runs_served_by() 
         ),
         (
             &json!("mycelium.request_gateway.v2"),
-            &json!("hi there"),
+            // The run model's chat envelope (lane CHATFIX; this line pinned the raw text before).
+            &json!(
+                api::prompt_codec::PromptCodec::Qwen3
+                    .chat("hi there")
+                    .as_str()
+            ),
             &json!(3),
             &json!("fake-route"),
             &json!("interactive_chat_v1"),
@@ -511,7 +517,7 @@ struct Scripted {
 impl RouteGateway for Scripted {
     fn stream(
         &self,
-        _: &str,
+        _: &ChatPrompt,
         _: u64,
         _: &RequestCancel,
         on_token: &mut dyn FnMut(&str),
@@ -771,7 +777,7 @@ struct Panics;
 impl RouteGateway for Panics {
     fn stream(
         &self,
-        _: &str,
+        _: &ChatPrompt,
         _: u64,
         _: &RequestCancel,
         _: &mut dyn FnMut(&str),
@@ -810,12 +816,12 @@ struct Recording(Mutex<Vec<String>>);
 impl RouteGateway for Recording {
     fn stream(
         &self,
-        prompt: &str,
+        prompt: &ChatPrompt,
         _: u64,
         _: &RequestCancel,
         on_token: &mut dyn FnMut(&str),
     ) -> Result<Streamed, GatewayError> {
-        self.0.lock().unwrap().push(prompt.to_owned());
+        self.0.lock().unwrap().push(prompt.as_str().to_owned());
         on_token("ok");
         Ok(Streamed {
             terminal: Some("completed"),
@@ -916,4 +922,82 @@ fn a_model_without_a_codec_is_refused_by_name_and_never_sent_raw() {
             "{model:?}: a refused send leaves the service free"
         );
     }
+}
+
+/// Lane CHATFIX: the seam's codecs against v0.1.4's EXECUTED codecs (FX-CHATFIX-prompt-codec):
+/// the text of every probed prompt byte for byte (braces, Unicode, ChatML-looking text and
+/// whitespace stay verbatim), the protocol, the stop ids, and the selection by architecture
+/// (`prompt_codec_from_deployment` executed on each `model_type`).
+#[test]
+fn the_seams_codecs_are_v014s_executed_codecs() {
+    use api::prompt_codec::{PromptCodec, QWEN_STOP_TOKEN_IDS, UNSUPPORTED};
+    let fixture: Value = serde_json::from_str(CODEC_FIXTURE).unwrap();
+    assert_eq!(
+        fixture["oracle"],
+        "f4e366e98a1f705dfaf182897044500d290dbd7f"
+    );
+    assert_eq!(fixture["oracle_tree_dirty"], false);
+    for (codec, name) in [(PromptCodec::Qwen3, "qwen3"), (PromptCodec::Qwen2, "qwen2")] {
+        let oracle = &fixture[name];
+        assert_eq!(codec.protocol(), oracle["protocol"], "{name}");
+        assert_eq!(
+            json!(codec.stop_token_ids()),
+            oracle["stop_token_ids"],
+            "{name}"
+        );
+        let cases = oracle["cases"].as_array().unwrap();
+        assert_eq!(cases.len(), 12, "{name}");
+        for case in cases {
+            let user = case["user"].as_str().unwrap();
+            assert_eq!(
+                codec.chat(user).as_str(),
+                case["templated"],
+                "{name} {user:?}"
+            );
+        }
+    }
+    assert_eq!(QWEN_STOP_TOKEN_IDS, [151_643, 151_645]);
+    let selection = &fixture["selection_by_model_type"];
+    for (model_type, codec) in [
+        ("qwen2", Some(PromptCodec::Qwen2)),
+        ("qwen3", Some(PromptCodec::Qwen3)),
+        ("llama", None),
+        ("mistral", None),
+    ] {
+        let ours = PromptCodec::for_architecture(model_type).map_err(|e| e.code);
+        match codec {
+            Some(codec) => {
+                assert_eq!(ours, Ok(codec), "{model_type}");
+                let class = if codec == PromptCodec::Qwen3 {
+                    "Qwen3PromptCodec"
+                } else {
+                    "Qwen2PromptCodec"
+                };
+                assert_eq!(selection[model_type], class, "{model_type}");
+            }
+            None => {
+                assert_eq!(ours, Err(UNSUPPORTED), "{model_type}");
+                assert!(
+                    selection[model_type]
+                        .as_str()
+                        .unwrap()
+                        .starts_with("refused:unsupported_prompt_codec:"),
+                    "{model_type}"
+                );
+            }
+        }
+    }
+    // v0.1.4 also selects Qwen3.5 (`qwen3_5`, `qwen3_5_moe`); no registered v0.2 model has it, its
+    // tokenizer and stop ids differ, so the seam refuses it by name rather than guessing.
+    assert_eq!(selection["qwen3_5"], "Qwen35PromptCodec");
+    assert_eq!(
+        PromptCodec::for_architecture("qwen3_5").map_err(|e| e.code),
+        Err(UNSUPPORTED)
+    );
+    // The snapshot the fixture was executed on selects Qwen3, as the catalog's contract does.
+    assert_eq!(fixture["snapshot"]["model_type"], "qwen3");
+    assert_eq!(
+        PromptCodec::for_model("Qwen/Qwen3-0.6B").map_err(|e| e.code),
+        Ok(PromptCodec::Qwen3)
+    );
 }

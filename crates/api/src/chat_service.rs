@@ -13,7 +13,12 @@
 //! appends one JSON line `{ttft_ms, decode_millitokens_s, request_ms, run_id}` (the fields of
 //! chat.py:392-395, v0.1.4 keeps them in memory only) to the owner's timing file, which is
 //! refused under v0.1.4's app folder (rulings 20/25).
-use crate::{chat::ChatError, schema::PublicError, sse_client};
+use crate::{
+    chat::ChatError,
+    prompt_codec::{ChatPrompt, PromptCodec},
+    schema::PublicError,
+    sse_client,
+};
 use base64::Engine as _;
 use budgets::{BudgetId, Entries};
 use serde_json::{Value, json};
@@ -27,7 +32,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// A prompt the caller already validated as `ChatService.send` does (chat.py:303-313).
+/// A prompt the caller already validated as `ChatService.send` does (chat.py:303-313): the user's
+/// own text. The service wraps it in the run model's chat envelope ([`crate::prompt_codec`]) before
+/// any gateway sees it.
 #[derive(Clone, Debug)]
 pub struct Prompt {
     pub text: String,
@@ -121,10 +128,12 @@ impl RequestCancel {
 /// The run's route gateway: ONE object per run (EP-PLAN U7), one `stream` call per chat.
 pub trait RouteGateway: Send + Sync {
     /// `RegistryClient.stream` (chat.py:106-147): qualification, submit, the event stream until
-    /// its terminal. `cancel` is armed once the gateway accepted the request.
+    /// its terminal. `cancel` is armed once the gateway accepted the request. `prompt` is already
+    /// in the run model's chat envelope (v0.1.4's gateway codec, backend.py:196-209): a
+    /// [`ChatPrompt`] is made only by [`PromptCodec::chat`].
     fn stream(
         &self,
-        prompt: &str,
+        prompt: &ChatPrompt,
         max_new_tokens: u64,
         cancel: &RequestCancel,
         on_token: &mut dyn FnMut(&str),
@@ -290,7 +299,7 @@ impl HttpRouteGateway {
 impl RouteGateway for HttpRouteGateway {
     fn stream(
         &self,
-        prompt: &str,
+        prompt: &ChatPrompt,
         max_new_tokens: u64,
         cancel: &RequestCancel,
         on_token: &mut dyn FnMut(&str),
@@ -304,7 +313,7 @@ impl RouteGateway for HttpRouteGateway {
                 return Err(http_code("get", "/v1/qualification/current", status, &body));
             }
         };
-        let document = json!({"protocol":"mycelium.request_gateway.v2","prompt":prompt,
+        let document = json!({"protocol":"mycelium.request_gateway.v2","prompt":prompt.as_str(),
             "max_new_tokens":max_new_tokens,"qualification":qualification,
             "workload_profile_id":"interactive_chat_v1","qos_class":"interactive"});
         let accepted =
@@ -658,7 +667,11 @@ impl ChatService {
         }
         Ok(())
     }
-    /// `send` (chat.py:300-340) after the body checks.
+    /// `send` (chat.py:300-340) after the body checks. The prompt goes to the gateway only in the
+    /// run model's chat envelope (lane CHATFIX): v0.1.4's gateway encodes every prompt with the
+    /// deployment's codec (backend.py:196-209, codec.py:153-157), and a deployment whose model has
+    /// no codec never serves (`unsupported_prompt_codec`, codec.py:287), so such a run's chat is
+    /// refused by that name before it counts against any limit.
     pub fn send(&self, client: &str, prompt: Prompt) -> Result<Value, ChatError> {
         let Some((serving, gateway)) = self.serving_route() else {
             let status = self.inner.run.status().unwrap_or(Value::Null);
@@ -679,6 +692,18 @@ impl ChatService {
                 },
             ));
         };
+        let codec = self
+            .inner
+            .run
+            .model_id()
+            .ok_or_else(|| ChatError::new(503, crate::prompt_codec::UNSUPPORTED))
+            .and_then(|model| {
+                PromptCodec::for_model(&model).map_err(|error| ChatError {
+                    error,
+                    retry_after: None,
+                })
+            })?;
+        let chat_prompt = codec.chat(&prompt.text);
         let kept = count(BudgetId::PyMyceliumA13MacosChatMaxKeptRequestsL44)?;
         let (id, record_view) = {
             let mut state = self.state_lock();
@@ -725,7 +750,7 @@ impl ChatService {
         let worker_id = id.clone();
         let spawned = std::thread::Builder::new()
             .name("a13-chat".into())
-            .spawn(move || this.work(&worker_id, gateway, &prompt.text));
+            .spawn(move || this.work(&worker_id, gateway, &chat_prompt));
         let mut workers = self.inner.workers.lock().unwrap_or_else(|p| p.into_inner());
         workers.retain(|w| !w.is_finished());
         match spawned {
@@ -751,7 +776,7 @@ impl ChatService {
         }
     }
     /// `_work` (chat.py:342-398).
-    fn work(&self, id: &str, gateway: Arc<dyn RouteGateway>, prompt: &str) {
+    fn work(&self, id: &str, gateway: Arc<dyn RouteGateway>, prompt: &ChatPrompt) {
         let _finally = Finally { service: self, id };
         let (run_id, max_new_tokens, cancel) = {
             let state = self.state_lock();

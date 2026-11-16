@@ -377,7 +377,7 @@ struct MustNotRunGateway;
 impl RouteGateway for MustNotRunGateway {
     fn stream(
         &self,
-        _: &str,
+        _: &api::prompt_codec::ChatPrompt,
         _: u64,
         _: &api::chat_service::RequestCancel,
         _: &mut dyn FnMut(&str),
