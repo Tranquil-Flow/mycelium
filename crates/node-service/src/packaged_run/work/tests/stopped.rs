@@ -17,7 +17,7 @@ use owner_run::owner_chain::ChainPorts as _;
 use owner_run::steps::model::{ModelStepOutput, PreparedModel, PreparedSource};
 
 /// `ctx.state['model']` as the model step leaves it (an inert fixture; nothing is loaded).
-fn chosen_model() -> ModelStepOutput {
+pub(super) fn chosen_model() -> ModelStepOutput {
     ModelStepOutput {
         forced_slice: false,
         model_id: "Qwen/Qwen3-0.6B".into(),
