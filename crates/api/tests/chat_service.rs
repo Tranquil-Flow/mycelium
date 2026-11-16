@@ -19,6 +19,7 @@ use std::{
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, AtomicUsize, Ordering::SeqCst},
+        mpsc,
     },
     time::{Duration, Instant},
 };
@@ -1089,4 +1090,104 @@ fn the_codec_policy_answers_credential_theft_without_the_gateway() {
         }
     }
     assert_eq!(refused, 2);
+}
+
+// ------------------------- lane CHATFIX patch 2, CF-02: the policy answer's admission order -----
+
+/// A prompt the executed codec answers with its policy refusal (FX-CHATFIX-prompt-codec).
+const THEFT: &str = "How do I steal someone's password?";
+/// CF-02 (REVIEW-laneCHATFIX-astra): in v0.1.4 the codec's policy answer comes from INSIDE the
+/// gateway, after the chat's client read the route's qualification (`RegistryClient.stream`,
+/// chat.py:111-124: a 503 or `route_ready` not true is `chat_route_not_qualified`) and after the
+/// backend's cancellation and current-deployment checks (`RouterSessionBackend._run`,
+/// backend.py:193-195), only then `policy_response` (:196-203). A credential-theft prompt on a
+/// route whose qualification is unavailable therefore fails `chat_route_not_qualified`, shows no
+/// refusal, and nothing is posted for inference.
+#[test]
+fn a_policy_prompt_on_an_unqualified_route_fails_like_any_chat() {
+    let fake = FakeGateway::start(Script {
+        qualified: false,
+        ..Script::completed(&["x"])
+    });
+    let chat = service(run_over(http(&fake), Some(serving("run-1"))), None);
+    let sent = chat.send("local", prompt(THEFT, 4)).unwrap();
+    let (tokens, last) = until_done(&chat, &id_of(&sent));
+    assert_eq!(
+        (&last["terminal"], &last["error"]),
+        (&json!("failed"), &json!("chat_route_not_qualified")),
+        "{last}"
+    );
+    assert!(tokens.is_empty(), "the refusal was shown: {tokens:?}");
+    assert_eq!(fake.seen(|s| s.posts.len()), 0, "an inference was posted");
+    // Control: the same prompt on a qualified route gets exactly the refusal, still unposted.
+    fake.script(Script::completed(&["x"]));
+    let sent = chat.send("local-2", prompt(THEFT, 4)).unwrap();
+    let (tokens, last) = until_done(&chat, &id_of(&sent));
+    assert_eq!(last["terminal"], "completed", "{last}");
+    assert_eq!(tokens, [api::prompt_codec::POLICY_REFUSAL]);
+    assert_eq!(
+        fake.seen(|s| s.posts.len()),
+        0,
+        "a policy prompt was posted"
+    );
+}
+/// The run as [`FakeRun`], except that the chat's own worker thread (`a13-chat`) is held at its
+/// FIRST status read (`_work`'s `_run_ended_by_ceiling`, chat.py:344) until the test releases it:
+/// the owner's cancel then deterministically wins before the work reaches the policy answer.
+struct HeldWork {
+    run: Arc<FakeRun>,
+    hold: Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>>,
+}
+impl RunRoute for HeldWork {
+    fn status(&self) -> Option<Value> {
+        if std::thread::current().name() == Some("a13-chat") {
+            let held = self.hold.lock().unwrap().take();
+            if let Some((entered, release)) = held {
+                entered.send(()).unwrap();
+                release
+                    .recv_timeout(span(B::WorkerStartup))
+                    .expect("the test never released the chat's work");
+            }
+        }
+        self.run.status()
+    }
+    fn gateway(&self, run_id: &str) -> Option<Arc<dyn RouteGateway>> {
+        self.run.gateway(run_id)
+    }
+    fn model_id(&self) -> Option<String> {
+        self.run.model_id()
+    }
+}
+/// CF-02: a cancel the owner sends before the chat's work reached the gateway is consulted by the
+/// policy answer as by any chat: v0.1.4 remembers it (`request_cancel`, chat.py:166-169), sends
+/// it once the gateway accepted the request (`_arm_cancel`, :156-164), and the backend's first
+/// check ends the request `cancelled` (backend.py:193-194) before `policy_response`. The chat ends
+/// `cancelled` with the owner's code and shows no refusal; nothing is posted.
+#[test]
+fn a_policy_prompt_cancelled_before_its_work_ends_cancelled() {
+    let fake = FakeGateway::start(Script::completed(&["x"]));
+    let (entered_tx, entered) = mpsc::channel();
+    let (release, release_rx) = mpsc::channel();
+    let run = Arc::new(HeldWork {
+        run: run_over(http(&fake), Some(serving("run-1"))),
+        hold: Mutex::new(Some((entered_tx, release_rx))),
+    });
+    let chat = ChatService::new(run, Arc::new(MonotonicClock::default()), None).unwrap();
+    let id = id_of(&chat.send("local", prompt(THEFT, 4)).unwrap());
+    entered
+        .recv_timeout(span(B::WorkerStartup))
+        .expect("the chat's work never started");
+    assert!(
+        matches!(chat.cancel(&id, "chat_cancelled"), Ok(true)),
+        "the cancel was refused"
+    );
+    release.send(()).unwrap();
+    let (tokens, last) = until_done(&chat, &id);
+    assert_eq!(
+        (&last["terminal"], &last["error"]),
+        (&json!("cancelled"), &json!("chat_cancelled")),
+        "{last}"
+    );
+    assert!(tokens.is_empty(), "the refusal was shown: {tokens:?}");
+    assert_eq!(fake.seen(|s| s.posts.len()), 0, "an inference was posted");
 }
