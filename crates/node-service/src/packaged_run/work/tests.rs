@@ -522,7 +522,9 @@ fn both_demo_stages_fit_the_owners_self_grant_at_the_contracts_serving_context()
             Err(StepError::Refused(e)) => {
                 assert_eq!(e.code, "stage_memory_consent_below_context");
                 assert!(
-                    e.message.as_deref().is_some_and(|m| m.contains("Mac owner")),
+                    e.message
+                        .as_deref()
+                        .is_some_and(|m| m.contains("Mac owner")),
                     "{e:?}"
                 );
             }
@@ -550,8 +552,7 @@ fn the_owners_fresh_self_grant_holds_five_thousand_commands() {
     let share = json!({"max_wall_seconds": 1800, "max_rss_bytes": 2_625_486_324u64,
         "max_disk_bytes": 1_074_471_271u64});
     assert_eq!(
-        standing_consent::standing_limits(&grant, Some(&share))
-            .map(|l| l["max_commands"].clone()),
+        standing_consent::standing_limits(&grant, Some(&share)).map(|l| l["max_commands"].clone()),
         Ok(json!(5000)),
         "{grant:?}"
     );

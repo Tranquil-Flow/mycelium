@@ -56,7 +56,10 @@ pub fn at_product_context_bytes(oracle_bytes: &str) -> String {
         .iter()
         .map(|m| {
             (
-                rss(model_catalog::whole_model_member_at(m.model_id, ORACLE_CONTEXT_TOKENS)),
+                rss(model_catalog::whole_model_member_at(
+                    m.model_id,
+                    ORACLE_CONTEXT_TOKENS,
+                )),
                 rss(model_catalog::whole_model_member(m.model_id)),
             )
         })

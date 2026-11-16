@@ -70,8 +70,11 @@ fn ceilings_and_consent_documents_equal_model_resources_py() {
                 Some(expect["selected"]["model_id"].as_str().unwrap())
             };
             let commit = expect["selected"]["resolved_commit"].as_str();
-            let got =
-                model_catalog::consent_document_at(selected.zip(commit), mem, ORACLE_CONTEXT_TOKENS);
+            let got = model_catalog::consent_document_at(
+                selected.zip(commit),
+                mem,
+                ORACLE_CONTEXT_TOKENS,
+            );
             assert_eq!(&got, expect, "memory {label}, model {key}");
             checked += 1;
         }
@@ -223,7 +226,10 @@ fn the_serving_context_divergence_from_the_oracle_is_recorded() {
     let context = &record["diverged"]["serving_context_tokens"];
     assert_eq!(context["oracle_value"], json!(ORACLE_CONTEXT_TOKENS));
     for key in ["oracle_source", "product_source", "ruling", "reason"] {
-        assert!(context[key].as_str().is_some_and(|s| !s.is_empty()), "{key}");
+        assert!(
+            context[key].as_str().is_some_and(|s| !s.is_empty()),
+            "{key}"
+        );
     }
     for model in model_catalog::registered() {
         assert_eq!(
