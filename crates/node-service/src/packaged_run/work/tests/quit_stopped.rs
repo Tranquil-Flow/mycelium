@@ -384,6 +384,68 @@ fn quit_publishes_stopped_to_a_mac_reading_through_the_relay_before_the_relay_cl
     );
 }
 
+/// Proves: CP-01's read chance (Mac B at its own cadence). A joined Mac does not poll at once:
+/// its standing loop waits 2 s between passes (`self.closed.wait(2)`, app.py:1203 @ f4e366e9).
+/// Here Mac B read `serving` through the relay while the teardown was held, then, the teardown
+/// released, waits until the owner's run reads `stopped` and one standing-loop wait more before
+/// its next read: the relay must still carry that read, and it reads `stopped`. A relay closed as
+/// soon as the run's close ended would be gone by then.
+#[test]
+fn a_mac_at_its_standing_cadence_reads_stopped_before_the_relay_closes() {
+    let s = served();
+    let allowance = desktop::lifecycle::quit_allowance().unwrap();
+    let verdict = quit(s.services, &s.config, &s.f);
+    s.torn
+        .recv_timeout(patience())
+        .expect("Quit stops the run: its teardown begins");
+    let held = s.mac_b.read(s.port).map(|a| a["phase"].clone());
+    s.release.send(()).unwrap_or_default();
+    assert_eq!(
+        held,
+        Ok(json!("serving")),
+        "the relay closed during the teardown"
+    );
+    let end = Instant::now() + patience();
+    loop {
+        let status = s
+            .config
+            .observed()
+            .and_then(|view| view.status())
+            .map_or(Value::Null, |s| s.to_value());
+        if status["state"] == "stopped" {
+            break;
+        }
+        assert!(Instant::now() < end, "the run never stopped: {status}");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    std::thread::sleep(
+        span(BudgetId::PyMyceliumA13MacosAppDemoappStandingLoopSelfClosedWaitL1203).unwrap(),
+    );
+    let read = s.mac_b.read(s.port);
+    let (verdict, took) = verdict
+        .recv_timeout(Duration::from_millis(allowance.millis()) + patience())
+        .expect("Quit ends");
+    eprintln!(
+        "CHATPAGE_P2_QUIT_STANDING_CADENCE verdict={verdict:?} took_ms={} read={read:?}",
+        took.as_millis()
+    );
+    let read = read.expect("the relay still carried Mac B's next standing read");
+    assert_eq!(
+        (&read["phase"], &read["run_id"]),
+        (&json!("stopped"), &json!(s.run_id)),
+        "{read}"
+    );
+    assert_eq!(verdict, Ok(Poll::Verified), "Quit after {took:?}");
+    assert!(
+        took < Duration::from_millis(allowance.millis() / 2),
+        "{took:?}"
+    );
+    assert!(
+        std::net::TcpStream::connect(("127.0.0.1", s.port)).is_err(),
+        "Quit left the relay listening"
+    );
+}
+
 /// Proves: CP-01's bound (Quit stays bounded when Mac B is absent). Mac B read through the relay,
 /// then stopped polling (it quit, or its network went): the run's teardown announces `stopped`,
 /// nobody reads it, and Quit still ends `Verified` well within its allowance, the relay closed.
