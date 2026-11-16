@@ -798,3 +798,122 @@ fn a_gateway_that_panics_does_not_leave_the_service_busy() {
         .map(|e| e.error.code);
     assert_eq!(next, None, "the service stayed busy after a panic");
 }
+
+// ------------------------------------------------- lane CHATFIX: the model's chat envelope -----
+
+/// FX-CHATFIX-prompt-codec: v0.1.4's `Qwen3PromptCodec` / `Qwen2PromptCodec` EXECUTED on the
+/// pinned Qwen3-0.6B snapshot (`mycelium_live/codec.py:17-36,120-180,240-253 @ f4e366e9`).
+const CODEC_FIXTURE: &str = include_str!("fixtures/prompt-codec-oracle.json");
+/// A gateway that records the exact prompt text each chat hands it, then completes.
+#[derive(Default)]
+struct Recording(Mutex<Vec<String>>);
+impl RouteGateway for Recording {
+    fn stream(
+        &self,
+        prompt: &str,
+        _: u64,
+        _: &RequestCancel,
+        on_token: &mut dyn FnMut(&str),
+    ) -> Result<Streamed, GatewayError> {
+        self.0.lock().unwrap().push(prompt.to_owned());
+        on_token("ok");
+        Ok(Streamed {
+            terminal: Some("completed"),
+            code: None,
+        })
+    }
+}
+/// The run serving `run-1` with `model` as its run model (`app.run_model_contract().model_id`).
+struct ModelRun {
+    model: Option<&'static str>,
+    gateway: Arc<dyn RouteGateway>,
+}
+fn model_service(model: Option<&'static str>, gateway: Arc<Recording>) -> ChatService {
+    ChatService::new(
+        Arc::new(ModelRun { model, gateway }),
+        Arc::new(MonotonicClock::default()),
+        None,
+    )
+    .unwrap()
+}
+impl RunRoute for ModelRun {
+    fn status(&self) -> Option<Value> {
+        Some(serving("run-1"))
+    }
+    fn gateway(&self, _: &str) -> Option<Arc<dyn RouteGateway>> {
+        Some(self.gateway.clone())
+    }
+    fn model_id(&self) -> Option<String> {
+        self.model.map(str::to_owned)
+    }
+}
+
+/// Lane CHATFIX item 1 (ledger row 112 a): v0.1.4's gateway encodes every chat prompt with the
+/// deployment's codec (`RouterSessionBackend._run`, backend.py:196-209: `codec.encode(prompt)` =
+/// `TEMPLATE.format(system=_SYSTEM, prompt=prompt)` then the tokenizer, codec.py:153-157); the
+/// codec is chosen by architecture (`prompt_codec_from_deployment`, codec.py:270-287): `qwen3` ->
+/// ChatML + system + the closed empty think block, `qwen2` -> ChatML + system. rv40's route chat
+/// sent the user's RAW text, so the model continued it. Every registered model's chat must reach
+/// the gateway as exactly the executed codec's text, byte for byte, for every probed prompt.
+#[test]
+fn every_chat_reaches_the_gateway_in_the_run_models_v014_codec_envelope() {
+    let fixture: Value = serde_json::from_str(CODEC_FIXTURE).unwrap();
+    for (model, codec) in [
+        ("Qwen/Qwen3-0.6B", "qwen3"),
+        ("Qwen/Qwen3-8B", "qwen3"),
+        ("Qwen/Qwen3-14B", "qwen3"),
+        ("Qwen/Qwen2.5-0.5B-Instruct", "qwen2"),
+        ("Qwen/Qwen2.5-7B-Instruct", "qwen2"),
+    ] {
+        let gateway = Arc::new(Recording::default());
+        let chat = model_service(Some(model), gateway.clone());
+        let mut expected = Vec::new();
+        for (i, case) in fixture[codec]["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .enumerate()
+        {
+            let user = case["user"].as_str().unwrap();
+            if user.trim().is_empty() || !case["policy_response"].is_null() {
+                // The body check refuses a blank prompt before the service; the policy's
+                // fixed answers never reach the gateway (item 1b, its own test).
+                continue;
+            }
+            let sent = chat
+                .send(&format!("client-{i}"), prompt(user, 4))
+                .unwrap_or_else(|e| panic!("{model} {user:?}: {:?}", e.error));
+            let (tokens, last) = until_done(&chat, &id_of(&sent));
+            assert_eq!(last["terminal"], "completed", "{model} {user:?}: {last}");
+            assert_eq!(tokens, ["ok"], "{model} {user:?}");
+            expected.push(case["templated"].as_str().unwrap().to_owned());
+        }
+        assert_eq!(*gateway.0.lock().unwrap(), expected, "{model}");
+    }
+}
+
+/// Lane CHATFIX item 1: a run model with no v0.1.4 codec (`prompt_codec_from_deployment` raises
+/// `unsupported_prompt_codec:<model_type>`, codec.py:287) is refused by name; its prompt never
+/// reaches the gateway raw. So is a run whose model is not known at all.
+#[test]
+fn a_model_without_a_codec_is_refused_by_name_and_never_sent_raw() {
+    for model in [Some("meta-llama/Llama-3.1-8B-Instruct"), None] {
+        let gateway = Arc::new(Recording::default());
+        let chat = model_service(model, gateway.clone());
+        let refused = chat
+            .send("local", prompt("What is the capital of France?", 4))
+            .err()
+            .map(|e| (e.error.status, e.error.code));
+        assert_eq!(
+            refused,
+            Some((503, "unsupported_prompt_codec")),
+            "{model:?}"
+        );
+        assert!(gateway.0.lock().unwrap().is_empty(), "{model:?}");
+        assert_eq!(
+            chat.busy(),
+            false,
+            "{model:?}: a refused send leaves the service free"
+        );
+    }
+}

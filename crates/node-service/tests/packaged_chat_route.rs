@@ -686,3 +686,131 @@ fn the_runs_handle_ends_the_route_chat_with_the_shipped_code_for_every_teardown(
         quit(&host.services);
     }
 }
+
+// ------------------------------------------------- lane CHATFIX: the model's chat envelope -----
+
+/// FX-CHATFIX-prompt-codec (v0.1.4 `Qwen3PromptCodec` / `Qwen2PromptCodec` executed on the pinned
+/// Qwen3-0.6B snapshot, `mycelium_live/codec.py @ f4e366e9`).
+const CODEC_FIXTURE: &str = include_str!("../../api/tests/fixtures/prompt-codec-oracle.json");
+/// The codec's text for `user` (`TEMPLATE.format(system=_SYSTEM, prompt=user)`), from the fixture.
+fn templated(codec: &str, user: &str) -> String {
+    let fixture: Value = serde_json::from_str(CODEC_FIXTURE).unwrap();
+    fixture[codec]["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["user"] == user)
+        .unwrap_or_else(|| panic!("{user:?} is not a fixture case"))["templated"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+const FRANCE: &str = "What is the capital of France?";
+/// The owner run serving `run-1` with `model` as its run model, over `gateway`.
+struct ModelRun(Arc<dyn RouteGateway>, &'static str);
+impl RunRoute for ModelRun {
+    fn status(&self) -> Option<Value> {
+        Some(serving_status())
+    }
+    fn gateway(&self, _: &str) -> Option<Arc<dyn RouteGateway>> {
+        Some(self.0.clone())
+    }
+    fn model_id(&self) -> Option<String> {
+        Some(self.1.into())
+    }
+}
+/// The relay's `/chat` handler (`_bind_public_routes`, app.py:1070-1077: `chat.handle(...,
+/// via_relay=True)`), called as the relay's loopback proxy calls it.
+fn relay_send(host: &DesktopServices, body: Value) -> (i64, Value) {
+    let handler = host
+        .network()
+        .relay_chat()
+        .expect("with_chat_run binds the relay's chat");
+    let answer = handler(
+        "POST",
+        "/chat/api/send",
+        &[
+            ("Content-Type".into(), "application/json".into()),
+            ("X-Mycelium-Chat".into(), "1".into()),
+            ("Cf-Connecting-Ip".into(), "203.0.113.7".into()),
+        ],
+        &serde_json::to_vec(&body).unwrap(),
+    )
+    .expect("the relay chat answers");
+    (
+        answer.status,
+        serde_json::from_slice(&answer.raw).unwrap_or(Value::Null),
+    )
+}
+
+/// Lane CHATFIX item 1 (ledger row 112 a): on rv40 the route chat sent the user's RAW prompt to the
+/// model, which continued it (` The capital of France is Paris. The answer is Paris. ...` to the
+/// 128-token cap). v0.1.4 wraps every chat prompt in the deployment codec's envelope before
+/// tokenising (`RouterSessionBackend._run`, backend.py:196-209; `Qwen3PromptCodec`, codec.py:240-
+/// 253: ChatML + system + `<think>\n\n</think>\n\n`). The page (`local`) and the relay
+/// (`via_relay`) reach the SAME seam: the gateway receives exactly the executed codec's text for
+/// the run's model, from both entries.
+#[test]
+fn the_page_and_the_relay_hand_the_gateway_the_run_models_v014_codec_text() {
+    let oracle = "Explain how rain forms and why plants need it. Give a detailed answer.";
+    for (model, codec) in [
+        ("Qwen/Qwen3-0.6B", "qwen3"),
+        ("Qwen/Qwen2.5-0.5B-Instruct", "qwen2"),
+    ] {
+        let fake = FakeGateway::start(Script::completed(&["Paris", "."]));
+        let host = host_over(Arc::new(ModelRun(http(&fake), model)), Arc::new(MustNotRun));
+        let (status, sent) = call(
+            &host.services,
+            "/chat/api/send",
+            json!({"prompt": FRANCE, "max_new_tokens": 8}),
+        );
+        assert_eq!(status, 200, "{model}: {sent}");
+        let (text, last) = until_done(&host.services, &sent["request_id"]);
+        assert_eq!(
+            (text.as_str(), &last["terminal"]),
+            ("Paris.", &json!("completed"))
+        );
+        let (status, sent) = relay_send(
+            &host.services,
+            json!({"prompt": oracle, "max_new_tokens": 8}),
+        );
+        assert_eq!(status, 200, "{model}: {sent}");
+        let (_, last) = until_done(&host.services, &sent["request_id"]);
+        assert_eq!(last["terminal"], "completed", "{model}: {last}");
+        let prompts: Vec<Value> =
+            fake.seen(|s| s.posts.iter().map(|p| p["prompt"].clone()).collect());
+        assert_eq!(
+            prompts,
+            [
+                json!(templated(codec, FRANCE)),
+                json!(templated(codec, oracle))
+            ],
+            "{model}: page then relay"
+        );
+        quit(&host.services);
+    }
+}
+
+/// Lane CHATFIX item 1: a run model with no v0.1.4 codec is refused by name on both entries
+/// (`unsupported_prompt_codec`, codec.py:287); nothing reaches the gateway.
+#[test]
+fn a_run_model_without_a_codec_is_refused_on_the_page_and_the_relay() {
+    let fake = FakeGateway::start(Script::completed(&["x"]));
+    let host = host_over(
+        Arc::new(ModelRun(http(&fake), "meta-llama/Llama-3.1-8B-Instruct")),
+        Arc::new(MustNotRun),
+    );
+    let page = call(
+        &host.services,
+        "/chat/api/send",
+        json!({"prompt": FRANCE, "max_new_tokens": 8}),
+    );
+    assert_eq!(page, (503, json!({"error": "unsupported_prompt_codec"})));
+    let relay = relay_send(
+        &host.services,
+        json!({"prompt": FRANCE, "max_new_tokens": 8}),
+    );
+    assert_eq!(relay, (503, json!({"error": "unsupported_prompt_codec"})));
+    assert_eq!(fake.seen(|s| s.posts.len()), 0);
+    quit(&host.services);
+}
