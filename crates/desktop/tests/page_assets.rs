@@ -238,3 +238,74 @@ fn relay_message(script: &str, line: &str, state: &str) -> String {
     }
     panic!("relayAdvice has no `{key}` (for state `{state}`)")
 }
+
+/// Lane CHATS item 3 (owner ruling 14 Nov, ledger rows 17 and 106 b): one chat path, through the
+/// run's route; no one-Mac native chat in the packaged app. The page still carried v0.1.4's
+/// `#inference` card ("03 · Native model-stage work", index.html:39 @ f4e366e9, with its nav link
+/// at :6): a Prompt box reading "Available only after this Mac has a qualified assignment" and a
+/// "Run on qualified route" button (inert: app.js only prevents the form's submit), beside the model
+/// download. On rv39 the owner typed into it during a serving run and pressed "Download / resume
+/// source". The one-Mac prompt and its button are gone from the shipped page, and so is the nav
+/// link. The card itself is hidden: its model download is still the owner's model-prepare step
+/// (owner-run `NOT_PREPARED_MESSAGE` names it, run.js points at `#acquisition` for the
+/// `prepare_model` fix), so the page shows the card only when the owner's last run stopped with
+/// that fix, or while a download it started is running, never during a run that serves.
+#[test]
+fn the_shipped_page_offers_no_one_mac_chat_and_hides_the_model_card() {
+    for gone in [
+        "Run on qualified route",
+        r#"id="infer-form""#,
+        r#"id="prompt""#,
+        "Available only after this Mac has a qualified assignment",
+        r##"href="#inference""##,
+    ] {
+        assert!(
+            !INDEX_HTML.contains(gone),
+            "the shipped page still has `{gone}`"
+        );
+    }
+    let open = INDEX_HTML
+        .find(r#"<section id="inference""#)
+        .expect("the model card (its download is the owner's model-prepare step)");
+    let tag = &INDEX_HTML[open..open + INDEX_HTML[open..].find('>').unwrap()];
+    assert!(
+        tag.split_whitespace()
+            .any(|attribute| attribute == "hidden"),
+        "the card is shown by default: {tag}"
+    );
+    let close = open + INDEX_HTML[open..].find("</section>").unwrap();
+    for (at, _) in INDEX_HTML.match_indices("Download / resume source") {
+        assert!(
+            open < at && at < close,
+            "a download control outside the hidden card"
+        );
+    }
+    let script = script_without_comments(APP_JS);
+    let writers: Vec<&str> = script
+        .lines()
+        .filter(|l| l.contains("'inference'") || l.contains("\"inference\""))
+        .collect();
+    assert_eq!(
+        writers.len(),
+        1,
+        "exactly one place decides the card's visibility: {writers:?}"
+    );
+    let rule = writers[0].replace(' ', "");
+    assert!(
+        rule.contains("$('inference').hidden=!(")
+            && rule.contains("prepareModel")
+            && rule.contains("downloading")
+            && rule.contains("!target"),
+        "the card is shown only to the owner, for the run's prepare_model fix or a running \
+         download: {rule}"
+    );
+    let prepare = script
+        .lines()
+        .find(|l| l.trim_start().starts_with("const prepareModel="))
+        .expect("app.js lost the prepare_model reveal");
+    let prepare = prepare.replace(' ', "");
+    assert!(
+        prepare.contains("state==='failed'") && prepare.contains("action==='prepare_model'"),
+        "{prepare}"
+    );
+}
