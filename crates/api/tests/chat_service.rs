@@ -1001,3 +1001,50 @@ fn the_seams_codecs_are_v014s_executed_codecs() {
         Ok(PromptCodec::Qwen3)
     );
 }
+
+/// Lane CHATFIX item 3: the chat envelope is written in ONE place. Before this lane a second copy
+/// (`node-service/src/chat_template.rs`, Qwen2 only, no think block) served the one-Mac path while
+/// the route chat had none. Every `src` file of the workspace that spells the ChatML start marker is
+/// listed; only the seam may, plus `model/src/chat.rs`, the Qwen3.6-35B-A3B `chat_template.jinja`
+/// subset (`model::chat::render`), which no chat path calls (its own crate's tests only) and which
+/// is not v0.1.4's codec.
+#[test]
+fn the_chat_envelope_is_written_once_in_the_workspace_sources() {
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+    let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    let mut found = Vec::new();
+    for krate in std::fs::read_dir(crates).unwrap() {
+        let src = krate.unwrap().path().join("src");
+        if !src.is_dir() {
+            continue;
+        }
+        let mut files = Vec::new();
+        walk(&src, &mut files);
+        for file in files {
+            if std::fs::read_to_string(&file)
+                .unwrap()
+                .contains("<|im_start|>")
+            {
+                found.push(
+                    file.strip_prefix(crates)
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
+        }
+    }
+    found.sort();
+    assert_eq!(found, ["api/src/prompt_codec.rs", "model/src/chat.rs"]);
+}
