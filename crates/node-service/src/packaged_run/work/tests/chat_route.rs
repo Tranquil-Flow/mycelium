@@ -546,6 +546,81 @@ fn the_owner_status_says_the_chat_is_available_while_the_run_serves() {
     page.close();
 }
 
+/// Lane CHATS item 2 (v0.1.4 `_bind_public_routes`, app.py:1073-1077 @ f4e366e9): the handler the
+/// relay's `/chat/*` call is the run's own chat service with the relay's client key, so a room
+/// member's chat goes through the serving run's route, as the owner's page does: the state says
+/// available, a send streams exactly the gateway's tokens through the relay's events, and a
+/// stopped run answers the service's own `chat_not_ready`.
+#[test]
+fn the_relay_chat_reaches_the_serving_runs_route() {
+    let fake = FakeGateway::start(Fake::completed(&["Hel", "lo"]));
+    let page = Page::new(&fake);
+    let relay = page
+        .services
+        .network()
+        .relay_chat()
+        .expect("the composition binds the relay's chat");
+    let call = |path: &str, body: Value| {
+        let answer = relay(
+            "POST",
+            path,
+            &[
+                ("X-Mycelium-Chat".into(), "1".into()),
+                ("Content-Type".into(), "application/json".into()),
+                ("Cf-Connecting-Ip".into(), "203.0.113.7".into()),
+            ],
+            &serde_json::to_vec(&body).unwrap(),
+        )
+        .expect("the relay chat answers");
+        assert_eq!(answer.kind, "application/json");
+        (
+            u16::try_from(answer.status).unwrap(),
+            serde_json::from_slice::<Value>(&answer.raw).unwrap(),
+        )
+    };
+    let (code, idle) = call("/chat/api/state", json!({}));
+    assert_eq!((code, &idle["available"]), (200, &json!(false)), "{idle}");
+    page.start();
+    page.serving();
+    let (code, serving) = call("/chat/api/state", json!({}));
+    assert_eq!(
+        (code, &serving["available"]),
+        (200, &json!(true)),
+        "{serving}"
+    );
+    let (code, sent) = call(
+        "/chat/api/send",
+        json!({"prompt": "hi", "max_new_tokens": 8}),
+    );
+    assert_eq!(code, 200, "{sent}");
+    let end = Instant::now() + patience();
+    let (mut after, mut tokens) = (json!(0), Vec::new());
+    loop {
+        let (code, page_events) = call(
+            "/chat/api/events",
+            json!({"request_id": sent["request_id"], "after": after}),
+        );
+        assert_eq!(code, 200, "{page_events}");
+        for t in page_events["tokens"].as_array().unwrap() {
+            tokens.push(t.as_str().unwrap().to_owned());
+        }
+        after = page_events["next"].clone();
+        if page_events["done"] == true {
+            break;
+        }
+        assert!(Instant::now() < end, "the relay chat never ended");
+        std::thread::yield_now();
+    }
+    assert_eq!(tokens, ["Hel", "lo"], "exactly the gateway's tokens");
+    page.stop();
+    page.until("the run stopped", |s| s["state"] == "stopped");
+    assert_eq!(
+        call("/chat/api/send", json!({"prompt": "hi"})),
+        (503, json!({"error": "chat_not_ready"}))
+    );
+    page.close();
+}
+
 /// Proves: ledger row 17 (a rollover: `ctx.state['rollover_requested']` (owner_run.py:256) makes
 /// the teardown cancel `chat_switching_runs` (demo_chain.py:1333); while the fresh run starts the
 /// page answers `chat_switching_runs` with `retry_after_s` (chat.py:239-242, 314-315,

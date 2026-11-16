@@ -4,6 +4,7 @@
 //! `/chat/api/send`, its events and Stop go through the serving root
 //! ([`crate::router_port::Serving`]: the oracle-checked request gateway over the node service).
 mod chat_boundary;
+mod relay_chat;
 use crate::{
     app_host::{FastModeDefault, FastModeProcess, HostLoop, PackagedHost, Publishing},
     router_port::{self, Serving, ServingActions},
@@ -236,6 +237,37 @@ pub struct DesktopServices {
     started: std::time::Instant,
     capacity: NonZeroUsize,
 }
+/// `/chat/api/send` over the run's route (chat.py:300-340) for `client` (the page's `local`, or
+/// the relay's `relay:<address>` key, `chat.client_key`): the body checks (`chat_edge`), Quit's
+/// fence, then the service (rate limits per client and for the swarm, one chat at a time under
+/// its own lock, chat.py:285-298, 319-321).
+fn send_routed(
+    gate: &Mutex<Gate>,
+    chat: &api::chat_service::ChatService,
+    client: &str,
+    body: &Value,
+) -> Result<Value, api::chat::ChatError> {
+    let refused = |error: PublicError| api::chat::ChatError {
+        error,
+        retry_after: None,
+    };
+    let plan = crate::chat_edge::plan(body).map_err(refused)?;
+    if gate
+        .lock()
+        .map_err(|_| refused(err("desktop_poisoned")))?
+        .closing
+    {
+        return Err(refused(err("application_closed")));
+    }
+    chat.send(
+        client,
+        api::chat_service::Prompt {
+            text: plan.prompt,
+            max_new_tokens: plan.max_new_tokens,
+            clamped: plan.clamped,
+        },
+    )
+}
 impl DesktopServices {
     /// `private` is the packaged private state root: the preference files, the recorded action
     /// failure and every later persisted action state live there.
@@ -390,6 +422,12 @@ impl DesktopServices {
             timing,
         )?;
         self.run_chats = Some(api::chat_service::RunChats::new(Arc::new(chat.clone())));
+        // The relay's `/chat` reaches this same service (`_bind_public_routes`, app.py:1073-1077).
+        self.network.bind_relay_chat(Some(relay_chat::handler(
+            chat.clone(),
+            self.gate.clone(),
+            self.authority.clone(),
+        )));
         self.chat_run = Some(chat);
         Ok(self)
     }
@@ -434,34 +472,14 @@ impl DesktopServices {
             "share_url": share_url,
         }))
     }
-    /// `/chat/api/send` over the run's route (chat.py:300-340): the body checks (`chat_edge`),
-    /// Quit's fence, then the service (one chat at a time under its own lock, chat.py:319-321).
+    /// `/chat/api/send` over the run's route (chat.py:300-340) for the owner's own page, the one
+    /// local client (`chat.client_key(..., via_relay=False)` is `local`): [`send_routed`].
     fn route_send(
         &self,
         chat: &api::chat_service::ChatService,
         body: &Value,
     ) -> Result<Value, api::chat::ChatError> {
-        let refused = |error: PublicError| api::chat::ChatError {
-            error,
-            retry_after: None,
-        };
-        let plan = crate::chat_edge::plan(body).map_err(refused)?;
-        if self
-            .gate
-            .lock()
-            .map_err(|_| refused(err("desktop_poisoned")))?
-            .closing
-        {
-            return Err(refused(err("application_closed")));
-        }
-        chat.send(
-            "local",
-            api::chat_service::Prompt {
-                text: plan.prompt,
-                max_new_tokens: plan.max_new_tokens,
-                clamped: plan.clamped,
-            },
-        )
+        send_routed(&self.gate, chat, "local", body)
     }
     fn with_host(
         node: NodeService,
