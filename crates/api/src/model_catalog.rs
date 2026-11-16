@@ -302,13 +302,15 @@ fn budget_bytes(id: BudgetId) -> u128 {
 fn budget_count(id: BudgetId) -> u128 {
     id.count().map_or(0, |c| u128::from(c.get()))
 }
-/// `_member_resource` for the whole-model split (slice mode, no owner, no memory report).
-fn whole_member(model: &Model) -> Member {
+/// `_member_resource` for the whole-model split (slice mode, no owner, no memory report), with
+/// KV charged for `context_tokens` (the product passes the model contract's serving context; the
+/// oracle-parity tests pass the oracle's `DEMO_CONTEXT_TOKENS`, 4,096, explicitly).
+fn whole_member(model: &Model, context_tokens: u64) -> Member {
     let shape = &model.shape;
     let stage = shape.whole_stage_bytes();
     let resident = ceil_ratio(stage, RESIDENT_FACTOR);
     let kv_per_layer = 2 * shape.kv_heads * shape.head_dim * KV_BYTES_PER_ELEMENT;
-    let kv = shape.num_layers * kv_per_layer * u128::from(model.serving_context_tokens);
+    let kv = shape.num_layers * kv_per_layer * u128::from(context_tokens);
     let (peak, disk_need, basis) = match &model.anchor {
         Some(a) => (a.group_peak_bytes, a.member_disk_bytes, "measured"),
         None => (
@@ -337,10 +339,17 @@ fn u(value: u128) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
 }
 
-/// `member_resources(model, whole split)[0]` of the registered model, by id.
+/// `member_resources(model, whole split)[0]` of the registered model, by id, at its contract's
+/// serving context.
 pub fn whole_model_member_json(model_id: &str) -> Option<Json> {
     let model = REGISTERED.iter().find(|m| m.model_id == model_id)?;
-    let m = whole_member(model);
+    whole_model_member_json_at(model_id, model.serving_context_tokens)
+}
+/// [`whole_model_member_json`] with KV charged for `context_tokens` instead of the contract's
+/// serving context (the oracle-parity tests: v0.1.4 computed it at 4,096).
+pub fn whole_model_member_json_at(model_id: &str, context_tokens: u64) -> Option<Json> {
+    let model = REGISTERED.iter().find(|m| m.model_id == model_id)?;
+    let m = whole_member(model, context_tokens);
     Some(crate::jobj! {
         "node_id" => "whole-model", "start" => 0u64, "end" => u(model.shape.num_layers),
         "layers" => u(model.shape.num_layers), "stage_source_bytes" => u(m.stage_source_bytes),
@@ -354,6 +363,9 @@ pub fn whole_model_member_json(model_id: &str) -> Option<Json> {
 pub fn whole_model_member(model_id: &str) -> Option<Value> {
     whole_model_member_json(model_id).map(|j| j.to_value())
 }
+pub fn whole_model_member_at(model_id: &str, context_tokens: u64) -> Option<Value> {
+    whole_model_member_json_at(model_id, context_tokens).map(|j| j.to_value())
+}
 
 /// Storage the owner must consent to for this model (snapshot + 10%; 7B: the measured figure).
 pub fn owner_storage_requirement(model: &Model) -> u64 {
@@ -365,7 +377,8 @@ pub fn owner_storage_requirement(model: &Model) -> u64 {
 /// Pairing quota a model can give one member: the whole model (anchored: its proposal, i.e.
 /// `RUNNER_LIMIT_DIVISOR` x the member disk limit).
 fn quota_of(model: &Model) -> u128 {
-    let disk = whole_member(model).max_disk_bytes;
+    // Disk does not depend on the context.
+    let disk = whole_member(model, model.serving_context_tokens).max_disk_bytes;
     if model.anchor.is_some() {
         RUNNER_LIMIT_DIVISOR * disk
     } else {
@@ -403,8 +416,8 @@ pub fn memory_cap_options(memory_bytes: u64) -> Vec<u64> {
     values.into_iter().collect()
 }
 
-fn model_row(model: &Model) -> Json {
-    let whole = whole_member(model);
+fn model_row(model: &Model, context: Option<u64>) -> Json {
+    let whole = whole_member(model, context.unwrap_or(model.serving_context_tokens));
     crate::jobj! {
         "model_id" => model.model_id, "resolved_commit" => model.resolved_commit,
         "label" => model.shape.label, "snapshot_bytes" => u(model.shape.snapshot_bytes),
@@ -415,19 +428,36 @@ fn model_row(model: &Model) -> Json {
     }
 }
 /// `consent_document(model, device_memory_bytes=...)`: the numbers the consent UI shows, in the
-/// source's dict order.
+/// source's dict order; every model's whole-model figures at its contract's serving context.
 pub fn consent_document_json(
     selected: Option<(&str, &str)>,
     device_memory_bytes: Option<u64>,
 ) -> Json {
+    consent_document_with(selected, device_memory_bytes, None)
+}
+/// [`consent_document_json`] with every model's whole-model KV charged for `context_tokens`
+/// instead of its contract's serving context (the oracle-parity tests: v0.1.4 computed the
+/// document at 4,096).
+pub fn consent_document_at(
+    selected: Option<(&str, &str)>,
+    device_memory_bytes: Option<u64>,
+    context_tokens: u64,
+) -> Value {
+    consent_document_with(selected, device_memory_bytes, Some(context_tokens)).to_value()
+}
+fn consent_document_with(
+    selected: Option<(&str, &str)>,
+    device_memory_bytes: Option<u64>,
+    context: Option<u64>,
+) -> Json {
     let selected_row = selected
         .and_then(|(id, commit)| find(id, commit))
-        .map_or(Json::Null, model_row);
+        .map_or(Json::Null, |m| model_row(m, context));
     let mut document = crate::jobj! {
         "storage_consent_ceiling_bytes" => storage_consent_ceiling(),
         "pairing_quota_ceiling_bytes" => pairing_quota_ceiling(),
         "selected" => selected_row,
-        "models" => REGISTERED.iter().map(model_row).collect::<Vec<_>>(),
+        "models" => REGISTERED.iter().map(|m| model_row(m, context)).collect::<Vec<_>>(),
         "device_memory_bytes" => device_memory_bytes,
         "memory_cap_ceiling_bytes" => Json::Null,
         "memory_cap_options" => Json::Arr(Vec::new()),

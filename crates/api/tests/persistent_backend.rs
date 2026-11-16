@@ -235,10 +235,25 @@ fn run_model_choice_persists_and_returns_the_oracle_document() {
         .find(|c| c["label"] == "save_qwen3_8b")
         .unwrap();
     assert_eq!(case["device_memory_bytes"], json!(16 * GIB));
+    // The fixture's consent document was recorded at the oracle's serving context (4,096,
+    // `DEMO_CONTEXT_TOKENS`): parity is checked at it, passed explicitly; the product's document
+    // is the one at its model contract's serving context.
+    let mut expected = case["ok"].clone();
+    let resources = &expected["resources"];
+    let selected = (
+        resources["selected"]["model_id"].as_str().unwrap().to_owned(),
+        resources["selected"]["resolved_commit"].as_str().unwrap().to_owned(),
+    );
+    let selected = Some((selected.0.as_str(), selected.1.as_str()));
+    assert_eq!(
+        *resources,
+        api::model_catalog::consent_document_at(selected, Some(16 * GIB), 4096)
+    );
+    expected["resources"] = api::model_catalog::consent_document(selected, Some(16 * GIB));
     assert_eq!(
         c.action("/api/run-model", &body(json!({"choice": "qwen3-8b"})))
             .unwrap(),
-        case["ok"]
+        expected
     );
     let file = dir.join("run-model.json");
     assert_eq!(

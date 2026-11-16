@@ -31,11 +31,49 @@ fn outcome(r: Result<Value, api::schema::PublicError>) -> Value {
         Err(e) => json!({"err": {"status": e.status, "code": e.code}}),
     }
 }
+/// The oracle's serving context (`model_resources.DEMO_CONTEXT_TOKENS`, model_resources.py:76 @
+/// f4e366e9): every fixture here was recorded at it, so parity is checked at it, passed
+/// explicitly. The product serves its model contract's context instead
+/// (`model_catalog::Model::serving_context_tokens`); that value must never reach a fixture
+/// comparison.
+const ORACLE_CONTEXT_TOKENS: u64 = 4096;
+/// Every consent document inside an oracle result (`resources`): checked equal to the product's
+/// document computed at [`ORACLE_CONTEXT_TOKENS`], then replaced by the product's document at
+/// the contract's serving context, which is what the product returns. Everything else in the
+/// result is compared as recorded.
+fn at_product_context(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            for (key, inner) in map.iter_mut() {
+                if key == "resources" && inner.get("storage_consent_ceiling_bytes").is_some() {
+                    let selected = inner["selected"]["model_id"]
+                        .as_str()
+                        .zip(inner["selected"]["resolved_commit"].as_str())
+                        .map(|(m, c)| (m.to_owned(), c.to_owned()));
+                    let selected = selected.as_ref().map(|(m, c)| (m.as_str(), c.as_str()));
+                    let memory = inner["device_memory_bytes"].as_u64();
+                    assert_eq!(
+                        *inner,
+                        model_catalog::consent_document_at(selected, memory, ORACLE_CONTEXT_TOKENS),
+                        "the consent document at the oracle's context equals the oracle's"
+                    );
+                    *inner = model_catalog::consent_document(selected, memory);
+                } else {
+                    at_product_context(inner);
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(at_product_context),
+        _ => {}
+    }
+}
 fn expected(case: &Value) -> Value {
-    match case.get("ok") {
+    let mut expected = match case.get("ok") {
         Some(v) => json!({"ok": v}),
         None => json!({"err": case["err"]}),
-    }
+    };
+    at_product_context(&mut expected);
+    expected
 }
 fn memory(case: &Value) -> Option<u64> {
     case["device_memory_bytes"].as_u64()
@@ -65,7 +103,8 @@ fn ceilings_and_consent_documents_equal_model_resources_py() {
                 Some(expect["selected"]["model_id"].as_str().unwrap())
             };
             let commit = expect["selected"]["resolved_commit"].as_str();
-            let got = model_catalog::consent_document(selected.zip(commit), mem);
+            let got =
+                model_catalog::consent_document_at(selected.zip(commit), mem, ORACLE_CONTEXT_TOKENS);
             assert_eq!(&got, expect, "memory {label}, model {key}");
             checked += 1;
         }
@@ -93,7 +132,7 @@ fn memory_ceiling_and_options_match_the_oracle() {
 #[test]
 fn whole_model_member_limits_match_the_oracle() {
     for (model, expect) in oracle()["whole_model_members"].as_object().unwrap() {
-        let got = model_catalog::whole_model_member(model).unwrap();
+        let got = model_catalog::whole_model_member_at(model, ORACLE_CONTEXT_TOKENS).unwrap();
         for key in [
             "resident_bytes",
             "kv_bytes",
