@@ -233,7 +233,7 @@ function render(value) {
   rung('Membership',a.membership_state ?? a.membership ?? a.state ?? 'Not joined');
   rung('Generation',a.membership_generation ?? a.generation);
   rung('Lease',a.lease_state ?? a.lease_expires_at ?? 'Unknown');
-  if(target && (value.renewal_error || value.recovery_error))rung('Owner relay',`Cannot reach the owner’s swarm (${String(value.recovery_error || value.renewal_error).replaceAll('_',' ')}). The owner’s temporary relay closes 30 minutes after it starts unless a run is serving, and a relay started again gets a new address. Keep Mycelium open, ask the owner to start the relay again and to reconnect this Mac to the new address; until then this Mac takes no part in runs.`);
+  if(target && (value.renewal_error || value.recovery_error))rung('Owner relay',a.membership_state==='current' ? `Renewal with the owner’s swarm failed (${String(value.recovery_error || value.renewal_error).replaceAll('_',' ')}); Mycelium keeps retrying while this Mac’s membership is current.` : `Cannot reach the owner’s swarm (${String(value.recovery_error || value.renewal_error).replaceAll('_',' ')}) and this Mac’s membership is no longer current. The owner’s temporary relay closes 30 minutes after it starts unless a run is serving, and a relay started again gets a new address. Keep Mycelium open, ask the owner to start the relay again and to reconnect this Mac to the new address; until then this Mac takes no part in runs.`);
   const capabilityStates={self_report_accepted:'Self-report accepted · not independently qualified',
     not_reported:'Not reported',stale:'Stale · report again'};
   rung('Capability',capabilityStates[a.capability_state] ?? 'Not independently qualified');
