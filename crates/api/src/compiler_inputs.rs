@@ -528,6 +528,9 @@ impl InputArtifact {
 
 /// Member byte custody reuses the compiler ledger, without source or proof fabrication.
 pub mod member_shard;
+/// The owner retires the ledger entries and stage shards of its own dead compile runs.
+pub mod owner_retire;
+pub use owner_retire::{Retirement, retire_dead_runs};
 
 fn reserve_output(
     runs: &Path,

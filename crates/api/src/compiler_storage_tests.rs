@@ -453,3 +453,232 @@ fn ledger_pre_rename_crash_allows_restart_without_refunding_old_charges() {
         assert!(temporaries(&f.root).is_empty());
     }
 }
+
+// Lane PHY item 1 (ledger rows 8, 81): the owner retires the entries and stage shards of its own
+// dead compile runs. Physical run 4 on 15 Nov was refused `compiler_storage_quota_exceeded` at
+// step 5 because runs 2 and 3 had compiled and then died at step 6, each leaving a `retained`
+// 1.5 GB entry against the 4.0 GB limit, and nothing ever removed them.
+
+fn ledger_of(root: &Path) -> Value {
+    serde_json::from_slice(&fs::read(root.join("chain-runs").join(STORAGE_LEDGER)).unwrap())
+        .unwrap()
+}
+fn ledger_runs(root: &Path) -> Vec<String> {
+    ledger_of(root)["entries"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect()
+}
+
+/// A run whose compile completed: its reservation, its stage shard (sparse, so the test spends no
+/// disk) and the ledger's `retained` entry, as the producer leaves them.
+fn compiled_run(f: &Fixture, run: &str, bytes: u64) -> InputArtifact {
+    use std::os::unix::fs::OpenOptionsExt;
+    let artifact = f.emit_run(run);
+    let reservation = artifact.reserve_stage_output(bytes).unwrap();
+    let output = artifact.root().join("stage-shards");
+    directory(&output).unwrap();
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(output.join("model-stage-001-of-002.safetensors"))
+        .unwrap()
+        .set_len(bytes)
+        .unwrap();
+    reservation.complete().unwrap();
+    assert_eq!(ledger_of(&f.root)["entries"][run]["phase"], "retained");
+    artifact
+}
+
+#[test]
+fn two_runs_dead_after_their_compile_are_retired_so_a_third_passes_the_reservation() {
+    let f = Fixture::new();
+    // Room for two compiled runs and not a third, as 2 x 1.5 GB against 4.0 GB on Mac A
+    // (the resource policy's floor is 100 MB).
+    storage_policy(&f.root, 100_000_000);
+    let charge = 40_000_000;
+    // Each run failed at step 6: its teardown ended the compile's custody.
+    drop(compiled_run(&f, "dead-1", charge));
+    drop(compiled_run(&f, "dead-2", charge));
+    let wedged = f.emit_run("wedged");
+    assert_eq!(
+        wedged.reserve_stage_output(charge).unwrap_err().0,
+        "compiler_storage_quota_exceeded",
+        "the physical wedge of row 81, before any retirement"
+    );
+    drop(wedged);
+    let retirement = compiler_inputs::retire_dead_runs(&f.root).unwrap();
+    assert_eq!(retirement.retired, ["dead-1", "dead-2"]);
+    assert!(retirement.refused.is_empty(), "{:?}", retirement.refused);
+    let runs = f.root.join("chain-runs");
+    for run in ["dead-1", "dead-2"] {
+        assert!(!runs.join(run).join("stage-shards").exists(), "{run}");
+        assert!(
+            runs.join(run).join("compile-start.private.json").exists(),
+            "the run's metadata is evidence and stays: {run}"
+        );
+    }
+    let third = compiled_run(&f, "third", charge);
+    assert_eq!(ledger_runs(&f.root), ["third"]);
+    drop(third);
+}
+
+#[test]
+fn a_crash_between_reserve_and_complete_is_retired_at_the_next_start() {
+    use std::{io::Write, os::unix::fs::OpenOptionsExt};
+    for written in [false, true] {
+        let f = Fixture::new();
+        let promised = 60_000_000;
+        storage_policy(&f.root, 100_000_000);
+        let crashed = f.emit_run("crashed");
+        drop(crashed.reserve_stage_output(promised).unwrap());
+        if written {
+            let output = crashed.root().join("stage-shards");
+            directory(&output).unwrap();
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(output.join("model-stage-001-of-003.safetensors"))
+                .unwrap();
+            file.write_all(&[7; 4096]).unwrap();
+            file.sync_all().unwrap();
+        }
+        // The process is lost with the compile in flight: its custody ends with it.
+        drop(crashed);
+        let next = f.emit_run("next");
+        assert_eq!(
+            next.reserve_stage_output(promised).unwrap_err().0,
+            "compiler_storage_quota_exceeded",
+            "written={written}"
+        );
+        let retirement = compiler_inputs::retire_dead_runs(&f.root).unwrap();
+        assert_eq!(retirement.retired, ["crashed"], "written={written}");
+        assert!(
+            !f.root.join("chain-runs/crashed/stage-shards").exists(),
+            "written={written}"
+        );
+        drop(
+            next.reserve_stage_output(promised)
+                .expect("the next Start's reservation passes"),
+        );
+        assert_eq!(ledger_runs(&f.root), ["next"], "written={written}");
+    }
+}
+
+#[test]
+fn a_serving_runs_entry_survives_a_second_starts_retirement_pass() {
+    let mut f = Fixture::new();
+    f.request.stage_sharded = true;
+    let mut serving = f.emit_run("serving");
+    serving.produce_stage_shards(&f.members, 0.0).unwrap();
+    let row = ledger_of(&f.root)["entries"]["serving"].clone();
+    let mut dead = f.emit_run("dead");
+    dead.produce_stage_shards(&f.members, 0.0).unwrap();
+    drop(dead);
+    let retirement = compiler_inputs::retire_dead_runs(&f.root).unwrap();
+    assert_eq!(retirement.retired, ["dead"]);
+    assert_eq!(ledger_of(&f.root)["entries"]["serving"], row);
+    serving
+        .validate_stage_shards(&f.members, 0.0)
+        .expect("a serving run's shards are untouched");
+    // A second Start's pass while the first run still serves.
+    let again = compiler_inputs::retire_dead_runs(&f.root).unwrap();
+    assert!(again.retired.is_empty(), "{again:?}");
+    assert_eq!(ledger_of(&f.root)["entries"]["serving"], row);
+    serving.validate_stage_shards(&f.members, 0.0).unwrap();
+    // Its own end releases it.
+    drop(serving);
+    assert_eq!(
+        compiler_inputs::retire_dead_runs(&f.root).unwrap().retired,
+        ["serving"]
+    );
+}
+
+#[test]
+fn retirement_never_adopts_a_member_custody_or_a_foreign_file() {
+    let mut f = Fixture::new();
+    f.request.stage_sharded = true;
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../planner/tests/fixtures/source-slices.json"
+    ))
+    .unwrap();
+    let case = &fixture["cases"][0];
+    let recipe = &case["node_plans"]["node-0"];
+    let transfer = &case["node_files"]["node-0"][0];
+    let digest = recipe["node_plan_digest"].as_str().unwrap();
+    // A joined Mac's custody in the same ledger is retired by its own discard, never by this pass.
+    drop(
+        member_shard::MemberShard::begin(&f.root, "member-run", "node-0", transfer, recipe, digest)
+            .unwrap(),
+    );
+    let mut tampered = f.emit_run("tampered");
+    tampered.produce_stage_shards(&f.members, 0.0).unwrap();
+    let shards = tampered.root().join("stage-shards");
+    drop(tampered);
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(shards.join("notes.txt"))
+            .unwrap();
+    }
+    let before: Vec<_> = {
+        let mut names: Vec<_> = fs::read_dir(&shards)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        names.sort();
+        names
+    };
+    let committed = fs::read(f.root.join("chain-runs").join(STORAGE_LEDGER)).unwrap();
+    let retirement = compiler_inputs::retire_dead_runs(&f.root).unwrap();
+    assert!(retirement.retired.is_empty(), "{retirement:?}");
+    assert_eq!(
+        retirement.refused,
+        [(
+            "tampered".to_owned(),
+            "compiler_storage_retire_foreign_output"
+        )]
+    );
+    let mut after: Vec<_> = fs::read_dir(&shards)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    after.sort();
+    assert_eq!(after, before, "nothing of a refused run is removed");
+    assert_eq!(
+        fs::read(f.root.join("chain-runs").join(STORAGE_LEDGER)).unwrap(),
+        committed
+    );
+}
+
+#[test]
+fn a_crash_before_the_retirements_ledger_rename_recovers_without_refusing() {
+    let mut f = Fixture::new();
+    f.request.stage_sharded = true;
+    let mut dead = f.emit_run("dead");
+    dead.produce_stage_shards(&f.members, 0.0).unwrap();
+    drop(dead);
+    interrupt_before_rename(0, || {
+        compiler_inputs::retire_dead_runs(&f.root).unwrap();
+    });
+    assert!(!f.root.join("chain-runs/dead/stage-shards").exists());
+    assert_eq!(temporaries(&f.root).len(), 1);
+    let next = f.emit_run("next");
+    drop(
+        next.reserve_stage_output(1)
+            .expect("the retirement's own leftover is recognised, never `owner_changed`"),
+    );
+    assert!(temporaries(&f.root).is_empty());
+    assert_eq!(
+        compiler_inputs::retire_dead_runs(&f.root).unwrap().retired,
+        ["dead"]
+    );
+    assert_eq!(ledger_runs(&f.root), ["next"]);
+}
