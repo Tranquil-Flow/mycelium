@@ -570,6 +570,8 @@ fn stop_between_the_probe_and_compose_drops_the_preflight_record() {
         preflight_reset(&chain.work),
         "teardown kept the run's preflight record"
     );
+    // Teardown withdrew the run's owner control; announce it again so its member verifies.
+    let state = published(&mut f, &chain.work, "run-stop");
     assert!(chain.work.local_network(&state, false).is_ok());
     assert_eq!(
         reads.load(Ordering::SeqCst),
@@ -609,6 +611,9 @@ fn a_second_run_reads_the_interfaces_afresh() {
         "new_run kept the earlier run's preflight record"
     );
     let second = published_for_work(&mut f, &chain.work, "run-two");
+    // The joined Mac's first tick after the run changed closes its earlier run's work service
+    // (`member_work_publication:member_work_run_changed`); its next one publishes for this run.
+    f.agent.tick(&f.member);
     assert!(chain.work.local_network(&second, false).is_ok());
     assert_eq!(
         reads.load(Ordering::SeqCst),

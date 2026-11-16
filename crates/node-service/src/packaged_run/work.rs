@@ -211,9 +211,10 @@ struct LocalNetwork {
     run: String,
     /// (node, generation, address) a datagram reached in this run.
     reached: std::collections::BTreeSet<(String, String, std::net::SocketAddr)>,
-    /// PHY-03: this run's work transport, resolved by its first probe pass with a joined Mac
-    /// (`Network::resolve_run_network`, the rule step 6 uses) and handed to its compose, so the
-    /// probe and the step-6 dial obey ONE reading of this Mac's interfaces.
+    /// PHY-03: this run's work transport as its first probe pass with a joined Mac resolved it
+    /// (`Network::resolve_run_network`, the rule step 6 uses), shared by its later probe passes.
+    /// Patch 3 (PHY2-01): compose never binds this; it reads this Mac's interfaces itself and only
+    /// compares its own reading with this one (a change drops `reached` and asks again).
     network: Option<crate::packaged_work::Resolved>,
 }
 impl LocalNetwork {
@@ -224,6 +225,10 @@ impl LocalNetwork {
             self.reached.clear();
             self.network = None;
         }
+    }
+    /// Forget the run's preflight record altogether (a new run, Stop and teardown).
+    fn reset(&mut self) {
+        *self = Self::default();
     }
 }
 impl Work {
@@ -254,6 +259,17 @@ impl Work {
     /// records only, read afresh on every pass; a run with no verified joined member sends nothing
     /// and is never refused here.
     fn local_network(&self, state: &RunState, refuse: bool) -> Result<(), StepError> {
+        self.probe_pass(state, refuse, || self.run_resolution(&state.run_id))
+    }
+    /// One probe pass of this run over the network `resolve` answers (asked only once the run has
+    /// a joined Mac and a seed): steps 1-5 pass the run's preflight resolution, compose its own
+    /// fresh one when that differs (PHY2-01).
+    fn probe_pass(
+        &self,
+        state: &RunState,
+        refuse: bool,
+        resolve: impl FnOnce() -> crate::packaged_work::Resolved,
+    ) -> Result<(), StepError> {
         use api::local_network::Answer;
         let joined: Vec<&String> = state
             .participants
@@ -266,10 +282,10 @@ impl Work {
         let Some(seed) = self.host.with(|c| c.authority.seed.clone()) else {
             return Ok(());
         };
-        // PHY-03: the run's network first (the resolution its compose will use); with no admitted
-        // LAN path (`local_only:*`, or a loopback-only run) nothing is sent: compose refuses a run
-        // with a joined Mac on it by name, as at the base.
-        let resolved = self.run_resolution(&state.run_id);
+        // PHY-03: the run's network first; with no admitted LAN path (`local_only:*`, or a
+        // loopback-only run) nothing is sent: compose, reading the interfaces itself, refuses a
+        // run with a joined Mac on it by name, as at the base.
+        let resolved = resolve();
         let Some((from, _)) = resolved.choice.0.clone() else {
             eprintln!("local_network_probe_skipped:{}", resolved.transport);
             return Ok(());
@@ -390,8 +406,8 @@ impl Work {
         let cause = lock(&self.resident).work.as_ref()?.failure_cause()?;
         self.named_dial_failure(&cause)
     }
-    /// PHY-03: the run's work transport as its first probe pass resolved it (held for that run),
-    /// resolving it now if no pass has; `compose` takes it from here (`take_resolution`).
+    /// PHY-03: the run's work transport as its first probe pass resolved it (held for that run's
+    /// later probe passes), resolving it now if no pass has. Compose never binds it (PHY2-01).
     fn run_resolution(&self, run: &str) -> crate::packaged_work::Resolved {
         let mut seen = lock(&self.local_network);
         seen.bind(run);
@@ -404,14 +420,18 @@ impl Work {
             }
         }
     }
-    /// The resolution the run's probe already made, taken by its compose (one reading per run);
-    /// `None` when no probe pass resolved it (compose reads this Mac's interfaces itself).
-    fn take_resolution(&self, run: &str) -> Option<crate::packaged_work::Resolved> {
+    /// PHY2-01 (lane PHY patch 3): the resolution this run's probe passes used, taken by compose
+    /// to compare with its own fresh reading; `None` when no pass of this run resolved one.
+    fn take_preflight(&self, run: &str) -> Option<crate::packaged_work::Resolved> {
         let mut seen = lock(&self.local_network);
         if seen.run != run {
             return None;
         }
         seen.network.take()
+    }
+    /// Forget the run's preflight record (`Composed::new_run`, teardown).
+    fn reset_preflight(&self) {
+        lock(&self.local_network).reset();
     }
     /// The run's transport, resolved at `compose`; a work announcement before any compose (none
     /// in the chain's order) resolves its own.
@@ -630,12 +650,11 @@ impl Work {
             .host
             .with(|c| c.authority.seed.clone())
             .ok_or_else(|| refused("owner_exchange_unavailable"))?;
-        // One transport per run, read from this Mac's interfaces as the run starts its work, or
-        // as its first Local Network probe pass did (PHY-03: the probe and the dial obey one
-        // reading).
-        let resolved = self
-            .take_resolution(&state.run_id)
-            .unwrap_or_else(|| self.host.network.resolve_run_network("owner_run"));
+        // One transport per run, read from this Mac's interfaces as the run starts its work, here
+        // and always here (lane PHY patch 3, PHY2-01): the probe passes before the compile may have
+        // read an older state of them.
+        let resolved = self.host.network.resolve_run_network("owner_run");
+        let probed = self.take_preflight(&state.run_id);
         // No single private network here while a joined Mac is in the run: refused by name now,
         // before the local worker starts or anything is dialed (lane LAN round 2, F6).
         if let Some(reason) = resolved.local_only
@@ -646,6 +665,20 @@ impl Work {
         {
             let (code, message) = crate::packaged_work::owner_network_refusal(reason);
             return Err(owner_run::OwnerRunError::with(code, Some(&message), None).into());
+        }
+        // PHY2-01: a network other than the one the probe passes asked on (local-only <-> LAN, or
+        // another local address): what they reached proves nothing for this one. Ask again, once,
+        // from this network, this run's current verified members only, before any work endpoint
+        // or dial; a blocked answer refuses by name as before.
+        if let Some(probed) = probed
+            && probed.choice != resolved.choice
+        {
+            eprintln!(
+                "local_network_resolution_changed:{}:{}",
+                probed.transport, resolved.transport
+            );
+            lock(&self.local_network).reached.clear();
+            self.probe_pass(state, true, || resolved.clone())?;
         }
         let network = resolved.choice;
         lock(&self.resident).network = Some(network.clone());
@@ -823,6 +856,8 @@ impl Work {
     fn teardown(&self) -> Result<(), String> {
         // The chat's route ends with the run's work (the epoch closes below).
         lock(&self.host.custody).route = None;
+        // So does what its probe passes resolved and reached (PHY2-01).
+        self.reset_preflight();
         let mut resident = lock(&self.resident);
         // The run's transport ends with it (R2-7): whatever asks next reads this Mac afresh.
         resident.network = None;
@@ -1169,6 +1204,8 @@ impl Chain for Composed {
         // retiring (a lost process) are released; an older build's run is only named (lane PHY
         // item 1, PHY-01).
         super::retire_dead_runs(&self.work.host);
+        // Nothing an earlier run's probe passes resolved or reached (PHY2-01).
+        self.work.reset_preflight();
         self.inner
             .new_run(run, deployment, reason, ceiling, binding);
     }
