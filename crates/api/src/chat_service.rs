@@ -273,12 +273,19 @@ fn io_code(error: &std::io::Error, connecting: bool) -> GatewayError {
     GatewayError::new(format!("chat_generation_failed_{name}"))
 }
 
+/// TEST ONLY (lane CHATFIX patch 2, CF-03): sees the route's id of each token event a chat
+/// streams (`token_id` of the gateway's SSE token event; `None` for an event without one), in
+/// order, before the chat records the token's text. The page never shows ids (v0.1.4's chat
+/// events carry text only); a model-backed probe compares them with a reference. The product
+/// composition never sets one.
+pub type TokenIdTap = Arc<dyn Fn(Option<u64>) + Send + Sync>;
 /// A route epoch's request gateway over loopback HTTP (`api::requests` routes; the shipped
 /// client's request shape, chat.py:106-147: request gateway v2, `interactive_chat_v1`).
 pub struct HttpRouteGateway {
     addr: SocketAddr,
     bearer: String,
     idle: BudgetId,
+    tap: Option<TokenIdTap>,
 }
 impl HttpRouteGateway {
     /// With the shipped client's 300 s socket timeout (chat.py:70) as the idle bound.
@@ -291,7 +298,19 @@ impl HttpRouteGateway {
     }
     /// With `idle` (a typed budget row) as the bound on any single wait for the gateway.
     pub fn with_idle(addr: SocketAddr, bearer: String, idle: BudgetId) -> Self {
-        Self { addr, bearer, idle }
+        Self {
+            addr,
+            bearer,
+            idle,
+            tap: None,
+        }
+    }
+    /// With the TEST-ONLY [`TokenIdTap`] `tap`.
+    pub fn with_token_id_tap(self, tap: TokenIdTap) -> Self {
+        Self {
+            tap: Some(tap),
+            ..self
+        }
     }
     fn exchange(
         &self,
@@ -362,6 +381,9 @@ impl RouteGateway for HttpRouteGateway {
         let result = sse_client::events(self.addr, &stream_path, &auth, idle, &mut |event| {
             match event["type"].as_str() {
                 Some("token") => {
+                    if let Some(tap) = &self.tap {
+                        tap(event["token_id"].as_u64());
+                    }
                     on_token(event["text"].as_str().unwrap_or_default());
                     None
                 }
