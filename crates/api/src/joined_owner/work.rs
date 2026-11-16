@@ -655,6 +655,7 @@ fn fail(f: &mut Flow, r: &Refusal) {
     }
     f.state = FAILED;
     f.error = Some(closed(r));
+    f.cause = Some(r.0.clone());
 }
 /// A closed code survives as the workflow's error code, anything else is
 /// `managed_workflow_failed` (workflow.py:337-343).

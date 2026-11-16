@@ -237,15 +237,118 @@ impl Work {
     /// raises its Local Network alert before the compile is spent, and a pending or denied
     /// permission is refused by name when `refuse` (Start's first step and the compile's start).
     fn local_network(&self, state: &RunState, refuse: bool) -> Result<(), StepError> {
-        let _ = (state, refuse);
-        Ok(())
+        use api::local_network::Answer;
+        let mut targets = lock(&self.local_network).known.clone();
+        if let Some(seed) = self.host.with(|c| c.authority.seed.clone()) {
+            let joined = state
+                .participants
+                .iter()
+                .filter(|node| Some(*node) != state.local_node.as_ref());
+            for node in joined {
+                // The address step 6 will dial, verified as it will be (signed by the joined
+                // Mac's enrolled key, for this run); not published yet: nothing to ask with.
+                if let Ok(verified) = seed.work_members.get(
+                    &seed.coordinator,
+                    node,
+                    self.owner.public(),
+                    &state.run_id,
+                    &state.deployment_id,
+                    &|_| true,
+                ) {
+                    targets.extend(verified.address().ip_addrs().copied());
+                }
+            }
+        }
+        let mut seen = lock(&self.local_network);
+        if seen.run != state.run_id {
+            seen.run = state.run_id.clone();
+            seen.reached.clear();
+        }
+        let mut blocked = None;
+        for to in targets {
+            if seen.reached.contains(&to) {
+                continue;
+            }
+            let answer = self.probe.send(to);
+            eprintln!("local_network_probe:{to}:{answer:?}");
+            match answer {
+                Answer::NotLocal => continue,
+                Answer::Sent => {
+                    seen.reached.insert(to);
+                }
+                Answer::Blocked => {
+                    blocked.get_or_insert(to);
+                }
+                Answer::Failed(_) => {}
+            }
+            seen.known.insert(to);
+        }
+        // Bounded: a run's member documents carry at most 8 addresses each.
+        while seen.known.len() > 64 {
+            seen.known.pop_first();
+        }
+        match blocked {
+            Some(_) if refuse => Err(owner_run::OwnerRunError::with(
+                api::local_network::PERMISSION_REQUIRED,
+                Some(&api::local_network::owner_message()),
+                None,
+            )
+            .into()),
+            _ => Ok(()),
+        }
     }
     /// Lane PHY item 2 (c): a step-6 dial that got no answer, named by one datagram to each joined
     /// Mac it dialed: this Mac's permission ([`api::local_network::PERMISSION_REQUIRED`]) or the
     /// joined Mac's silence ([`api::local_network::JOINED_MAC_SILENT`]); `None` for any other cause.
     fn named_dial_failure(&self, cause: &str) -> Option<StepError> {
-        let _ = cause;
-        None
+        use api::local_network::{Answer, dial_unanswered};
+        if !dial_unanswered(cause) {
+            return None;
+        }
+        // The joined Macs it dialed; the owner's own contributor is this Mac.
+        let local = self
+            .host
+            .with(|c| c.run.contributor.as_ref().map(|n| n.node.clone()));
+        let dialed: Vec<std::net::SocketAddr> = lock(&self.resident)
+            .bindings
+            .iter()
+            .filter(|v| Some(v.node_id()) != local.as_deref())
+            .flat_map(|v| v.address().ip_addrs().copied().collect::<Vec<_>>())
+            .collect();
+        let mut silent = None;
+        for to in dialed {
+            let answer = self.probe.send(to);
+            eprintln!("local_network_probe:{to}:{answer:?} after {cause}");
+            match answer {
+                Answer::Blocked => {
+                    return Some(
+                        owner_run::OwnerRunError::with(
+                            api::local_network::PERMISSION_REQUIRED,
+                            Some(&api::local_network::owner_message()),
+                            None,
+                        )
+                        .into(),
+                    );
+                }
+                Answer::Sent => {
+                    silent.get_or_insert(to);
+                }
+                Answer::NotLocal | Answer::Failed(_) => {}
+            }
+        }
+        silent.map(|to| {
+            owner_run::OwnerRunError::with(
+                api::local_network::JOINED_MAC_SILENT,
+                Some(&api::local_network::joined_mac_message(to.ip(), cause)),
+                None,
+            )
+            .into()
+        })
+    }
+    /// The run's failed workflow's open cause, named when it was a dial without an answer.
+    fn named_step_failure(&self) -> Option<StepError> {
+        let cause = lock(&self.resident).work.as_ref()?.failure_cause()?;
+        self.named_dial_failure(&cause)
     }
     /// The run's transport, resolved at `compose`; a work announcement before any compose (none
     /// in the chain's order) resolves its own.
@@ -965,6 +1068,15 @@ impl Chain for Composed {
             .new_run(run, deployment, reason, ceiling, binding);
     }
     fn run_step(&mut self, step: &str, env: &mut dyn StepEnv) -> Result<(), StepError> {
+        // Lane PHY item 2: macOS's Local Network question is asked before the compile is spent,
+        // and a pending or denied answer refuses Start's first step and the compile by name.
+        // Steps 1-5 (`machine::STEPS`): the joined Macs' work addresses arrive during step 3.
+        if let ("model" | "contributor" | "descriptors" | "observe" | "compile", Some(state)) =
+            (step, self.inner.state())
+        {
+            self.work
+                .local_network(state, matches!(step, "model" | "compile"))?;
+        }
         if step == "slices" {
             let state = self
                 .inner
@@ -972,6 +1084,13 @@ impl Chain for Composed {
                 .ok_or_else(|| refused("compiler_run_changed"))?;
             self.work
                 .prepare(state, env, &self.compiler, self.program.as_ref())?;
+            // Lane PHY item 2 (c): a dial without an answer is named, not `managed_workflow_failed`.
+            return self.inner.run_step(step, env).map_err(|failed| {
+                match (&failed, self.work.named_step_failure()) {
+                    (StepError::Refused(_), Some(named)) => named,
+                    _ => failed,
+                }
+            });
         }
         self.inner.run_step(step, env)
     }

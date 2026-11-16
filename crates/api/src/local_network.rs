@@ -48,16 +48,24 @@ pub enum Answer {
 
 /// One `send_to`'s result as an [`Answer`].
 pub fn classify(sent: std::io::Result<usize>) -> Answer {
-    let _ = sent;
-    Answer::Sent
+    match sent {
+        Ok(_) => Answer::Sent,
+        Err(e) if e.raw_os_error() == Some(libc::EHOSTUNREACH) => Answer::Blocked,
+        Err(e) => Answer::Failed(e.raw_os_error().unwrap_or(0)),
+    }
 }
 
 /// A unicast address on a private local network (RFC 1918, IPv4 link-local, IPv6 unique-local or
 /// link-local): what the Local Network permission gates and what a joined Mac advertises. Loopback,
 /// public, broadcast, multicast and unspecified addresses are not.
 pub fn is_local_network(ip: IpAddr) -> bool {
-    let _ = ip;
-    false
+    match ip {
+        IpAddr::V4(v4) => (v4.is_private() || v4.is_link_local()) && !v4.is_broadcast(),
+        IpAddr::V6(v6) => {
+            let first = v6.segments()[0];
+            (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80
+        }
+    }
 }
 
 /// Sends the one datagram (the seam a test replaces).
@@ -108,8 +116,9 @@ pub fn joined_mac_message(ip: IpAddr, cause: &str) -> String {
 /// The open dial failures whose cause can be a Local Network permission: a connect that never got
 /// an answer (rows 79, 80: `control_call_failed:control_connect_timeout`, `Expired`).
 pub fn dial_unanswered(cause: &str) -> bool {
-    let _ = cause;
-    false
+    cause.contains("control_connect_timeout")
+        || cause.contains("control_connect_failed")
+        || cause == "Expired"
 }
 
 #[cfg(test)]

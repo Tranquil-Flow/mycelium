@@ -135,7 +135,7 @@ fn a_pending_permission_is_asked_early_and_refuses_the_compile_by_name() {
 }
 
 /// Proves: (b) at Start's first step. A Start after a run whose datagram was blocked refuses at
-/// once, before the observe step runs, by re-probing the address the earlier run verified; the
+/// once, before its first step (`model`, `machine::STEPS`) runs, by re-probing the address the earlier run verified; the
 /// compile's start does the same.
 #[test]
 fn the_next_start_refuses_at_once_while_the_permission_is_still_pending() {
@@ -154,12 +154,24 @@ fn the_next_start_refuses_at_once_while_the_permission_is_still_pending() {
         None,
         None,
     );
-    let (code, _) = refusal(chain.run_step("observe", &mut Stopping));
+    let (code, _) = refusal(chain.run_step("model", &mut Stopping));
     assert_eq!(code, PERMISSION_REQUIRED);
     assert_eq!(
         probe.sent()[first.len()..],
         first[..],
         "the earlier run's address, again"
+    );
+    // Steps between only ask: the observe step is reached (and ends on the pressed Stop).
+    let asked = probe.sent().len();
+    let observed = chain.run_step("observe", &mut Stopping);
+    assert!(
+        !matches!(&observed, Err(StepError::Refused(e)) if e.code == PERMISSION_REQUIRED),
+        "{observed:?}"
+    );
+    assert_eq!(
+        probe.sent().len(),
+        asked + first.len(),
+        "the step asked again"
     );
     let (code, _) = refusal(chain.run_step("compile", &mut Stopping));
     assert_eq!(code, PERMISSION_REQUIRED);
