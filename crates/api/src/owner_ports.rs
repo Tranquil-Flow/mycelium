@@ -262,6 +262,11 @@ fn grant_self_consent(dir: &std::path::Path, node: &str, policy: &Value) -> Resu
     // maximum; a lower grant (it was `MemberChosenWall`, a member's choice in a v0.1.4 test fixture)
     // made the contributor refuse its own share, `member_wall_cap_below_share`.
     // Caps are integers (`_int_in`): a float wall is refused as `standing_consent_caps_invalid`.
+    // Commands: owner ruling 16 Nov 2026, 5,000 (it was 1,000, which ended one run's serving after
+    // about 995 answer tokens: REPORT-laneCAP measurement run). The figure a joined Mac's own page
+    // grants (`app.js` `max_commands:5000`) and the compile offers each stage
+    // (`DemoChainMaxCommands`), inside the standing consent's maximum (10,000). A stored grant
+    // keeps its own figure (above: never re-granted).
     let wall = budgets::BudgetId::PyMyceliumA13MacosStandingConsentMaxWallSecondsMaximumL102
         .span(budgets::Entries::ZERO)
         .map_or(3600u64, |s| s.millis() / 1000);
@@ -272,7 +277,7 @@ fn grant_self_consent(dir: &std::path::Path, node: &str, policy: &Value) -> Resu
             "storage_bytes": storage,
             "max_memory_bytes": 4_000_000_000u64,
             "max_wall_seconds": wall,
-            "max_commands": 1000u64,
+            "max_commands": 5000u64,
         },
     });
     standing_consent::grant(dir, &body, policy, now(), None)
