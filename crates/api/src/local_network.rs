@@ -29,7 +29,8 @@
 //! a multicast: the bundle's usage text promises that (`desktop::bundle::LOCAL_NETWORK_USAGE`).
 use std::net::{IpAddr, SocketAddr, UdpSocket};
 
-/// Start or step 6 refused because this Mac (the owner's) may not reach the local network yet.
+/// Start or step 6 refused because a datagram from this Mac (the owner's) to a current joined Mac
+/// failed at once with `EHOSTUNREACH`: Local Network not allowed yet, or no route (PHY-04).
 pub const PERMISSION_REQUIRED: &str = "local_network_permission_required";
 /// Step 6's dial got no answer although this Mac may reach the local network: the joined Mac's own
 /// Local Network alert is the first suspect (row 80), its network the second.
@@ -40,7 +41,8 @@ pub const JOINED_MAC_SILENT: &str = "joined_mac_did_not_answer";
 pub enum Answer {
     /// The kernel took the datagram: this app may reach the local network.
     Sent,
-    /// `EHOSTUNREACH` at once: the Local Network permission is pending or denied.
+    /// `EHOSTUNREACH` at once ([`IMMEDIATE`]): the Local Network permission is pending or denied,
+    /// or this Mac has no route to that address; on a fresh install the first is the likely cause.
     Blocked,
     /// Not a private local-network address: nothing was sent, nothing learned.
     NotLocal,
@@ -48,14 +50,23 @@ pub enum Answer {
     Failed(i32),
 }
 
-/// How soon a refused send must fail to read as the permission (PHY-04).
+/// How soon a refused send must fail to read as the permission (PHY-04). The measured pending
+/// permission failed every `sendto` at once (no packet left: the kernel's policy check answers
+/// before any network I/O), while a send that waits on the network fails only after it (an ARP
+/// resolution that gives up takes seconds, `EHOSTDOWN` in the measured allowed case). 100 ms is far
+/// above the first and far below the second; it does not make `EHOSTUNREACH` exclusive to the
+/// permission (an immediate routing refusal looks the same), which is why the refusal's message
+/// names both causes ([`owner_message`]).
 pub const IMMEDIATE: std::time::Duration = std::time::Duration::from_millis(100);
 
-/// One `send_to`'s result as an [`Answer`].
-pub fn classify(sent: std::io::Result<usize>, _elapsed: std::time::Duration) -> Answer {
+/// One `send_to`'s result, and how long it took, as an [`Answer`]: only an immediate
+/// `EHOSTUNREACH` is evidence of the permission; a slow one is a network fault.
+pub fn classify(sent: std::io::Result<usize>, elapsed: std::time::Duration) -> Answer {
     match sent {
         Ok(_) => Answer::Sent,
-        Err(e) if e.raw_os_error() == Some(libc::EHOSTUNREACH) => Answer::Blocked,
+        Err(e) if e.raw_os_error() == Some(libc::EHOSTUNREACH) && elapsed < IMMEDIATE => {
+            Answer::Blocked
+        }
         Err(e) => Answer::Failed(e.raw_os_error().unwrap_or(0)),
     }
 }
@@ -90,7 +101,16 @@ impl Probe for Udp {
             return Answer::NotLocal;
         }
         match UdpSocket::bind(SocketAddr::new(from, 0)) {
-            Ok(socket) => classify(socket.send_to(&[0], to), std::time::Duration::ZERO),
+            Ok(socket) => {
+                // PHY-04: the elapsed time is recorded at the send itself.
+                let begun = std::time::Instant::now();
+                let sent = socket.send_to(&[0], to);
+                let elapsed = begun.elapsed();
+                if sent.is_err() {
+                    eprintln!("local_network_send_failed:{to}:{}us", elapsed.as_micros());
+                }
+                classify(sent, elapsed)
+            }
             Err(e) => Answer::Failed(e.raw_os_error().unwrap_or(0)),
         }
     }
@@ -98,12 +118,16 @@ impl Probe for Udp {
 
 const SETTINGS: &str = "System Settings › Privacy & Security › Local Network";
 
-/// The page message of [`PERMISSION_REQUIRED`]: which Mac, what to allow, where.
-pub fn owner_message(_ip: IpAddr) -> String {
+/// The page message of [`PERMISSION_REQUIRED`] for a datagram to the joined Mac at `ip` that
+/// failed at once with `EHOSTUNREACH`: what the evidence shows (this Mac's permission OR no route
+/// to that Mac), which one is likely, what to allow and where (PHY-04).
+pub fn owner_message(ip: IpAddr) -> String {
     format!(
-        "macOS does not let Mycelium reach the joined Mac on your network yet. On THIS Mac (the \
-         owner's), answer Allow on the alert asking whether Mycelium may find devices on your local \
-         network, or turn Mycelium on in {SETTINGS}; then press Start again."
+        "macOS has not allowed Mycelium to use the Local Network on THIS Mac (the owner's), or this \
+         Mac has no route to the joined Mac at {ip}. On a fresh install the first is the likely \
+         cause: answer Allow on the alert asking whether Mycelium may find devices on your local \
+         network, or turn Mycelium on in {SETTINGS}; then press Start again. If Mycelium is already \
+         on there, check that both Macs are on the same network."
     )
 }
 
