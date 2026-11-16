@@ -134,19 +134,32 @@ fn a_pending_permission_is_asked_early_and_refuses_the_compile_by_name() {
     );
 }
 
-/// Proves: (b) at Start's first step. A Start after a run whose datagram was blocked refuses at
-/// once, before its first step (`model`, `machine::STEPS`) runs, by re-probing the address the earlier run verified; the
-/// compile's start does the same.
+/// The owner's and the joined Mac's work transports on a LAN-shaped choice: bound to 127.0.0.1
+/// under an explicit-peer policy that admits only 127.0.0.1, so the run has an admitted LAN path
+/// (`NetworkChoice(Some(..))`) and every address `allows` accepts is on this Mac.
+fn lan_on_loopback() -> WorkNetwork {
+    let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
+    WorkNetwork::Fixed(NetworkChoice(Some((
+        loopback,
+        runtime::iroh_host::LanPolicy::with_explicit(vec![loopback]).unwrap(),
+    ))))
+}
+
+/// Proves PHY-02 (lane PHY patch 2): a new run takes its probe targets from ITS verified members
+/// only. An earlier run's blocked address is not probed into a new run whose joined Mac has not
+/// published (and so is not verified) for it: Start's first step and the compile's start send no
+/// datagram and never refuse `local_network_permission_required`. (Replaces the patch-1 test that
+/// required the earlier run's address to be replayed into the fresh run.)
 #[test]
-fn the_next_start_refuses_at_once_while_the_permission_is_still_pending() {
-    let mut f = Fixture::new();
+fn a_new_run_whose_members_are_not_verified_yet_sends_nothing_and_is_never_refused() {
+    let mut f = Fixture::on(lan_on_loopback());
     let mut chain = Composed::new(&f.host, None, None);
     let probe = Scripted::new(Answer::Blocked);
     chain.work.probe = probe.clone();
     let earlier = published(&mut f, &chain.work, "run-ln2");
     assert!(chain.work.local_network(&earlier, false).is_ok());
     let first = probe.sent();
-    assert!(!first.is_empty());
+    assert!(!first.is_empty(), "the earlier run's member was probed");
     chain.new_run(
         "run-ln3",
         "dep-run-ln3",
@@ -154,27 +167,49 @@ fn the_next_start_refuses_at_once_while_the_permission_is_still_pending() {
         None,
         None,
     );
-    let (code, _) = refusal(chain.run_step("model", &mut Stopping));
-    assert_eq!(code, PERMISSION_REQUIRED);
+    for step in ["model", "compile"] {
+        let result = chain.run_step(step, &mut Stopping);
+        assert!(
+            !matches!(&result, Err(StepError::Refused(e)) if e.code == PERMISSION_REQUIRED),
+            "{step}: {result:?}"
+        );
+    }
+    // The new run with the joined Mac named but not yet verified for it (it has not published).
+    let mut fresh = RunState::new("run-ln3", "dep-run-ln3", owner_run::Reason::Start);
+    fresh.participants = earlier.participants.clone();
+    fresh.local_node = earlier.local_node.clone();
+    assert!(chain.work.local_network(&fresh, true).is_ok());
+    assert_eq!(probe.sent(), first, "no datagram into the new run");
+}
+
+/// Proves PHY-02: a member the seed revoked is not a current verified member, so its address is
+/// not probed again, even in the run it was verified for, and it cannot veto the run.
+#[test]
+fn a_revoked_members_address_is_not_probed() {
+    let mut f = Fixture::on(lan_on_loopback());
+    let mut ports = PackagedChainPorts::new(&f.host, None, None);
+    let probe = Scripted::new(Answer::Blocked);
+    ports.work.probe = probe.clone();
+    let state = published(&mut f, &ports.work, "run-rv1");
+    assert!(ports.work.local_network(&state, false).is_ok());
+    let first = probe.sent();
+    assert!(!first.is_empty());
+    let seed = f.host.with(|c| c.authority.seed.clone().unwrap());
+    let generation = lock(&f.member_authority)
+        .session
+        .as_ref()
+        .unwrap()
+        .generation()
+        .unwrap();
+    seed.coordinator
+        .advance_member_generation(&f.remote, generation, "STOPPED")
+        .unwrap();
+    assert!(ports.work.local_network(&state, true).is_ok());
     assert_eq!(
-        probe.sent()[first.len()..],
-        first[..],
-        "the earlier run's address, again"
+        probe.sent(),
+        first,
+        "the revoked member's address was probed"
     );
-    // Steps between only ask: the observe step is reached (and ends on the pressed Stop).
-    let asked = probe.sent().len();
-    let observed = chain.run_step("observe", &mut Stopping);
-    assert!(
-        !matches!(&observed, Err(StepError::Refused(e)) if e.code == PERMISSION_REQUIRED),
-        "{observed:?}"
-    );
-    assert_eq!(
-        probe.sent().len(),
-        asked + first.len(),
-        "the step asked again"
-    );
-    let (code, _) = refusal(chain.run_step("compile", &mut Stopping));
-    assert_eq!(code, PERMISSION_REQUIRED);
 }
 
 /// Proves: (c). A step-6 dial that got no answer is named: by this Mac's permission when the
