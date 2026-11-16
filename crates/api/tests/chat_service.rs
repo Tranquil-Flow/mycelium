@@ -1048,3 +1048,45 @@ fn the_chat_envelope_is_written_once_in_the_workspace_sources() {
     found.sort();
     assert_eq!(found, ["api/src/prompt_codec.rs", "model/src/chat.rs"]);
 }
+
+/// Lane CHATFIX item 1b: v0.1.4's gateway answers explicit credential theft with the codec's fixed
+/// refusal BEFORE any model work (`Qwen2PromptCodec.policy_response`, codec.py:159-175, inherited
+/// by Qwen3; `RouterSessionBackend._run`, backend.py:196-203: emitted as the only token, then
+/// `completed`). rv40's route chat applied no policy at all (only the one-Mac path did,
+/// `chat_edge::policy_response`). Every probed prompt the executed codec refuses gets exactly that
+/// one piece and never reaches the gateway; every other prompt does.
+#[test]
+fn the_codec_policy_answers_credential_theft_without_the_gateway() {
+    let fixture: Value = serde_json::from_str(CODEC_FIXTURE).unwrap();
+    let gateway = Arc::new(Recording::default());
+    let chat = model_service(Some("Qwen/Qwen3-0.6B"), gateway.clone());
+    let mut refused = 0;
+    for (i, case) in fixture["qwen3"]["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
+        let user = case["user"].as_str().unwrap();
+        if user.trim().is_empty() {
+            continue;
+        }
+        let sent = chat
+            .send(&format!("client-{i}"), prompt(user, 4))
+            .unwrap_or_else(|e| panic!("{user:?}: {:?}", e.error));
+        let (tokens, last) = until_done(&chat, &id_of(&sent));
+        assert_eq!(last["terminal"], "completed", "{user:?}: {last}");
+        match case["policy_response"].as_str() {
+            Some(answer) => {
+                refused += 1;
+                assert_eq!(tokens, [answer], "{user:?}");
+                assert!(
+                    !gateway.0.lock().unwrap().iter().any(|p| p.contains(user)),
+                    "{user:?} reached the gateway"
+                );
+            }
+            None => assert_eq!(tokens, ["ok"], "{user:?}"),
+        }
+    }
+    assert_eq!(refused, 2);
+}
