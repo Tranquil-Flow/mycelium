@@ -27,7 +27,10 @@ use std::{
     io::Write as _,
     net::SocketAddr,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, Ordering},
+    },
     thread::JoinHandle,
     time::{Duration, Instant},
 };
@@ -127,6 +130,13 @@ impl RequestCancel {
 }
 /// The run's route gateway: ONE object per run (EP-PLAN U7), one `stream` call per chat.
 pub trait RouteGateway: Send + Sync {
+    /// The route's live qualification (`RegistryClient.stream`'s first read, chat.py:111-124:
+    /// `GET qualification/current`; a 503 is `chat_route_not_qualified`), which [`Self::stream`]
+    /// sends with its request. v0.2's request gateway answers it from the route's current
+    /// state (withdrawn/revoked, carrier, owner signature: `RouteHost::qualification`), the
+    /// state v0.1.4's backend re-reads in `_require_current_deployment` (backend.py:195,
+    /// 429-454). The codec's policy answer is given only after it (lane CHATFIX patch 2, CF-02).
+    fn qualification(&self) -> Result<Value, GatewayError>;
     /// `RegistryClient.stream` (chat.py:106-147): qualification, submit, the event stream until
     /// its terminal. `cancel` is armed once the gateway accepted the request. `prompt` is already
     /// in the run model's chat envelope (v0.1.4's gateway codec, backend.py:196-209): a
@@ -297,6 +307,15 @@ impl HttpRouteGateway {
     }
 }
 impl RouteGateway for HttpRouteGateway {
+    fn qualification(&self) -> Result<Value, GatewayError> {
+        let idle = span(self.idle)?;
+        // 503 is the gateway's answer while no route is qualified: name the state (chat.py:114-121).
+        match self.exchange("GET", "/v1/qualification/current", "", "", idle)? {
+            (200, q) if q.is_object() => Ok(q),
+            (503, _) => Err(GatewayError::new("chat_route_not_qualified")),
+            (status, body) => Err(http_code("get", "/v1/qualification/current", status, &body)),
+        }
+    }
     fn stream(
         &self,
         prompt: &ChatPrompt,
@@ -305,14 +324,7 @@ impl RouteGateway for HttpRouteGateway {
         on_token: &mut dyn FnMut(&str),
     ) -> Result<Streamed, GatewayError> {
         let idle = span(self.idle)?;
-        // 503 is the gateway's answer while no route is qualified: name the state (chat.py:114-121).
-        let qualification = match self.exchange("GET", "/v1/qualification/current", "", "", idle)? {
-            (200, q) if q.is_object() => q,
-            (503, _) => return Err(GatewayError::new("chat_route_not_qualified")),
-            (status, body) => {
-                return Err(http_code("get", "/v1/qualification/current", status, &body));
-            }
-        };
+        let qualification = self.qualification()?;
         let document = json!({"protocol":"mycelium.request_gateway.v2","prompt":prompt.as_str(),
             "max_new_tokens":max_new_tokens,"qualification":qualification,
             "workload_profile_id":"interactive_chat_v1","qos_class":"interactive"});
@@ -778,7 +790,8 @@ impl ChatService {
     }
     /// `_work` (chat.py:342-398).
     /// `policy`: the codec's fixed answer for this prompt, which v0.1.4's gateway emits as the only
-    /// token, then `completed`, before any model work (backend.py:196-203); the route is not asked.
+    /// token, then `completed`, before any model work (backend.py:196-203), in the gateway's
+    /// admission order ([`Self::policy_answer`]).
     fn work(
         &self,
         id: &str,
@@ -809,11 +822,7 @@ impl ChatService {
         let outcome = match (self.ended_by_ceiling(run_id.as_deref()), policy) {
             (Some(ended), _) => Err(GatewayError::new(ended)),
             (None, Some(answer)) => {
-                on_token(answer);
-                Ok(Streamed {
-                    terminal: Some("completed"),
-                    code: None,
-                })
+                Self::policy_answer(gateway.as_ref(), &cancel, answer, &mut on_token)
             }
             (None, None) => gateway.stream(prompt, max_new_tokens, &cancel, &mut on_token),
         };
@@ -880,6 +889,41 @@ impl ChatService {
         if state.busy.as_deref() == Some(id) {
             state.busy = None;
         }
+    }
+    /// The codec's policy answer in v0.1.4's admission order (lane CHATFIX patch 2, CF-02). There
+    /// it comes from inside the gateway: the chat's client first reads the route's qualification
+    /// (chat.py:111-124), the gateway accepts the request and a cancel the owner sent earlier goes
+    /// at once (`_arm_cancel`, chat.py:156-164), the backend ends a cancelled request `cancelled`
+    /// and re-checks the current deployment (`_run`, backend.py:193-195), and only then emits
+    /// `policy_response` as the only token, `completed` (:196-203). Here: the same qualification
+    /// read, then the cancel armed as on acceptance (a cancel wanted earlier ends the chat
+    /// `cancelled`), then the answer. Departure, named: no `POST` inference is made, so the
+    /// policy answer takes no gateway session: v0.2's gateway tokenizes at submit
+    /// (`RouteHost::prepare`), and v0.1.4 never encodes a policy prompt (backend.py:204).
+    fn policy_answer(
+        gateway: &dyn RouteGateway,
+        cancel: &RequestCancel,
+        answer: &str,
+        on_token: &mut dyn FnMut(&str),
+    ) -> Result<Streamed, GatewayError> {
+        gateway.qualification()?;
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let flag = cancelled.clone();
+        cancel.arm(Box::new(move || {
+            flag.store(true, Ordering::SeqCst);
+            Ok(true)
+        }));
+        let terminal = if cancelled.load(Ordering::SeqCst) {
+            "cancelled"
+        } else {
+            on_token(answer);
+            "completed"
+        };
+        cancel.disarm();
+        Ok(Streamed {
+            terminal: Some(terminal),
+            code: None,
+        })
     }
     /// `_work`'s `except Exception` + `finally` (chat.py:376-398) for a chat whose work unwound
     /// before it ended: `cancel_reason`, else `chat_generation_failed_panic` (`failure_code`,

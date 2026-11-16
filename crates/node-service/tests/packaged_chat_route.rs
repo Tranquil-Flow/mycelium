@@ -375,6 +375,9 @@ fn serving_status() -> Value {
 /// `ServingRun`'s status needs a gateway value only; this one is never asked to stream.
 struct MustNotRunGateway;
 impl RouteGateway for MustNotRunGateway {
+    fn qualification(&self) -> Result<Value, api::chat_service::GatewayError> {
+        panic!("this gateway only builds a status")
+    }
     fn stream(
         &self,
         _: &api::prompt_codec::ChatPrompt,

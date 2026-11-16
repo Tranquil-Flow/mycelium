@@ -516,6 +516,9 @@ struct Scripted {
     end: u64,
 }
 impl RouteGateway for Scripted {
+    fn qualification(&self) -> Result<Value, GatewayError> {
+        Ok(json!({}))
+    }
     fn stream(
         &self,
         _: &ChatPrompt,
@@ -776,6 +779,9 @@ fn a_timing_file_swapped_for_a_symlink_is_not_followed() {
 /// A gateway that panics inside `stream` (a defect in a later `RouteGateway`).
 struct Panics;
 impl RouteGateway for Panics {
+    fn qualification(&self) -> Result<Value, GatewayError> {
+        Ok(json!({}))
+    }
     fn stream(
         &self,
         _: &ChatPrompt,
@@ -815,6 +821,9 @@ const CODEC_FIXTURE: &str = include_str!("fixtures/prompt-codec-oracle.json");
 #[derive(Default)]
 struct Recording(Mutex<Vec<String>>);
 impl RouteGateway for Recording {
+    fn qualification(&self) -> Result<Value, GatewayError> {
+        Ok(json!({}))
+    }
     fn stream(
         &self,
         prompt: &ChatPrompt,
