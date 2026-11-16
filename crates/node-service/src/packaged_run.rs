@@ -566,17 +566,38 @@ impl PackagedChainPorts {
         }
     }
 }
-impl owner_run::owner_chain::ChainPorts for PackagedChainPorts {
-    /// `chain.teardown`: the compiler's worker first, then the bootstrap offers' cleanup and
-    /// retirement (`api::owner_observation::Backend::teardown`).
-    fn teardown(
+impl PackagedChainPorts {
+    /// `chain.teardown(ctx, failed=)` over the run's `ctx.state` (`None`: a teardown without one,
+    /// which then announces nothing): every chat, the route's work, the `stopped` announcement,
+    /// the compiler's worker, then the bootstrap offers' cleanup and retirement
+    /// (`api::owner_observation::Backend::teardown`) and the run's context.
+    fn teardown_with(
         &mut self,
         failed: bool,
-        _: &mut dyn owner_run::chain::StepEnv,
+        state: Option<&owner_run::state::RunState>,
+        env: &mut dyn owner_run::chain::StepEnv,
     ) -> Result<(), String> {
         // Every chat FIRST, while the route still takes `DELETE` (demo_chain.py:1326-1338).
         chat::teardown(self.work.host(), failed);
         let work = self.close_work();
+        // `stopped` is an instruction, not just status: the joined Macs' agents tear their work
+        // down on receipt and their cards read `stopped` (demo_chain.py:1381-1390 @ f4e366e9),
+        // announced once the route's close had its allowance, whatever it answered (never a
+        // proof of cleanup), before the offers are retired and the run's context ends. Only for
+        // a run whose model step ran (`if ctx.state.get('model') is not None`); a failure is
+        // recorded `owner_stop_announce_failed` and the teardown goes on (lane CHATPAGE item 3:
+        // without it Mac B's card kept `phase: serving` after Stop and Quit).
+        if let Some(state) = state.filter(|state| state.model.is_some())
+            && let Err(error) =
+                owner_run::steps::exchange::announce(&mut self.reports, state, "stopped", None)
+        {
+            let class = match error {
+                owner_run::chain::StepError::Refused(_) => "OwnerRunError".to_owned(),
+                owner_run::chain::StepError::Stopped => "_Stopped".to_owned(),
+                owner_run::chain::StepError::Exception { class } => class,
+            };
+            env.record_exception("owner_stop_announce_failed", &class);
+        }
         let (compilation, outputs) = {
             let mut compiler = self
                 .compiler
@@ -621,6 +642,26 @@ impl owner_run::owner_chain::ChainPorts for PackagedChainPorts {
             }
         };
         work.and(compilation).and(observation)
+    }
+}
+impl owner_run::owner_chain::ChainPorts for PackagedChainPorts {
+    /// `chain.teardown` without the run's state: everything but the `stopped` announcement.
+    fn teardown(
+        &mut self,
+        failed: bool,
+        env: &mut dyn owner_run::chain::StepEnv,
+    ) -> Result<(), String> {
+        self.teardown_with(failed, None, env)
+    }
+    /// `chain.teardown(ctx, failed=)`: what [`OwnerChain`](owner_run::owner_chain::OwnerChain)
+    /// calls, with `ctx.state` as the steps left it.
+    fn teardown_run(
+        &mut self,
+        failed: bool,
+        state: &owner_run::state::RunState,
+        env: &mut dyn owner_run::chain::StepEnv,
+    ) -> Result<(), String> {
+        self.teardown_with(failed, Some(state), env)
     }
     /// The serving run's probes go to its resident owner workflow (lane SRV), never the trait
     /// defaults, which would never roll over, never reach the ceiling and never fail a serving run.
