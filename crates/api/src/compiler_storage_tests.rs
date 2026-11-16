@@ -598,6 +598,65 @@ fn a_serving_runs_entry_survives_a_second_starts_retirement_pass() {
     );
 }
 
+/// Proves PHY-01 (lane PHY patch 2): a run whose start record has no custody marker is a base
+/// build's run. A base build never takes the run directory's lock, so a free lock proves nothing
+/// about it: a LIVE base process (compiling or serving it) looks exactly like a dead one. Such a
+/// run is never retired; it is named with its charged bytes. A marked run (this build's) whose
+/// lock is free is dead and is retired beside it.
+#[test]
+fn a_legacy_runs_entry_is_kept_and_named_while_a_dead_marked_run_beside_it_is_retired() {
+    let f = Fixture::new();
+    let charge = 40_000_000;
+    // A base-format live run: the base wrote this start record and holds no run-directory lock.
+    drop(compiled_run(&f, "legacy-live", charge));
+    let start = f
+        .root
+        .join("chain-runs/legacy-live")
+        .join("compile-start.private.json");
+    let max = private_state::private_json_limit().unwrap();
+    let written = private_state::load(&start, max).unwrap().unwrap();
+    let base = json!({
+        "protocol": "mycelium.chain_compile_start.v1",
+        "run_id": written["run_id"],
+        "deployment_id": written["deployment_id"],
+        "epoch": written["epoch"],
+    });
+    private_state::store(&start, &base, max).unwrap();
+    let row = ledger_of(&f.root)["entries"]["legacy-live"].clone();
+    // This build's run, dead: its process released the lock.
+    drop(compiled_run(&f, "dead-marked", charge));
+    let retirement = compiler_inputs::retire_dead_runs(&f.root).unwrap();
+    assert_eq!(retirement.retired, ["dead-marked"]);
+    assert!(retirement.refused.is_empty(), "{:?}", retirement.refused);
+    assert_eq!(retirement.legacy, [("legacy-live".to_owned(), charge)]);
+    assert_eq!(ledger_of(&f.root)["entries"]["legacy-live"], row);
+    assert!(
+        f.root
+            .join("chain-runs/legacy-live/stage-shards/model-stage-001-of-002.safetensors")
+            .exists(),
+        "a legacy run's shards are untouched"
+    );
+    assert!(!f.root.join("chain-runs/dead-marked/stage-shards").exists());
+    // This build marks its start record (the retired run keeps its metadata).
+    let marked = private_state::load(
+        &f.root
+            .join("chain-runs/dead-marked")
+            .join("compile-start.private.json"),
+        max,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        marked.get("custody"),
+        Some(&json!(owner_retire::CUSTODY)),
+        "this build marks its start record"
+    );
+    // Every later pass leaves it too.
+    let again = compiler_inputs::retire_dead_runs(&f.root).unwrap();
+    assert!(again.retired.is_empty(), "{again:?}");
+    assert_eq!(again.legacy, [("legacy-live".to_owned(), charge)]);
+}
+
 #[test]
 fn retirement_never_adopts_a_member_custody_or_a_foreign_file() {
     let mut f = Fixture::new();

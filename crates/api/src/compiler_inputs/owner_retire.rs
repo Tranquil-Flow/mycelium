@@ -44,13 +44,18 @@ pub const FOREIGN_OUTPUT: &str = "compiler_storage_retire_foreign_output";
 /// The run directory no longer has the identity, mode or owner the ledger bound.
 pub const OWNER_CHANGED: &str = "compiler_storage_retire_owner_changed";
 const BUSY: &str = "compiler_run_busy";
+/// The start record's custody marker (lane PHY patch 2, PHY-01): written by every build that
+/// holds the run directory's lock for as long as it keeps the run.
+pub const CUSTODY: &str = "mycelium.compile_run_flock.v1";
 
-/// What one retirement pass did: the runs whose entries it removed, in ledger order, and the runs
-/// it left charged with the reason (never silently).
+/// What one retirement pass did: the runs whose entries it removed, in ledger order, the runs it
+/// left charged with the reason (never silently), and the legacy runs it left charged with their
+/// charged bytes.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Retirement {
     pub retired: Vec<String>,
     pub refused: Vec<(String, &'static str)>,
+    pub legacy: Vec<(String, u64)>,
 }
 
 fn open_directory(path: &Path) -> std::io::Result<fs::File> {

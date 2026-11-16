@@ -8,9 +8,19 @@ use super::*;
 use api::preferences::private_state;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 
-/// A run that compiled and died, as a crashed or older process leaves it: its run directory with
-/// the compile's start record, its stage shard and its `retained` ledger entry; nothing holds it.
+/// A run that compiled and died, as a crashed process of this build leaves it: its run directory
+/// with the compile's start record (carrying this build's custody marker), its stage shard and its
+/// `retained` ledger entry; nothing holds it.
 fn dead_owner_run(owner: &Path, run: &str) {
+    owner_run_on_disk(owner, run, true);
+}
+/// A run as a base build leaves it while it compiles or serves it: a start record with no custody
+/// marker, its stage shard and its ledger entry; the base build never takes the run directory's
+/// lock, so nothing holds it although its process may be alive.
+fn legacy_owner_run(owner: &Path, run: &str) {
+    owner_run_on_disk(owner, run, false);
+}
+fn owner_run_on_disk(owner: &Path, run: &str, marked: bool) {
     let limit = private_state::private_json_limit().unwrap();
     let runs = owner.join("chain-runs");
     match fs::DirBuilder::new().mode(0o700).create(&runs) {
@@ -20,13 +30,12 @@ fn dead_owner_run(owner: &Path, run: &str) {
     }
     let root = runs.join(run);
     fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
-    private_state::store(
-        &root.join("compile-start.private.json"),
-        &json!({"protocol":"mycelium.chain_compile_start.v1","run_id":run,
-            "deployment_id":"dead-deployment","epoch":0}),
-        limit,
-    )
-    .unwrap();
+    let mut start = json!({"protocol":"mycelium.chain_compile_start.v1","run_id":run,
+        "deployment_id":"dead-deployment","epoch":0});
+    if marked {
+        start["custody"] = json!(api::compiler_inputs::owner_retire::CUSTODY);
+    }
+    private_state::store(&root.join("compile-start.private.json"), &start, limit).unwrap();
     let shards = root.join("stage-shards");
     fs::DirBuilder::new().mode(0o700).create(&shards).unwrap();
     let mut file = fs::OpenOptions::new()
@@ -113,4 +122,24 @@ fn the_next_start_retires_runs_a_lost_process_left_behind() {
     let mut chain = Composed::new(&f.host, None, None);
     chain.new_run("next", "next-dep", owner_run::Reason::Start, None, None);
     assert!(entries(&owner).is_empty(), "{:?}", entries(&owner));
+}
+
+/// Proves PHY-01 (lane PHY patch 2) at the next Start: a base-format run (no custody marker; a
+/// live base process may still compile or serve it) is kept with its stage shards and charge, and
+/// the dead marked run beside it is retired.
+#[test]
+fn the_next_start_keeps_a_legacy_run_and_retires_the_dead_marked_one_beside_it() {
+    let f = Fixture::new();
+    let owner = f.root.join("owner");
+    legacy_owner_run(&owner, "legacy-live");
+    dead_owner_run(&owner, "crashed");
+    let mut chain = Composed::new(&f.host, None, None);
+    chain.new_run("next", "next-dep", owner_run::Reason::Start, None, None);
+    assert_eq!(entries(&owner), ["legacy-live"]);
+    assert!(
+        owner
+            .join("chain-runs/legacy-live/stage-shards/model-stage-001-of-002.safetensors")
+            .exists()
+    );
+    assert!(!owner.join("chain-runs/crashed/stage-shards").exists());
 }
