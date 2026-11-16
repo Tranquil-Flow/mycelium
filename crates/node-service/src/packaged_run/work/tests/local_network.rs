@@ -267,6 +267,48 @@ fn a_step_6_dial_without_an_answer_is_named_on_the_mac_that_must_allow_it() {
     ports.work.teardown().unwrap();
 }
 
+/// Proves PHY-02 residual (lane PHY patch 3): the step-6 diagnostic probes only members still
+/// current for this run. A member verified at compose and revoked before its failed dial is
+/// diagnosed gets no datagram, and its address cannot decide the returned error: the original
+/// failure passes through unnamed.
+#[test]
+fn a_member_revoked_after_compose_is_not_probed_by_the_step_6_diagnostic() {
+    let mut f = Fixture::on(lan_on_loopback());
+    let mut ports = PackagedChainPorts::new(&f.host, None, None);
+    let probe = Scripted::new(Answer::Blocked);
+    ports.work.probe = probe.clone();
+    let state = run_state(&mut f, &ports);
+    let mut env = Env { at: Instant::now() };
+    ports
+        .work
+        .compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env)
+        .unwrap();
+    assert!(!member_addresses(&f, &ports.work, &state).is_empty());
+    let seed = f.host.with(|c| c.authority.seed.clone().unwrap());
+    let generation = lock(&f.member_authority)
+        .session
+        .as_ref()
+        .unwrap()
+        .generation()
+        .unwrap();
+    seed.coordinator
+        .advance_member_generation(&f.remote, generation, "STOPPED")
+        .unwrap();
+    let named = ports
+        .work
+        .named_dial_failure("control_call_failed:control_connect_timeout");
+    assert!(
+        named.is_none(),
+        "a revoked member decided the error: {named:?}"
+    );
+    assert!(
+        probe.sent().is_empty(),
+        "the revoked member's address was probed: {:?}",
+        probe.sent()
+    );
+    let _ = ports.work.teardown();
+}
+
 /// PHY2-01 (lane PHY patch 3): a reading of this Mac's interfaces that answers `first` to the run's
 /// first reading (its probe passes) and `then` to every later one (compose), with the count.
 fn changing(
