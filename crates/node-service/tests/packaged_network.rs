@@ -247,3 +247,93 @@ fn the_owner_status_carries_the_chat_block_with_the_relay_share_url() {
     drop(core);
     std::fs::remove_dir_all(&state).unwrap_or_default();
 }
+
+/// One request to the relay's loopback proxy, as the public front forwards it: `(status, headers,
+/// body)`. `Connection: close`, so the body ends with the stream.
+fn relay_request(
+    proxy: u16,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &[u8],
+) -> (u16, String, Vec<u8>) {
+    use std::io::{Read, Write};
+    let mut stream = TcpStream::connect(("127.0.0.1", proxy)).unwrap();
+    stream
+        .set_read_timeout(Some(millis(B::WorkerStartup)))
+        .unwrap();
+    let mut head = format!(
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Length: {}\r\n",
+        body.len()
+    );
+    for (name, value) in headers {
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
+    head.push_str("\r\n");
+    stream.write_all(head.as_bytes()).unwrap();
+    stream.write_all(body).unwrap();
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).unwrap();
+    let split = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    let head = String::from_utf8_lossy(&raw[..split]).into_owned();
+    let status = head.split(' ').nth(1).unwrap().parse().unwrap();
+    (status, head.to_ascii_lowercase(), raw[split + 4..].to_vec())
+}
+fn relay_chat(proxy: u16, path: &str, body: &Value) -> (u16, Value) {
+    let (status, _, raw) = relay_request(
+        proxy,
+        "POST",
+        path,
+        &[
+            ("Content-Type", "application/json"),
+            ("X-Mycelium-Chat", "1"),
+        ],
+        &serde_json::to_vec(body).unwrap(),
+    );
+    (status, serde_json::from_slice(&raw).unwrap_or(Value::Null))
+}
+
+/// Lane CHATS item 2 (ledger row 106 a): v0.1.4 binds the owner's chat behind its relay
+/// (`_bind_public_routes`, app.py:1070-1077 @ f4e366e9: `proxy.bind_chat(... chat.handle(self, ...,
+/// via_relay=True))`), so the room's `share_url` reaches the run's chat service. On rv39 the relay
+/// answered `/chat/api/state` with `relay_chat_not_bound` (503) while the run served. With the
+/// relay up and no run, the relay's `/chat/*` answer from the run's chat service itself: its state
+/// document (not available), its own `chat_not_ready` for a send, its header check, and the chat
+/// page under the chat CSP.
+#[test]
+fn the_relay_answers_the_chat_from_the_runs_chat_service() {
+    let state = state_root("relay-chat");
+    let (core, mut cleanup) = packaged_core(&state);
+    let proxy = free_port();
+    let started = post(&core, "/api/network/start", network_body(proxy));
+    assert_eq!(started.0, 200, "network start: {}", started.1);
+    let (code, chat_state) = relay_chat(proxy, "/chat/api/state", &json!({}));
+    assert_eq!(code, 200, "{chat_state}");
+    assert_eq!(
+        (&chat_state["available"], &chat_state["busy"]),
+        (&json!(false), &json!(false)),
+        "{chat_state}"
+    );
+    assert!(chat_state["limits"].is_object(), "{chat_state}");
+    let sent = relay_chat(proxy, "/chat/api/send", &json!({"prompt": "hi"}));
+    assert_eq!(sent, (503, json!({"error": "chat_not_ready"})));
+    let (code, _, raw) = relay_request(
+        proxy,
+        "POST",
+        "/chat/api/state",
+        &[("Content-Type", "application/json")],
+        b"{}",
+    );
+    assert_eq!(
+        (code, serde_json::from_slice::<Value>(&raw).unwrap()),
+        (403, json!({"error": "chat_header_required"}))
+    );
+    let (code, head, page) = relay_request(proxy, "GET", "/chat", &[], b"");
+    assert_eq!(code, 200, "{head}");
+    assert!(head.contains("content-type: text/html"), "{head}");
+    assert!(head.contains("content-security-policy:"), "{head}");
+    assert!(!page.is_empty());
+    assert_eq!(quit(&mut cleanup), Ok(Poll::Verified));
+    drop(core);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
