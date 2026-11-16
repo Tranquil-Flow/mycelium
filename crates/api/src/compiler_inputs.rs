@@ -138,6 +138,9 @@ pub struct InputArtifact {
     source: Prepared,
     request: BuildRequest,
     cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// The run directory, exclusively locked while this artifact lives: a retirement pass
+    /// ([`retire_dead_runs`]) never touches a run whose custody is held (lane PHY item 1).
+    _custody: fs::File,
 }
 impl InputArtifact {
     pub fn bind_cancellation(
@@ -528,6 +531,9 @@ impl InputArtifact {
 
 /// Member byte custody reuses the compiler ledger, without source or proof fabrication.
 pub mod member_shard;
+/// The owner retires the ledger entries and stage shards of its own dead compile runs.
+pub mod owner_retire;
+pub use owner_retire::{Retirement, retire_dead_runs};
 
 fn reserve_output(
     runs: &Path,
@@ -837,7 +843,10 @@ fn reconcile_storage_temporaries(runs: &Path, committed: &Map<String, Value>) ->
                 Some(next) => ["bytes", "run_dev", "run_ino"]
                     .iter()
                     .any(|key| next[*key] != row[*key]),
-                None => !member_shard::refund_matches(runs, run, row),
+                None => {
+                    !member_shard::refund_matches(runs, run, row)
+                        && !owner_retire::refund_matches(runs, run, row)
+                }
             })
         {
             return Err(bad);
@@ -1054,13 +1063,16 @@ fn emit_mode(
             Err(_) => return Err(Error("compiler_directory_invalid")),
         }
     }
+    let custody = owner_retire::custody(&output, directory_identity)?;
     let documents = BTreeMap::from([
         (
             "compile-start.private.json".into(),
             if loopback {
-                json!({"protocol":"mycelium.chain_compile_start.loopback.v1","run_id":run,"deployment_id":deployment,"epoch":epoch,"scope":"loopback_process_qualification","route_ready":false})
+                json!({"protocol":"mycelium.chain_compile_start.loopback.v1","run_id":run,"deployment_id":deployment,"epoch":epoch,"scope":"loopback_process_qualification","route_ready":false,"custody":owner_retire::CUSTODY})
             } else {
-                json!({"protocol":"mycelium.chain_compile_start.v1","run_id":run,"deployment_id":deployment,"epoch":epoch})
+                // `custody`: this process holds the run directory's lock while it keeps the run, so
+                // a retirement pass may read a free lock as a dead run (PHY-01).
+                json!({"protocol":"mycelium.chain_compile_start.v1","run_id":run,"deployment_id":deployment,"epoch":epoch,"custody":owner_retire::CUSTODY})
             },
         ),
         ("topology.json".into(), topology.clone()),
@@ -1081,6 +1093,7 @@ fn emit_mode(
         source: source.clone(),
         request: request.clone(),
         cancel: None,
+        _custody: custody,
     };
     artifact.validate()?;
     Ok(artifact)

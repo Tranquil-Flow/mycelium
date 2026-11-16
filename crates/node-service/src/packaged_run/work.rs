@@ -266,6 +266,41 @@ pub(super) struct Work {
     /// The run's clock, kept after the workflow is gone: `rollover_due` and `ceiling_reached`
     /// read `ctx.state` and the clock alone (demo_chain.py:1132-1164).
     clock: Arc<Mutex<Option<RunClock>>>,
+    /// Sends the one datagram that asks macOS's Local Network permission (lane PHY item 2).
+    probe: Arc<dyn api::local_network::Probe>,
+    /// What the probe reached in the current run (never a target list: see [`LocalNetwork`]).
+    local_network: Arc<Mutex<LocalNetwork>>,
+}
+/// Lane PHY item 2, patch 2 (PHY-02): what one run's probes reached. Targets are never cached:
+/// every pass reads them afresh from this run's current, verified member records
+/// (`Inbox::get` -> `joined::verify`: current enrollment, lease, generation, run and share
+/// binding). This only spares a second datagram to an address already reached for the same member
+/// generation in the same run, and it is dropped when the run changes.
+#[derive(Default)]
+struct LocalNetwork {
+    /// The run the `reached` set and the `network` belong to.
+    run: String,
+    /// (node, generation, address) a datagram reached in this run.
+    reached: std::collections::BTreeSet<(String, String, std::net::SocketAddr)>,
+    /// PHY-03: this run's work transport as its first probe pass with a joined Mac resolved it
+    /// (`Network::resolve_run_network`, the rule step 6 uses), shared by its later probe passes.
+    /// Patch 3 (PHY2-01): compose never binds this; it reads this Mac's interfaces itself and only
+    /// compares its own reading with this one (a change drops `reached` and asks again).
+    network: Option<crate::packaged_work::Resolved>,
+}
+impl LocalNetwork {
+    /// Bind this record to `run`, forgetting another run's reached addresses and network.
+    fn bind(&mut self, run: &str) {
+        if self.run != run {
+            self.run = run.to_owned();
+            self.reached.clear();
+            self.network = None;
+        }
+    }
+    /// Forget the run's preflight record altogether (a new run, Stop and teardown).
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
 }
 impl Work {
     pub(super) fn new(host: PackagedRun) -> Self {
@@ -284,7 +319,214 @@ impl Work {
             })),
             stopped: Arc::new(AtomicBool::new(false)),
             clock: Arc::default(),
+            probe: Arc::new(api::local_network::Udp),
+            local_network: Arc::default(),
         }
+    }
+    /// Lane PHY item 2 (rows 79, 80): one datagram to every joined Mac's verified work address
+    /// in THIS run, so macOS raises its Local Network alert before the compile is spent, and a
+    /// pending or denied permission is refused by name when `refuse` (Start's first step and the
+    /// compile's start). Patch 2 (PHY-02): the targets are this run's current verified member
+    /// records only, read afresh on every pass; a run with no verified joined member sends nothing
+    /// and is never refused here.
+    fn local_network(&self, state: &RunState, refuse: bool) -> Result<(), StepError> {
+        self.probe_pass(state, refuse, || self.run_resolution(&state.run_id))
+    }
+    /// One probe pass of this run over the network `resolve` answers (asked only once the run has
+    /// a joined Mac and a seed): steps 1-5 pass the run's preflight resolution, compose its own
+    /// fresh one when that differs (PHY2-01).
+    fn probe_pass(
+        &self,
+        state: &RunState,
+        refuse: bool,
+        resolve: impl FnOnce() -> crate::packaged_work::Resolved,
+    ) -> Result<(), StepError> {
+        use api::local_network::Answer;
+        let joined: Vec<&String> = state
+            .participants
+            .iter()
+            .filter(|node| Some(*node) != state.local_node.as_ref())
+            .collect();
+        if joined.is_empty() {
+            return Ok(());
+        }
+        let Some(seed) = self.host.with(|c| c.authority.seed.clone()) else {
+            return Ok(());
+        };
+        // PHY-03: the run's network first; with no admitted LAN path (`local_only:*`, or a
+        // loopback-only run) nothing is sent: compose, reading the interfaces itself, refuses a
+        // run with a joined Mac on it by name, as at the base.
+        let resolved = resolve();
+        let Some((from, _)) = resolved.choice.0.clone() else {
+            eprintln!("local_network_probe_skipped:{}", resolved.transport);
+            return Ok(());
+        };
+        // (node, generation, address) of every current verified joined member's work address
+        // that this run's transport admits (family, loopback rule, exact hosts).
+        let mut targets = Vec::new();
+        for node in joined {
+            // The address step 6 will dial, verified as it will be (signed by the joined Mac's
+            // currently enrolled key, for this run, admitted by the run's transport); not
+            // published yet or not admitted: nothing to ask with.
+            let Ok(verified) = seed.work_members.get(
+                &seed.coordinator,
+                node,
+                self.owner.public(),
+                &state.run_id,
+                &state.deployment_id,
+                &|address| resolved.choice.allows(address),
+            ) else {
+                continue;
+            };
+            let generation = verified.registration()["message"]["member"]["generation"].to_string();
+            for to in verified.address().ip_addrs() {
+                targets.push((node.clone(), generation.clone(), *to));
+            }
+        }
+        let mut seen = lock(&self.local_network);
+        seen.bind(&state.run_id);
+        let mut blocked = None;
+        for target in targets {
+            if seen.reached.contains(&target) {
+                continue;
+            }
+            let to = target.2;
+            let answer = self.probe.send(from, to);
+            eprintln!("local_network_probe:{to}:{answer:?}");
+            match answer {
+                Answer::Sent => {
+                    seen.reached.insert(target);
+                }
+                Answer::Blocked => {
+                    blocked.get_or_insert(to);
+                }
+                Answer::NotLocal | Answer::Failed(_) => {}
+            }
+        }
+        match blocked {
+            Some(to) if refuse => Err(owner_run::OwnerRunError::with(
+                api::local_network::PERMISSION_REQUIRED,
+                Some(&api::local_network::owner_message(to.ip())),
+                None,
+            )
+            .into()),
+            _ => Ok(()),
+        }
+    }
+    /// Lane PHY item 2 (c): a step-6 dial that got no answer, named by one datagram to each joined
+    /// Mac it dialed: this Mac's permission ([`api::local_network::PERMISSION_REQUIRED`]) or the
+    /// joined Mac's silence ([`api::local_network::JOINED_MAC_SILENT`]); `None` for any other cause.
+    fn named_dial_failure(&self, cause: &str) -> Option<StepError> {
+        use api::local_network::{Answer, dial_unanswered};
+        if !dial_unanswered(cause) {
+            return None;
+        }
+        // The joined Macs it dialed (this run's verified bindings, admitted by its transport at
+        // compose); the owner's own contributor is this Mac. Sent from the run's bound address;
+        // a run with no LAN address sends nothing and keeps its own failure.
+        let local = self
+            .host
+            .with(|c| c.run.contributor.as_ref().map(|n| n.node.clone()));
+        let resident = lock(&self.resident);
+        let Some(network) = resident.network.clone() else {
+            return None;
+        };
+        let Some((from, _)) = network.0.clone() else {
+            return None;
+        };
+        let (Some((run, deployment)), bindings) = (resident.run.clone(), resident.bindings.clone())
+        else {
+            return None;
+        };
+        drop(resident);
+        let seed = self.host.with(|c| c.authority.seed.clone())?;
+        // PHY-02 residual (lane PHY patch 3): only a binding that is STILL this run's current
+        // verified member is probed: a fresh `Inbox::get` (current enrollment, lease, generation,
+        // run, deployment, owner and share binding, expiry) under the run's resident network,
+        // answering the same registration and address compose bound. A member revoked, expired
+        // or re-addressed since compose gets no datagram and cannot decide the returned error.
+        let dialed: Vec<std::net::SocketAddr> = bindings
+            .iter()
+            .filter(|v| Some(v.node_id()) != local.as_deref())
+            .filter(|v| {
+                seed.work_members
+                    .get(
+                        &seed.coordinator,
+                        v.node_id(),
+                        self.owner.public(),
+                        &run,
+                        &deployment,
+                        &|a| network.allows(a),
+                    )
+                    .is_ok_and(|current| {
+                        current.registration() == v.registration()
+                            && current.address() == v.address()
+                    })
+            })
+            .flat_map(|v| v.address().ip_addrs().copied().collect::<Vec<_>>())
+            .filter(|address| network.allows(*address))
+            .collect();
+        let mut silent = None;
+        for to in dialed {
+            let answer = self.probe.send(from, to);
+            eprintln!("local_network_probe:{to}:{answer:?} after {cause}");
+            match answer {
+                Answer::Blocked => {
+                    return Some(
+                        owner_run::OwnerRunError::with(
+                            api::local_network::PERMISSION_REQUIRED,
+                            Some(&api::local_network::owner_message(to.ip())),
+                            None,
+                        )
+                        .into(),
+                    );
+                }
+                Answer::Sent => {
+                    silent.get_or_insert(to);
+                }
+                Answer::NotLocal | Answer::Failed(_) => {}
+            }
+        }
+        silent.map(|to| {
+            owner_run::OwnerRunError::with(
+                api::local_network::JOINED_MAC_SILENT,
+                Some(&api::local_network::joined_mac_message(to.ip(), cause)),
+                None,
+            )
+            .into()
+        })
+    }
+    /// The run's failed workflow's open cause, named when it was a dial without an answer.
+    fn named_step_failure(&self) -> Option<StepError> {
+        let cause = lock(&self.resident).work.as_ref()?.failure_cause()?;
+        self.named_dial_failure(&cause)
+    }
+    /// PHY-03: the run's work transport as its first probe pass resolved it (held for that run's
+    /// later probe passes), resolving it now if no pass has. Compose never binds it (PHY2-01).
+    fn run_resolution(&self, run: &str) -> crate::packaged_work::Resolved {
+        let mut seen = lock(&self.local_network);
+        seen.bind(run);
+        match &seen.network {
+            Some(resolved) => resolved.clone(),
+            None => {
+                let resolved = self.host.network.resolve_run_network("owner_run");
+                seen.network = Some(resolved.clone());
+                resolved
+            }
+        }
+    }
+    /// PHY2-01 (lane PHY patch 3): the resolution this run's probe passes used, taken by compose
+    /// to compare with its own fresh reading; `None` when no pass of this run resolved one.
+    fn take_preflight(&self, run: &str) -> Option<crate::packaged_work::Resolved> {
+        let mut seen = lock(&self.local_network);
+        if seen.run != run {
+            return None;
+        }
+        seen.network.take()
+    }
+    /// Forget the run's preflight record (`Composed::new_run`, teardown).
+    fn reset_preflight(&self) {
+        lock(&self.local_network).reset();
     }
     /// The run's transport, resolved at `compose`; a work announcement before any compose (none
     /// in the chain's order) resolves its own.
@@ -524,8 +766,11 @@ impl Work {
             .host
             .with(|c| c.authority.seed.clone())
             .ok_or_else(|| refused("owner_exchange_unavailable"))?;
-        // One transport per run, read from this Mac's interfaces as the run starts its work.
+        // One transport per run, read from this Mac's interfaces as the run starts its work, here
+        // and always here (lane PHY patch 3, PHY2-01): the probe passes before the compile may have
+        // read an older state of them.
         let resolved = self.host.network.resolve_run_network("owner_run");
+        let probed = self.take_preflight(&state.run_id);
         // No single private network here while a joined Mac is in the run: refused by name now,
         // before the local worker starts or anything is dialed (lane LAN round 2, F6).
         if let Some(reason) = resolved.local_only
@@ -536,6 +781,20 @@ impl Work {
         {
             let (code, message) = crate::packaged_work::owner_network_refusal(reason);
             return Err(owner_run::OwnerRunError::with(code, Some(&message), None).into());
+        }
+        // PHY2-01: a network other than the one the probe passes asked on (local-only <-> LAN, or
+        // another local address): what they reached proves nothing for this one. Ask again, once,
+        // from this network, this run's current verified members only, before any work endpoint
+        // or dial; a blocked answer refuses by name as before.
+        if let Some(probed) = probed
+            && probed.choice != resolved.choice
+        {
+            eprintln!(
+                "local_network_resolution_changed:{}:{}",
+                probed.transport, resolved.transport
+            );
+            lock(&self.local_network).reached.clear();
+            self.probe_pass(state, true, || resolved.clone())?;
         }
         let network = resolved.choice;
         lock(&self.resident).network = Some(network.clone());
@@ -713,6 +972,8 @@ impl Work {
     fn teardown(&self) -> Result<(), String> {
         // The chat's route ends with the run's work (the epoch closes below).
         lock(&self.host.custody).route = None;
+        // So does what its probe passes resolved and reached (PHY2-01).
+        self.reset_preflight();
         let mut resident = lock(&self.resident);
         // The run's transport ends with it (R2-7): whatever asks next reads this Mac afresh.
         resident.network = None;
@@ -985,6 +1246,20 @@ pub(super) struct Composed {
     work: Work,
     compiler: SharedCompiler<PackagedRun>,
     program: Option<api::native_compiler::NativeProgram>,
+    /// PHY-06: a model-free witness replaces `Work::prepare` and the shared chain's slices step,
+    /// never the rename between them and the returned refusal.
+    #[cfg(test)]
+    slices_seam: Option<SlicesSeam>,
+}
+/// PHY-06 (lane PHY patch 2): the two halves of the slices step a model-free test supplies.
+#[cfg(test)]
+type SlicesHalf = Box<dyn FnMut(&Work, &mut dyn StepEnv) -> Result<(), StepError> + Send>;
+#[cfg(test)]
+pub(super) struct SlicesSeam {
+    /// Stands for `Work::prepare` (the compile's artifact into the run's composed work).
+    pub prepare: SlicesHalf,
+    /// Stands for the shared chain's slices step (`run_slices_step` over the work's ports).
+    pub step: SlicesHalf,
 }
 impl Composed {
     pub(super) fn new(
@@ -1000,7 +1275,30 @@ impl Composed {
             work,
             compiler,
             program,
+            #[cfg(test)]
+            slices_seam: None,
         }
+    }
+    /// The slices step's preparation: the compile's artifact into the run's composed work.
+    fn prepare_slices(&mut self, env: &mut dyn StepEnv) -> Result<(), StepError> {
+        #[cfg(test)]
+        if let Some(seam) = self.slices_seam.as_mut() {
+            return (seam.prepare)(&self.work, env);
+        }
+        let state = self
+            .inner
+            .state()
+            .ok_or_else(|| refused("compiler_run_changed"))?;
+        self.work
+            .prepare(state, env, &self.compiler, self.program.as_ref())
+    }
+    /// The shared chain's slices step over the composed work.
+    fn shared_slices(&mut self, env: &mut dyn StepEnv) -> Result<(), StepError> {
+        #[cfg(test)]
+        if let Some(seam) = self.slices_seam.as_mut() {
+            return (seam.step)(&self.work, env);
+        }
+        self.inner.run_step("slices", env)
     }
 }
 impl Chain for Composed {
@@ -1018,17 +1316,35 @@ impl Chain for Composed {
         }
         // A fresh `RunContext` for the page's chats too (lane CHAT, owner_run.py:392-399).
         super::chat::new_run(&self.work.host);
+        // Before this run reserves anything: the charges of this build's runs that ended without
+        // retiring (a lost process) are released; an older build's run is only named (lane PHY
+        // item 1, PHY-01).
+        super::retire_dead_runs(&self.work.host);
+        // Nothing an earlier run's probe passes resolved or reached (PHY2-01).
+        self.work.reset_preflight();
         self.inner
             .new_run(run, deployment, reason, ceiling, binding);
     }
     fn run_step(&mut self, step: &str, env: &mut dyn StepEnv) -> Result<(), StepError> {
-        if step == "slices" {
-            let state = self
-                .inner
-                .state()
-                .ok_or_else(|| refused("compiler_run_changed"))?;
+        // Lane PHY item 2: macOS's Local Network question is asked before the compile is spent,
+        // and a pending or denied answer refuses Start's first step and the compile by name.
+        // Steps 1-5 (`machine::STEPS`): the joined Macs' work addresses arrive during step 3.
+        if let ("model" | "contributor" | "descriptors" | "observe" | "compile", Some(state)) =
+            (step, self.inner.state())
+        {
             self.work
-                .prepare(state, env, &self.compiler, self.program.as_ref())?;
+                .local_network(state, matches!(step, "model" | "compile"))?;
+        }
+        if step == "slices" {
+            // A preparation refusal is returned as it is (no workflow has run).
+            self.prepare_slices(env)?;
+            // Lane PHY item 2 (c): a refused step whose workflow failed on a dial without an
+            // answer is named, not `managed_workflow_failed`; Stop, an exception and every other
+            // refusal pass unchanged (only a refusal is probed).
+            return self.shared_slices(env).map_err(|failed| match failed {
+                StepError::Refused(_) => self.work.named_step_failure().unwrap_or(failed),
+                other => other,
+            });
         }
         self.inner.run_step(step, env)
     }

@@ -31,6 +31,7 @@ pub mod joined_shard;
 pub mod lan_interface;
 pub mod leave;
 pub mod local_agent;
+pub mod local_network;
 pub mod local_manifest;
 pub mod m16_requests;
 pub mod m16_route;

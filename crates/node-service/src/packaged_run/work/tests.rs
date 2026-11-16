@@ -5,7 +5,9 @@
 use super::*;
 mod chat_route;
 mod flake;
+mod local_network;
 mod regressions;
+mod retire;
 mod serving_q;
 mod serving_r2;
 mod serving_r3;

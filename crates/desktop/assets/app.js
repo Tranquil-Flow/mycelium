@@ -225,7 +225,7 @@ function render(value) {
   rung('Application',value.running ? 'Started · foreground only' : 'Stopped · private state retained');
   if(value.network?.provider==='cloudflare'){
     const relay=value.network;
-    rung('Public relay',relay.state==='stopped' ? 'Temporary relay stopped.'
+    rung('Public relay',relay.state==='stopped' ? 'Temporary relay stopped. Press “Start public relay” to open a new one; it gets a new address, so each joined Mac must be reconnected to it.'
       : relay.renewal_stopped==='relay_renewal_cap_reached'
         ? `24-hour renewal cap reached; the temporary relay closes in ${relay.expires_in_seconds} seconds.`
         : `Temporary relay renews while your swarm is serving, at most 24 hours; ${relay.renewals} renewals. Current window: ${relay.expires_in_seconds} seconds left. When serving stops, it closes at the current deadline. A published swarm stays reachable while idle.`);
@@ -233,6 +233,18 @@ function render(value) {
   rung('Membership',a.membership_state ?? a.membership ?? a.state ?? 'Not joined');
   rung('Generation',a.membership_generation ?? a.generation);
   rung('Lease',a.lease_state ?? a.lease_expires_at ?? 'Unknown');
+  // The joined Mac's relay line says only what its membership state shows (lane PHY patch 3,
+  // PHY-05): a failed renewal pass alone is no verdict on the owner's relay, and a reachable owner
+  // can end or replace a membership; only an expired one gets the restart/reconnect advice.
+  const why=String(value.recovery_error || value.renewal_error).replaceAll('_',' ');
+  const relayAdvice={retrying:`Renewal with the owner’s swarm failed (${why}); Mycelium keeps retrying while this Mac’s membership is current.`,
+    renewing:`Renewal with the owner’s swarm failed (${why}); Mycelium keeps retrying with this Mac’s saved membership.`,
+    lapsed:`Renewal with the owner’s swarm failed (${why}) and this Mac’s membership has expired. If the owner’s temporary relay closed (it closes 30 minutes after it starts unless a run is serving), a relay started again gets a new address: keep Mycelium open, ask the owner to start the relay again and to reconnect this Mac to the new address. Until then this Mac takes no part in runs.`,
+    ended:`The owner ended or replaced this Mac’s membership (${why}). This Mac takes no part in runs until the owner adds this Mac again.`,
+    none:`This Mac holds no membership with the owner’s swarm (${why}); it takes no part in runs until the owner adds it.`,
+    unknown:`The state of this Mac’s membership is not known yet (${why}).`};
+  const relayLine={current:'retrying',retained:'renewing',expired:'lapsed',revoked:'ended',stale:'ended',absent:'none',unknown:'unknown'};
+  if(target && (value.renewal_error || value.recovery_error))rung('Owner relay',relayAdvice[relayLine[a.membership_state] ?? 'unknown']);
   const capabilityStates={self_report_accepted:'Self-report accepted · not independently qualified',
     not_reported:'Not reported',stale:'Stale · report again'};
   rung('Capability',capabilityStates[a.capability_state] ?? 'Not independently qualified');
@@ -533,7 +545,8 @@ function renderJoinFlow(value,target,a){
   const owner=!target;
   $('invite-owner').hidden=!owner;
   $('join-target').hidden=owner && !!a.swarm_created;
-  const relayUp=!!value.network?.public_origin;
+  // A relay whose window ran out keeps its origin in the status: it is not up (lane PHY item 3).
+  const relayUp=!!value.network?.public_origin && value.network?.state!=='stopped';
   $('relay-start').hidden=!owner || relayUp;
   $('own-address').hidden=!owner || relayUp;
   $('relay-order-note').hidden=!owner || relayUp;

@@ -135,6 +135,37 @@ struct WorkDebt {
     /// A close that failed without a member cleanup report (worker panic): no later call may
     /// declare this owner settled, because no proof of the member stages exists.
     unprovable: Option<String>,
+    /// The compile outputs of the runs whose close failed (lane PHY item 1): held, they keep
+    /// their run directories' custody, so no retirement pass removes stage shards the retained
+    /// local Service may still read; dropped with the debt once it is settled.
+    outputs: Vec<api::compiler_inputs::InputArtifact>,
+}
+
+/// Retire this owner's dead compile runs from its storage ledger (lane PHY item 1, ledger rows 8
+/// and 81): every run no process holds any more loses its stage shards and its charge. Called
+/// when a run ends (the chain's teardown: a failed step, Stop, Quit) and at the next Start
+/// (`work::Composed::new_run`), which also covers a run a lost process of this build left. A
+/// refusal is logged by name and leaves that run charged, and so does a legacy run (one an older
+/// build started, which never took the run directory's lock): it never fails the run or its
+/// teardown.
+fn retire_dead_runs(host: &PackagedRun) {
+    let root = host.with(|c| c.authority.root.clone());
+    match api::compiler_inputs::retire_dead_runs(&root) {
+        Ok(done) => {
+            for run in done.retired {
+                eprintln!("owner_storage_retired:{run}");
+            }
+            for (run, code) in done.refused {
+                eprintln!("owner_storage_retire_refused:{run}:{code}");
+            }
+            // A run an older build started (no custody marker): it may still be live in that
+            // build's process, so it stays charged and is only named (PHY-01).
+            for (run, bytes) in done.legacy {
+                eprintln!("owner_storage_legacy_kept:{run}:{bytes}");
+            }
+        }
+        Err(error) => eprintln!("owner_storage_retire_failed:{}", error.0),
+    }
 }
 
 /// The owner's bootstrap custody beside the run's fields (the headless launcher keeps the same
@@ -546,12 +577,27 @@ impl owner_run::owner_chain::ChainPorts for PackagedChainPorts {
         // Every chat FIRST, while the route still takes `DELETE` (demo_chain.py:1326-1338).
         chat::teardown(self.work.host(), failed);
         let work = self.close_work();
-        let compilation = self
-            .compiler
-            .0
-            .lock()
-            .map_err(|_| "compiler_state_unavailable".to_owned())?
-            .teardown();
+        let (compilation, outputs) = {
+            let mut compiler = self
+                .compiler
+                .0
+                .lock()
+                .map_err(|_| "compiler_state_unavailable".to_owned())?;
+            let compilation = compiler.teardown();
+            (compilation, compiler.release_outputs())
+        };
+        // The run's stage shards go with the run, unless its close left work owed: then the
+        // debt keeps them (and their charge) until it is settled (lane PHY item 1).
+        if work.is_ok() {
+            drop(outputs);
+            retire_dead_runs(self.work.host());
+        } else if let Some(outputs) = outputs {
+            lock(&self.work.host().custody)
+                .work_debt
+                .get_or_insert_with(WorkDebt::default)
+                .outputs
+                .push(outputs);
+        }
         // The context ends with the run whatever its cleanup answered (demo_chain.py:1436): the
         // ports live as long as the host (`work::Composed`), and the next Start prepares anew.
         let observation = match &self.observation {
