@@ -197,19 +197,20 @@ pub(super) struct Work {
     clock: Arc<Mutex<Option<RunClock>>>,
     /// Sends the one datagram that asks macOS's Local Network permission (lane PHY item 2).
     probe: Arc<dyn api::local_network::Probe>,
-    /// What the probe learned: the joined Macs' work addresses it may probe again at the next
-    /// Start, and the ones this run already reached.
+    /// What the probe reached in the current run (never a target list: see [`LocalNetwork`]).
     local_network: Arc<Mutex<LocalNetwork>>,
 }
-/// Lane PHY item 2: the joined Macs' verified work addresses the owner probed.
+/// Lane PHY item 2, patch 2 (PHY-02): what one run's probes reached. Targets are never cached:
+/// every pass reads them afresh from this run's current, verified member records
+/// (`Inbox::get` -> `joined::verify`: current enrollment, lease, generation, run and share
+/// binding). This only spares a second datagram to an address already reached for the same member
+/// generation in the same run, and it is dropped when the run changes.
 #[derive(Default)]
 struct LocalNetwork {
     /// The run the `reached` set belongs to.
     run: String,
-    /// Addresses a datagram reached in this run: not probed again in it.
-    reached: std::collections::BTreeSet<std::net::SocketAddr>,
-    /// Every local-network address probed (this run's or an earlier run's in this process).
-    known: std::collections::BTreeSet<std::net::SocketAddr>,
+    /// (node, generation, address) a datagram reached in this run.
+    reached: std::collections::BTreeSet<(String, String, std::net::SocketAddr)>,
 }
 impl Work {
     pub(super) fn new(host: PackagedRun) -> Self {
@@ -233,30 +234,38 @@ impl Work {
         }
     }
     /// Lane PHY item 2 (rows 79, 80): one datagram to every joined Mac's verified work address
-    /// this owner knows (this run's, and the ones an earlier run of this process probed), so macOS
-    /// raises its Local Network alert before the compile is spent, and a pending or denied
-    /// permission is refused by name when `refuse` (Start's first step and the compile's start).
+    /// in THIS run, so macOS raises its Local Network alert before the compile is spent, and a
+    /// pending or denied permission is refused by name when `refuse` (Start's first step and the
+    /// compile's start). Patch 2 (PHY-02): the targets are this run's current verified member
+    /// records only, read afresh on every pass; a run with no verified joined member sends nothing
+    /// and is never refused here.
     fn local_network(&self, state: &RunState, refuse: bool) -> Result<(), StepError> {
         use api::local_network::Answer;
-        let mut targets = lock(&self.local_network).known.clone();
-        if let Some(seed) = self.host.with(|c| c.authority.seed.clone()) {
-            let joined = state
-                .participants
-                .iter()
-                .filter(|node| Some(*node) != state.local_node.as_ref());
-            for node in joined {
-                // The address step 6 will dial, verified as it will be (signed by the joined
-                // Mac's enrolled key, for this run); not published yet: nothing to ask with.
-                if let Ok(verified) = seed.work_members.get(
-                    &seed.coordinator,
-                    node,
-                    self.owner.public(),
-                    &state.run_id,
-                    &state.deployment_id,
-                    &|_| true,
-                ) {
-                    targets.extend(verified.address().ip_addrs().copied());
-                }
+        let Some(seed) = self.host.with(|c| c.authority.seed.clone()) else {
+            return Ok(());
+        };
+        // (node, generation, address) of every current verified joined member's work address.
+        let mut targets = Vec::new();
+        for node in state
+            .participants
+            .iter()
+            .filter(|node| Some(*node) != state.local_node.as_ref())
+        {
+            // The address step 6 will dial, verified as it will be (signed by the joined Mac's
+            // currently enrolled key, for this run); not published yet: nothing to ask with.
+            let Ok(verified) = seed.work_members.get(
+                &seed.coordinator,
+                node,
+                self.owner.public(),
+                &state.run_id,
+                &state.deployment_id,
+                &|_| true,
+            ) else {
+                continue;
+            };
+            let generation = verified.registration()["message"]["member"]["generation"].to_string();
+            for to in verified.address().ip_addrs() {
+                targets.push((node.clone(), generation.clone(), *to));
             }
         }
         let mut seen = lock(&self.local_network);
@@ -265,27 +274,22 @@ impl Work {
             seen.reached.clear();
         }
         let mut blocked = None;
-        for to in targets {
-            if seen.reached.contains(&to) {
+        for target in targets {
+            if seen.reached.contains(&target) {
                 continue;
             }
+            let to = target.2;
             let answer = self.probe.send(to);
             eprintln!("local_network_probe:{to}:{answer:?}");
             match answer {
-                Answer::NotLocal => continue,
                 Answer::Sent => {
-                    seen.reached.insert(to);
+                    seen.reached.insert(target);
                 }
                 Answer::Blocked => {
                     blocked.get_or_insert(to);
                 }
-                Answer::Failed(_) => {}
+                Answer::NotLocal | Answer::Failed(_) => {}
             }
-            seen.known.insert(to);
-        }
-        // Bounded: a run's member documents carry at most 8 addresses each.
-        while seen.known.len() > 64 {
-            seen.known.pop_first();
         }
         match blocked {
             Some(_) if refuse => Err(owner_run::OwnerRunError::with(
