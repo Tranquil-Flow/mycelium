@@ -89,17 +89,61 @@ fn after_the_relay_window_closes_the_owner_can_start_a_relay_again_from_the_page
 /// at a new address, a joined Mac's renewals fail (`renewal_error: renewal_unavailable`, app.py:925-927)
 /// and v0.1.4's page read that field nowhere: the joined Mac's page showed nothing while every poll
 /// got HTTP 530. The page now names the case on the joined Mac.
+///
+/// Patch 2 (PHY-05): `renewal_error` is recorded by ANY failed renewal pass
+/// (`api::app_status::Recorded::renewal`), including a transient or local one that keeps the live
+/// Session and its work service (`api/src/app_host.rs`). So the line says only what the state
+/// shows: while this Mac's membership is still current it reads "renewal failed, retrying", with
+/// no claim that this Mac takes no part and no restart/reconnect advice; only a membership that is
+/// no longer current gets the instruction to have the owner start the relay again and reconnect.
 #[test]
-fn a_joined_mac_that_cannot_reach_the_owners_relay_says_so_on_its_page() {
+fn a_joined_macs_relay_line_says_only_what_its_membership_shows() {
     let script = script_without_comments(APP_JS);
     let line = script
         .lines()
-        .find(|l| l.contains("value.renewal_error"))
+        .find(|l| l.contains("rung('Owner relay'"))
         .expect(
             "app.js never shows renewal_error: a joined Mac whose owner relay closed shows nothing",
         );
+    let (condition, _) = line
+        .split_once('`')
+        .unwrap_or_else(|| panic!("the line has no message: {line}"));
     assert!(
-        line.contains("target") && line.contains("relay") && line.contains("new address"),
+        condition.contains("target") && condition.contains("value.renewal_error"),
         "{line}"
+    );
+    assert!(
+        condition
+            .replace(' ', "")
+            .ends_with("a.membership_state==='current'?"),
+        "the relay line must depend on whether this Mac's membership is still current: {line}"
+    );
+    let messages: Vec<&str> = line.split('`').skip(1).step_by(2).collect();
+    assert_eq!(
+        messages.len(),
+        2,
+        "one message per membership state: {line}"
+    );
+    let (retrying, lapsed) = (messages[0].to_lowercase(), messages[1].to_lowercase());
+    assert!(
+        retrying.contains("renewal") && retrying.contains("retr"),
+        "{retrying}"
+    );
+    for claim in [
+        "takes no part",
+        "start the relay again",
+        "reconnect",
+        "restart",
+    ] {
+        assert!(
+            !retrying.contains(claim),
+            "a single failed renewal with a current membership claims `{claim}`: {retrying}"
+        );
+    }
+    assert!(
+        lapsed.contains("no longer current")
+            && lapsed.contains("start the relay again")
+            && lapsed.contains("new address"),
+        "{lapsed}"
     );
 }
