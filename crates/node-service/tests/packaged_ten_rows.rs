@@ -90,6 +90,13 @@ use std::{
 const PROMPT: &str = "<|im_start|>system\nYou are a helpful assistant.<|im_end|>\n<|im_start|>user\nExplain how rain forms and why plants need it. Give a detailed answer.<|im_end|>\n<|im_start|>assistant\n";
 /// Tokens the gate's chat asks for (the joined route tests compare 32 with the reference).
 const CHAT_TOKENS: u64 = 32;
+/// The answer row's and the probe's question (ledger row 112: rv40 answered it raw, a greedy loop
+/// to the 128-token cap).
+const FRANCE: &str = "What is the capital of France?";
+/// FX-CHATFIX-prompt-codec: v0.1.4's codecs EXECUTED on this snapshot (prompt text and ids).
+const CODEC_FIXTURE: &str = include_str!("../../api/tests/fixtures/prompt-codec-oracle.json");
+/// The page's chat wraps what the user types in the run model's envelope (lane CHATFIX): Qwen3.
+const RUN_CODEC: api::prompt_codec::PromptCodec = api::prompt_codec::PromptCodec::Qwen3;
 /// The member's consent: the disk and memory this Mac offers, and the worker wall.
 const STORAGE: u64 = 8_000_000_000;
 const MEMORY: u64 = 8_589_934_592;
@@ -562,7 +569,7 @@ fn ten_rows(owner: &Mac, member: &Mac, ev: &Evidence, run: &str) -> Result<Value
                     owner,
                     "POST",
                     "/chat/api/send",
-                    &json!({"prompt": PROMPT, "max_new_tokens": 4}),
+                    &json!({"prompt": api::prompt_codec::ORACLE_USER_PROMPT, "max_new_tokens": 4}),
                 );
                 ev.note(
                     &format!("{run}_chat_before_serving_row{done}"),
@@ -648,9 +655,15 @@ fn chat_call(mac: &Mac, method: &str, path: &str, body: &Value) -> (u16, Value) 
         serde_json::from_slice(&reply.body).unwrap_or(Value::Null),
     )
 }
-/// One page chat: send, then the events loop (chat.js) until done. The pieces as the page shows
-/// them, with each piece's arrival time from the send.
-fn chat(mac: &Mac, ev: &Evidence, label: &str, tokens: u64) -> (Value, Vec<(String, u64)>) {
+/// One page chat of `prompt` as the user types it: send, then the events loop (chat.js) until done.
+/// The pieces as the page shows them, with each piece's arrival time from the send.
+fn chat(
+    mac: &Mac,
+    ev: &Evidence,
+    label: &str,
+    prompt: &str,
+    tokens: u64,
+) -> (Value, Vec<(String, u64)>) {
     let (_, state) = chat_call(mac, "POST", "/chat/api/state", &json!({}));
     ev.note(&format!("{label}_chat_state_before"), state);
     let posted = Instant::now();
@@ -658,7 +671,7 @@ fn chat(mac: &Mac, ev: &Evidence, label: &str, tokens: u64) -> (Value, Vec<(Stri
         mac,
         "POST",
         "/chat/api/send",
-        &json!({"prompt": PROMPT, "max_new_tokens": tokens}),
+        &json!({"prompt": prompt, "max_new_tokens": tokens}),
     );
     ev.note(
         &format!("{label}_chat_send"),
@@ -707,52 +720,112 @@ fn reference_pieces(codec: &api::joined_owner::codec::NativeCodec, n: usize) -> 
         .map(|t| codec.decode(*t).unwrap())
         .collect()
 }
-fn chat_row(
+/// A stop token shown as text (lane CHATFIX item 2: the route never emits one).
+fn shows_stop(piece: &str) -> bool {
+    piece.contains("<|im_end|>") || piece.contains("<|endoftext|>")
+}
+/// The run's chat row. Lane CHATFIX: the page's chat wraps what the user types in the run model's
+/// envelope (`api::prompt_codec`, v0.1.4's codec), so the row types the oracle QUESTION, not the
+/// recorded workload's ChatML (system "You are a helpful assistant.", no think block: that is the
+/// startup challenge's prompt, which the challenge compares token for token). Sending that ChatML
+/// through the page would now be wrapped twice, and the answer to the templated question has no
+/// recorded reference: the row requires a completed chat with pieces and no stop token shown; the
+/// token-for-token comparison with a single-process native reference over the same template is the
+/// ignored probe `probe_route_chat_against_a_single_process_reference`.
+fn chat_row(mac: &Mac, ev: &Evidence, label: &str) -> Result<(), String> {
+    let (last, pieces) = chat(
+        mac,
+        ev,
+        label,
+        api::prompt_codec::ORACLE_USER_PROMPT,
+        CHAT_TOKENS,
+    );
+    let got: Vec<String> = pieces.iter().map(|p| p.0.clone()).collect();
+    let ok =
+        last["terminal"] == "completed" && !got.is_empty() && !got.iter().any(|p| shows_stop(p));
+    ev.row(
+        json!({"row": format!("{label} chat"), "result": if ok { "passed" } else { "failed" },
+        "wall_ms": pieces.last().map(|p| p.1), "ttft_ms": pieces.first().map(|p| p.1),
+        "pieces": got.len(), "text": got.concat(),
+        "status_line": {"terminal": last["terminal"], "error": last["error"]}, "last": last}),
+    );
+    if ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "chat {label}: terminal={} error={} pieces={} text={:?}",
+            last["terminal"],
+            last["error"],
+            got.len(),
+            got.concat()
+        ))
+    }
+}
+/// Lane CHATFIX item 4, the answer-content row: while the run serves, `What is the capital of
+/// France?` through the page's chat with 32 new tokens must END AT A STOP ID (the chat completes
+/// with fewer pieces than it asked for: the route stops only at a stop id or the cap, and never
+/// emits the stop id) and contain `Paris`. On rv40 the raw prompt ran to the cap
+/// (` The capital of France is Paris. The answer is Paris. ...`). Evidence: the prompt's ids (the
+/// product tokenizer helper over the seam's text; equal to v0.1.4's codec ids, checked at setup)
+/// and the answer's pieces with their ids. The page shows text only (v0.1.4's chat events carry no
+/// ids), so the answer ids are each piece re-encoded by the same helper, labelled so: equal to the
+/// route's ids for whole-character pieces; the probe compares route and reference exactly.
+fn answer_row(
     mac: &Mac,
     ev: &Evidence,
     label: &str,
     codec: &api::joined_owner::codec::NativeCodec,
 ) -> Result<(), String> {
-    let (last, pieces) = chat(mac, ev, label, CHAT_TOKENS);
+    let (last, pieces) = chat(mac, ev, &format!("{label}_answer"), FRANCE, CHAT_TOKENS);
     let got: Vec<String> = pieces.iter().map(|p| p.0.clone()).collect();
-    let expected = reference_pieces(codec, CHAT_TOKENS as usize);
-    let ttft = pieces.first().map(|p| p.1);
-    let row = json!({"row": format!("{label} chat"), "wall_ms": pieces.last().map(|p| p.1),
-        "ttft_ms": ttft, "pieces": got.len(), "status_line": {"terminal": last["terminal"], "error": last["error"]},
-        "last": last});
-    if last["terminal"] == "completed" && got == expected {
-        ev.row(with(row, "result", json!("passed")));
-        return Ok(());
-    }
-    ev.note(
-        &format!("{label}_chat_mismatch"),
-        json!({"got": got, "expected": expected}),
-    );
-    ev.row(with(row, "result", json!("failed")));
-    // A second row, not a substitute: the longest chat the route's stages admit (their KV context
-    // is the challenge's prompt + 4, REPORT-laneTEN D6), compared token for token as above.
-    let (small, small_pieces) = chat(mac, ev, &format!("{label}_within_capacity"), 4);
-    let small_got: Vec<String> = small_pieces.iter().map(|p| p.0.clone()).collect();
-    let small_expected = reference_pieces(codec, 4);
-    let passed = small["terminal"] == "completed" && small_got == small_expected;
+    let text = got.concat();
+    let prompt_ids = codec.encode(RUN_CODEC.chat(FRANCE).as_str()).ok();
+    let piece_ids: Vec<Value> = got.iter().map(|p| json!(codec.encode(p).ok())).collect();
+    let at_stop = last["terminal"] == "completed" && (got.len() as u64) < CHAT_TOKENS;
+    let ok = at_stop && text.contains("Paris") && !got.iter().any(|p| shows_stop(p));
     ev.row(
-        json!({"row": format!("{label} chat within the stages' 39-token context (4 tokens)"),
-        "result": if passed { "passed" } else { "failed" },
-        "wall_ms": small_pieces.last().map(|p| p.1), "ttft_ms": small_pieces.first().map(|p| p.1),
-        "pieces": small_got, "expected": small_expected,
-        "status_line": {"terminal": small["terminal"], "error": small["error"]}}),
+        json!({"row": format!("{label} answer (France, {CHAT_TOKENS} tokens)"),
+        "result": if ok { "passed" } else { "failed" },
+        "wall_ms": pieces.last().map(|p| p.1), "ttft_ms": pieces.first().map(|p| p.1),
+        "ended": if at_stop { "stop id" } else { "cap or failure" }, "pieces": got.len(),
+        "text": text, "prompt_ids": prompt_ids, "answer_pieces": got,
+        "answer_piece_ids_reencoded": piece_ids,
+        "status_line": {"terminal": last["terminal"], "error": last["error"]}}),
     );
-    Err(format!(
-        "chat {label}: terminal={} error={} pieces={}; within the 39-token context: {}",
-        last["terminal"],
-        last["error"],
-        got.len(),
-        if passed {
-            "equal to the reference"
-        } else {
-            "FAILED"
-        }
-    ))
+    if ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "answer {label}: ended={} terminal={} error={} pieces={} text={text:?}",
+            if at_stop { "stop id" } else { "cap or failure" },
+            last["terminal"],
+            last["error"],
+            got.len()
+        ))
+    }
+}
+/// The seam's text for the oracle question and the France question tokenises, through the product
+/// tokenizer helper (the packaged `tokenize` role the route encodes with), to exactly v0.1.4's
+/// codec ids (FX-CHATFIX-prompt-codec, executed on this snapshot).
+fn codec_ids_match_the_oracle(codec: &api::joined_owner::codec::NativeCodec) -> Value {
+    let fixture: Value = serde_json::from_str(CODEC_FIXTURE).unwrap();
+    let mut checked = Vec::new();
+    for user in [api::prompt_codec::ORACLE_USER_PROMPT, FRANCE] {
+        let case = fixture["qwen3"]["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["user"] == user)
+            .unwrap();
+        let ids = codec.encode(RUN_CODEC.chat(user).as_str()).unwrap();
+        assert_eq!(
+            json!(ids),
+            case["ids"],
+            "{user:?}: the seam's ids are v0.1.4's"
+        );
+        checked.push(json!({"user": user, "prompt_ids": ids.len()}));
+    }
+    json!(checked)
 }
 
 /// Lane CAP measurement (opt-in, `MYCELIUM_TEN_MEASURE_CHATS=<n>`; not a gate row): after the
@@ -773,7 +846,13 @@ fn measure_chats(mac: &Mac, ev: &Evidence, run: &str, binary: &Path) {
         let label = format!("{run}_measure_{i}_{tokens}");
         let mut limited = 0;
         let (last, pieces) = loop {
-            let (last, pieces) = chat(mac, ev, &label, tokens);
+            let (last, pieces) = chat(
+                mac,
+                ev,
+                &label,
+                api::prompt_codec::ORACLE_USER_PROMPT,
+                tokens,
+            );
             if last["send_status"] == 429 && limited < 8 {
                 limited += 1;
                 std::thread::sleep(Duration::from_secs(16));
@@ -886,7 +965,7 @@ fn stop_row(
         &owner.mac,
         "POST",
         "/chat/api/send",
-        &json!({"prompt": PROMPT, "max_new_tokens": 4}),
+        &json!({"prompt": api::prompt_codec::ORACLE_USER_PROMPT, "max_new_tokens": 4}),
     );
     // Workers and transport: gone within the router's close once the run reads stopped.
     let close = Instant::now() + millis(B::RouterClose) + millis(B::CancelAndCleanup);
@@ -975,7 +1054,8 @@ fn ten_rows_with_the_real_model_on_the_lan() {
     );
     ev.note(
         "tokenizer",
-        json!({"prompt_ids": prompt_ids.len(), "challenge_decoded": reference_pieces(&codec, 4)}),
+        json!({"prompt_ids": prompt_ids.len(), "challenge_decoded": reference_pieces(&codec, 4),
+            "chat_codec_ids_equal_v014": codec_ids_match_the_oracle(&codec)}),
     );
 
     let repository = cached::CachedRepository::start();
@@ -1007,10 +1087,18 @@ fn ten_rows_with_the_real_model_on_the_lan() {
                 if let Err(e) = chat_link_row(&owner.mac, &member, &ev, run) {
                     failures.push(e);
                 }
-                if let Err(e) = chat_row(&owner.mac, &ev, run, &codec) {
+                let chatted = chat_row(&owner.mac, &ev, run);
+                if run == "run1" {
+                    // Lane CHATFIX item 4: the answer-content row, while run 1 serves.
+                    if let Err(e) = answer_row(&owner.mac, &ev, run, &codec) {
+                        failures.push(e);
+                    }
+                    if chatted.is_ok() {
+                        measure_chats(&owner.mac, &ev, run, &binary);
+                    }
+                }
+                if let Err(e) = chatted {
                     failures.push(e);
-                } else if run == "run1" {
-                    measure_chats(&owner.mac, &ev, run, &binary);
                 }
                 if let Err(e) = stop_row(&owner, &member, &ev, run, &binary, &lan) {
                     failures.push(e);
@@ -1063,6 +1151,161 @@ fn ten_rows_with_the_real_model_on_the_lan() {
     }
     drop(repository);
     // A failed gate keeps both state roots for the report; a passed one removes them.
+    if failures.is_empty() {
+        std::fs::remove_dir_all(&base).unwrap_or_default();
+    }
+    ev.note("end", json!({"failures": failures}));
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// Lane CHATFIX item 4, the orchestrator's model-backed probe (IGNORED; no lane runs it). For the
+/// oracle question and the France question, the route's greedy answer through the owner's page (two
+/// packaged hosts on this Mac's LAN address, as the gate) is compared with a single-process native
+/// reference over the SAME template: `api::native_compiler::single_process_greedy`, one native
+/// worker of the admitted program holding all 28 layers of the pinned checkpoint, fed the seam's
+/// prompt ids (`RUN_CODEC.chat(question)` through the product tokenizer helper), greedy, ending
+/// before a stop id as the route does. The reference runs first, before any host loads the model.
+/// The page shows text pieces only (v0.1.4's chat events carry no ids), so each reference id is
+/// decoded to its piece by the same helper and the two are compared piece by piece: a byte-level
+/// BPE id has exactly one byte string, so equal pieces are equal ids except where two different
+/// tokens each hold an incomplete UTF-8 sequence (both decode to U+FFFD); the evidence keeps the
+/// reference ids. Per question it reports `identical over N` or the first divergent index (in
+/// `probe.json` of the run directory and the TEN log), and fails when any question differs.
+/// Run like the gate (see the module documentation), with this test's name instead.
+#[test]
+#[ignore = "real Metal + cached Qwen3-0.6B + this Mac's private LAN address; MYCELIUM_TEN_PACKAGED_EXECUTABLE, MYCELIUM_PINNED_PAYLOAD_APP, MYCELIUM_TEN_RUN_DIR, MYCELIUM_BOOTSTRAP_TEST_CONFIG"]
+fn probe_route_chat_against_a_single_process_reference() {
+    let ev = Evidence::open();
+    let _reaper = Reaper(ev.clone());
+    for name in [
+        "MYCELIUM_COMPILER_NATIVE_BINARY",
+        "MYCELIUM_COMPILER_NATIVE_SHA256",
+    ] {
+        assert!(
+            std::env::var_os(name).is_none(),
+            "{name} is set: the probe runs the admitted program only"
+        );
+    }
+    let lan = lan_ip();
+    let base = std::env::temp_dir().canonicalize().unwrap().join(format!(
+        "ten-probe-{}",
+        node_service::service::random_id().unwrap()
+    ));
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&base)
+        .unwrap();
+    let packaged = PathBuf::from(std::env::var_os("MYCELIUM_TEN_PACKAGED_EXECUTABLE").expect(
+        "MYCELIUM_TEN_PACKAGED_EXECUTABLE = the packaged `mycelium` (--features packaged --bin mycelium)",
+    ));
+    let binary = staged::stage(&packaged, &staged::payload_app(), &base);
+    let program = staged::admitted_program(&binary);
+    let tokenizer = cached::snapshot_dir().join("tokenizer.json");
+    let codec = api::joined_owner::codec::NativeCodec::start(&program.binary, &tokenizer).unwrap();
+    ev.note(
+        "probe_setup",
+        json!({"lan": lan, "state_root": base, "staged_executable": binary,
+            "codec_ids_equal_v014": codec_ids_match_the_oracle(&codec)}),
+    );
+    // The single-process reference first, over the same template and stop ids as the route.
+    let checkpoint = cached::snapshot_dir().join("model.safetensors");
+    let questions = [api::prompt_codec::ORACLE_USER_PROMPT, FRANCE];
+    let mut references = Vec::new();
+    for question in questions {
+        let ids = codec.encode(RUN_CODEC.chat(question).as_str()).unwrap();
+        let began = Instant::now();
+        let reference = api::native_compiler::single_process_greedy(
+            &program,
+            &checkpoint,
+            &ids,
+            CHAT_TOKENS as usize,
+            RUN_CODEC.stop_token_ids(),
+        )
+        .unwrap_or_else(|e| panic!("single-process reference for {question:?}: {}", e.0));
+        let pieces: Vec<String> = reference
+            .iter()
+            .map(|t| codec.decode(*t).unwrap())
+            .collect();
+        ev.note(
+            "probe_reference",
+            json!({"question": question, "prompt_ids": ids, "ids": reference,
+                "pieces": pieces, "text": pieces.concat(), "ms": ms(began)}),
+        );
+        references.push((question, reference, pieces));
+    }
+    let repository = cached::CachedRepository::start();
+    let (owner, member) = pair(
+        &base,
+        &repository,
+        RunConfig {
+            sidecar: Some(repository::sidecar_file(&base)),
+            native_program: Some(program.clone()),
+            observe_test_double: Some(Arc::new(observe_test_double::HostIdentityTestDouble::over)),
+            ..RunConfig::default()
+        },
+        &program,
+        &ev,
+    );
+    let mut report = Vec::new();
+    let mut failures = Vec::new();
+    match ten_rows(&owner.mac, &member, &ev, "probe") {
+        Ok(_) => {
+            for (i, (question, reference, expected)) in references.iter().enumerate() {
+                let (last, pieces) = chat(
+                    &owner.mac,
+                    &ev,
+                    &format!("probe_{i}"),
+                    question,
+                    CHAT_TOKENS,
+                );
+                let route: Vec<String> = pieces.iter().map(|p| p.0.clone()).collect();
+                let first = route
+                    .iter()
+                    .zip(expected)
+                    .position(|(a, b)| a != b)
+                    .or((route.len() != expected.len()).then(|| route.len().min(expected.len())));
+                let verdict = match first {
+                    None => format!("identical over {}", route.len()),
+                    Some(index) => format!("first divergent index {index}"),
+                };
+                let line = json!({"question": question, "verdict": verdict,
+                    "first_divergent_index": first, "route_pieces": route,
+                    "reference_pieces": expected, "reference_ids": reference,
+                    "route_terminal": last["terminal"], "route_error": last["error"]});
+                ev.note("probe_compare", line.clone());
+                if first.is_some() || last["terminal"] != "completed" {
+                    failures.push(format!(
+                        "{question:?}: {verdict}, terminal {}",
+                        last["terminal"]
+                    ));
+                }
+                report.push(line);
+            }
+            if let Err(e) = stop_row(&owner, &member, &ev, "probe", &binary, &lan) {
+                failures.push(e);
+            }
+        }
+        Err(e) => {
+            failures.push(e);
+            let (code, answer) = owner.mac.post("/api/demo/stop", json!({}));
+            ev.note(
+                "probe_stop_after_failure",
+                json!({"code": code, "answer": answer}),
+            );
+        }
+    }
+    std::fs::write(
+        ev.dir.join("probe.json"),
+        serde_json::to_vec_pretty(&json!({"compared": report, "failures": failures})).unwrap(),
+    )
+    .unwrap();
+    drop(codec);
+    let owner_quit = quit(owner.mac);
+    let member_quit = quit(member);
+    if owner_quit != Ok(Poll::Verified) || member_quit != Ok(Poll::Verified) {
+        failures.push(format!("Quit: owner={owner_quit:?} member={member_quit:?}"));
+    }
+    drop(repository);
     if failures.is_empty() {
         std::fs::remove_dir_all(&base).unwrap_or_default();
     }
