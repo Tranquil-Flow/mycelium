@@ -15,6 +15,15 @@
 //! waiting, and a busy lock is a live run, skipped. A lost process releases its locks with it, so
 //! the next Start's pass retires what a crash left. `reserve_output` itself still never refunds.
 //!
+//! A free lock proves a run dead only when its process would have held it (PHY-01, lane PHY patch
+//! 2). A build before this one (base `3d7d89be` and earlier) writes the same start record
+//! (`mycelium.chain_compile_start.v1`) and never takes the lock, so a live older process compiling
+//! or serving its run looks exactly like a crashed one. Every build that takes the lock writes
+//! [`CUSTODY`] in its start record (`emit_mode`), before any stage reservation; only such a run is
+//! retired. A run without the marker is a legacy run: never retired automatically, only reported
+//! with its charged bytes ([`Retirement::legacy`]) so the owner can release it by hand once no
+//! older Mycelium runs on this Mac.
+//!
 //! Only the owner's own runs are retired: an entry whose run directory still has the identity the
 //! ledger bound (dev, ino; private mode, this user), with the compile's start record and no member
 //! custody record (a joined Mac's custody is retired by its own discard,
@@ -98,6 +107,9 @@ enum Outcome {
     NotOwner,
     /// Another holder keeps the run.
     Live,
+    /// A run whose start record has no custody marker: its process never took the lock, so a free
+    /// lock proves nothing (its charged bytes).
+    Legacy(u64),
     /// Stage shards gone and refund recorded; the lock is held until the ledger commits.
     Retired(fs::File),
 }
@@ -120,6 +132,7 @@ pub fn retire_dead_runs(host: &Path) -> Result<Retirement> {
     for (run, row) in &rows {
         match retire_one(&runs, run, row) {
             Ok(Outcome::NotOwner | Outcome::Live) => {}
+            Ok(Outcome::Legacy(bytes)) => done.legacy.push((run.clone(), bytes)),
             Ok(Outcome::Retired(held)) => {
                 ledger["entries"]
                     .as_object_mut()
@@ -155,7 +168,11 @@ fn retire_one(runs: &Path, run: &str, row: &Value) -> Result<Outcome> {
     }
     let max = private_state::private_json_limit().map_err(state)?;
     match private_state::load(&root.join(START), max) {
-        Ok(Some(start)) if start.get("run_id") == Some(&json!(run)) => {}
+        Ok(Some(start)) if start.get("run_id") == Some(&json!(run)) => {
+            if start.get("custody") != Some(&json!(CUSTODY)) {
+                return Ok(Outcome::Legacy(row["bytes"].as_u64().unwrap_or(0)));
+            }
+        }
         Ok(None) => return Ok(Outcome::NotOwner),
         _ => return Err(changed()),
     }

@@ -144,8 +144,10 @@ struct WorkDebt {
 /// Retire this owner's dead compile runs from its storage ledger (lane PHY item 1, ledger rows 8
 /// and 81): every run no process holds any more loses its stage shards and its charge. Called
 /// when a run ends (the chain's teardown: a failed step, Stop, Quit) and at the next Start
-/// (`work::Composed::new_run`), which also covers a run a lost process left. A refusal is logged
-/// by name and leaves that run charged: it never fails the run or its teardown.
+/// (`work::Composed::new_run`), which also covers a run a lost process of this build left. A
+/// refusal is logged by name and leaves that run charged, and so does a legacy run (one an older
+/// build started, which never took the run directory's lock): it never fails the run or its
+/// teardown.
 fn retire_dead_runs(host: &PackagedRun) {
     let root = host.with(|c| c.authority.root.clone());
     match api::compiler_inputs::retire_dead_runs(&root) {
@@ -155,6 +157,11 @@ fn retire_dead_runs(host: &PackagedRun) {
             }
             for (run, code) in done.refused {
                 eprintln!("owner_storage_retire_refused:{run}:{code}");
+            }
+            // A run an older build started (no custody marker): it may still be live in that
+            // build's process, so it stays charged and is only named (PHY-01).
+            for (run, bytes) in done.legacy {
+                eprintln!("owner_storage_legacy_kept:{run}:{bytes}");
             }
         }
         Err(error) => eprintln!("owner_storage_retire_failed:{}", error.0),

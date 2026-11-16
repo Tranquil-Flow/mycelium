@@ -1068,9 +1068,11 @@ fn emit_mode(
         (
             "compile-start.private.json".into(),
             if loopback {
-                json!({"protocol":"mycelium.chain_compile_start.loopback.v1","run_id":run,"deployment_id":deployment,"epoch":epoch,"scope":"loopback_process_qualification","route_ready":false})
+                json!({"protocol":"mycelium.chain_compile_start.loopback.v1","run_id":run,"deployment_id":deployment,"epoch":epoch,"scope":"loopback_process_qualification","route_ready":false,"custody":owner_retire::CUSTODY})
             } else {
-                json!({"protocol":"mycelium.chain_compile_start.v1","run_id":run,"deployment_id":deployment,"epoch":epoch})
+                // `custody`: this process holds the run directory's lock while it keeps the run, so
+                // a retirement pass may read a free lock as a dead run (PHY-01).
+                json!({"protocol":"mycelium.chain_compile_start.v1","run_id":run,"deployment_id":deployment,"epoch":epoch,"custody":owner_retire::CUSTODY})
             },
         ),
         ("topology.json".into(), topology.clone()),
