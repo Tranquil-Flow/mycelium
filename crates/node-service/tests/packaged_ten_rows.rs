@@ -820,6 +820,35 @@ fn workers(binary: &Path) -> Vec<(u32, u64)> {
         .map(|r| (r.0, r.2))
         .collect()
 }
+/// Lane CHATS item 4 (ledger row 106 a): while the run serves, the owner's page can reach the
+/// chat. run.js shows "Open the chat on this Mac" (and the room's link) only from the status's
+/// `chat` block (v0.1.4 `chat.chat_status`, chat.py:521-529); the chat row below calls the chat
+/// API directly, so it passed on rv39 while the page said "The chat opens when the route is
+/// serving." The owner's block must say available with a `local_url`; a joined Mac has none.
+fn chat_link_row(owner: &Mac, member: &Mac, ev: &Evidence, run: &str) -> Result<(), String> {
+    let block = owner.status()["chat"].clone();
+    let joined = member.status()["chat"].clone();
+    ev.note(
+        &format!("{run}_status_chat"),
+        json!({"owner": block, "member": joined}),
+    );
+    let ok = block["available"] == true
+        && block["local_url"]
+            .as_str()
+            .is_some_and(|url| url.ends_with("/chat"))
+        && joined.is_null();
+    ev.row(
+        json!({"row": format!("{run} chat link"), "result": if ok { "passed" } else { "failed" },
+        "wall_ms": null, "status_line": block}),
+    );
+    if ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "{run}: the serving owner's status does not offer the chat: {block} (member: {joined})"
+        ))
+    }
+}
 fn stop_row(
     owner: &Owner,
     member: &Mac,
@@ -975,6 +1004,9 @@ fn ten_rows_with_the_real_model_on_the_lan() {
                 ev.note(&format!("{run}_workers_at_serving"), json!({"workers": at_serving,
                     "lan_sockets": sockets().into_iter().filter(|s| s.contains(&lan)).collect::<Vec<_>>(),
                     "loopback_udp": sockets().into_iter().filter(|s| s.contains("UDP") && s.contains("127.0.0.1")).collect::<Vec<_>>()}));
+                if let Err(e) = chat_link_row(&owner.mac, &member, &ev, run) {
+                    failures.push(e);
+                }
                 if let Err(e) = chat_row(&owner.mac, &ev, run, &codec) {
                     failures.push(e);
                 } else if run == "run1" {
