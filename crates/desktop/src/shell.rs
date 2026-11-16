@@ -32,45 +32,11 @@ pub const MIN_WINDOW_HEIGHT: f64 = 560.0;
 #[cfg(all(feature = "dev-shell", debug_assertions))]
 const DEV_TITLE: &str = "Mycelium L11 development — core not integrated";
 fn asset(path: &str) -> Option<Reply> {
-    let (kind, bytes): (&str, &[u8]) = match path {
-        "/" => (
-            "text/html; charset=utf-8",
-            include_bytes!("../assets/index.html"),
-        ),
-        "/app.js" => ("text/javascript", include_bytes!("../assets/app.js")),
-        "/run.js" => ("text/javascript", include_bytes!("../assets/run.js")),
-        "/swarm.js" => ("text/javascript", include_bytes!("../assets/swarm.js")),
-        "/style.css" => ("text/css", include_bytes!("../assets/style.css")),
-        "/mark.svg" => ("image/svg+xml", include_bytes!("../assets/mark.svg")),
-        "/mycelium-boot.js" => (
-            "text/javascript",
-            include_bytes!("../assets/mycelium-boot.js"),
-        ),
-        "/mycelium-geometry.js" => (
-            "text/javascript",
-            include_bytes!("../assets/mycelium-geometry.js"),
-        ),
-        "/mycelium-hero.js" => ("text/javascript", include_bytes!("../assets/mycelium-hero.js")),
-        "/mycelium-field.js" => (
-            "text/javascript",
-            include_bytes!("../assets/mycelium-field.js"),
-        ),
-        "/fraunces-latin-wght-normal.woff2" => (
-            "font/woff2",
-            include_bytes!("../assets/fraunces-latin-wght-normal.woff2"),
-        ),
-        "/chat" => (
-            "text/html; charset=utf-8",
-            include_bytes!("../assets/chat.html"),
-        ),
-        "/chat/chat.js" => ("text/javascript", include_bytes!("../assets/chat.js")),
-        "/chat/chat.css" => ("text/css", include_bytes!("../assets/chat.css")),
-        _ => return None,
-    };
+    let asset = crate::page::window(path)?;
     Some(Reply {
         status: 200,
-        content_type: kind,
-        body: bytes.to_vec(),
+        content_type: asset.content_type,
+        body: asset.bytes.to_vec(),
     })
 }
 fn response(reply: Reply) -> tauri::http::Response<Vec<u8>> {

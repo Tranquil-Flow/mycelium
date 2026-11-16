@@ -1,7 +1,7 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Mycelium · swarm chat</title><link rel="stylesheet" href="/chat/chat.css"><script defer src="/chat/chat.js"></script></head>
-<body><header><div class="brand">✳ Mycelium <span>a model running across the Macs in this room</span></div></header>
-<main><p id="state" role="status" aria-live="polite">Connecting…</p>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Mycelium · chat</title><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/chat/chat.css"><script defer src="/chat/chat.js"></script><script defer src="/chat/owner.js"></script></head>
+<body class="chat-page"><header><div class="brand"><img class="mark" src="/mark.svg" alt="" aria-hidden="true"><span class="brand-text">Mycelium<span class="brand-tag">a model running across the Macs in this room</span></span></div><nav class="owner-controls" aria-label="This Mac"><a id="back" class="back" href="/">Back to Mycelium</a><button id="run-stop" type="button" class="secondary" disabled>Stop the run</button></nav></header>
+<main id="main"><p id="run-stop-state" class="detail" role="status" aria-live="polite"></p><p class="eyebrow">Chat</p><h1>Ask the swarm</h1><p id="state" role="status" aria-live="polite">Connecting…</p>
 <p id="served" class="detail"></p>
 <div id="log" aria-live="polite"></div>
 <form id="form"><label for="prompt">Your prompt</label><textarea id="prompt" rows="3" maxlength="2000" placeholder="Ask the swarm something" required></textarea>

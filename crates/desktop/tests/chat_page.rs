@@ -18,7 +18,9 @@
 use std::path::Path;
 
 fn asset(name: &str) -> String {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets").join(name);
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("assets")
+        .join(name);
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{name}: {e}"))
 }
 
@@ -49,7 +51,10 @@ fn the_window_chat_page_wears_the_apps_look() {
     let chat = html
         .find(r#"<link rel="stylesheet" href="/chat/chat.css">"#)
         .expect("the chat layout stylesheet is gone");
-    assert!(style < chat, "the chat layout must build on the app's tokens, not precede them");
+    assert!(
+        style < chat,
+        "the chat layout must build on the app's tokens, not precede them"
+    );
     assert!(
         html.contains(r#"<img class="mark" src="/mark.svg""#),
         "the app's header mark is missing from the chat page"
@@ -64,20 +69,34 @@ fn the_window_chat_page_wears_the_apps_look() {
         "chat.css declares its own palette instead of the app's tokens"
     );
     for old in ["#101b19", "#192923", "#edf2e9", "#b6e8ad", "#40564a"] {
-        assert!(!css.contains(old), "chat.css still carries v0.1.4's colour {old}");
+        assert!(
+            !css.contains(old),
+            "chat.css still carries v0.1.4's colour {old}"
+        );
     }
-    assert!(css.contains("var(--"), "chat.css does not use the app's tokens");
+    assert!(
+        css.contains("var(--"),
+        "chat.css does not use the app's tokens"
+    );
 }
 
 #[test]
 fn the_window_chat_page_has_a_visible_way_back_to_mycelium() {
     let html = asset("chat.html");
     let back = back_link(&html).expect("the chat page has no \"Back to Mycelium\" link");
-    assert!(back.contains(r#"href="/""#), "Back does not lead to the main page: {back}");
+    assert!(
+        back.contains(r#"href="/""#),
+        "Back does not lead to the main page: {back}"
+    );
     assert!(!back.contains("hidden"), "Back is hidden: {back}");
-    assert!(!back.contains("target="), "Back must stay in the pinned window: {back}");
+    assert!(
+        !back.contains("target="),
+        "Back must stay in the pinned window: {back}"
+    );
     // `/` is a pinned destination of the window (navigation is refused anywhere else).
-    assert!(desktop::channel::navigation_allowed("mycelium://localhost/"));
+    assert!(desktop::channel::navigation_allowed(
+        "mycelium://localhost/"
+    ));
 }
 
 #[test]
@@ -86,7 +105,10 @@ fn the_window_chat_page_offers_the_runs_stop_with_the_main_pages_request() {
     let stop = tag_with_id(&html, "run-stop").expect("the chat page has no Stop control");
     assert!(stop.starts_with("<button"), "{stop}");
     assert!(stop.contains(r#"type="button""#), "{stop}");
-    assert!(!stop.contains("hidden"), "Stop is hidden by default: {stop}");
+    assert!(
+        !stop.contains("hidden"),
+        "Stop is hidden by default: {stop}"
+    );
     assert!(
         html.contains(">Stop the run</button>"),
         "the Stop control has no visible label"
@@ -99,13 +121,19 @@ fn the_window_chat_page_offers_the_runs_stop_with_the_main_pages_request() {
     let run = asset("run.js");
     // The main page's Stop: run.js `act('/api/demo/stop', {})` through its `api` (POST JSON with
     // `X-Mycelium-Action: 1`, the header the window's channel requires for an action).
-    assert!(run.contains("act('/api/demo/stop', {})"), "run.js's Stop moved");
+    assert!(
+        run.contains("act('/api/demo/stop', {})"),
+        "run.js's Stop moved"
+    );
     assert!(
         owner.contains("api('/api/demo/stop', {})"),
         "the chat page's Stop is not the main page's request"
     );
     let headers = "{'Content-Type':'application/json','X-Mycelium-Action':'1'}";
-    assert!(run.contains(headers) && owner.contains(headers), "the action headers differ");
+    assert!(
+        run.contains(headers) && owner.contains(headers),
+        "the action headers differ"
+    );
     assert!(
         owner.contains("$('run-stop').addEventListener('click'"),
         "Stop is not wired"
@@ -125,7 +153,44 @@ fn the_shared_chat_script_reaches_no_owner_action() {
             );
         }
     }
-    for owner in ["run-stop", "/api/demo", "Back to Mycelium", "X-Mycelium-Action"] {
-        assert!(!chat.contains(owner), "chat.js reaches owner control {owner}");
+    for owner in [
+        "run-stop",
+        "/api/demo",
+        "Back to Mycelium",
+        "X-Mycelium-Action",
+    ] {
+        assert!(
+            !chat.contains(owner),
+            "chat.js reaches owner control {owner}"
+        );
     }
+}
+
+/// The window serves every file the chat page names (the app's stylesheet, mark and font, the
+/// chat's layout, the shared script and the window-only owner script), byte for byte; the shared
+/// script is the one exported for the relay ([`desktop::page::CHAT_JS`]).
+#[test]
+fn the_window_serves_everything_its_chat_page_loads() {
+    let html = asset("chat.html");
+    let mut named = Vec::new();
+    for attribute in ["href=\"", "src=\""] {
+        for part in html.split(attribute).skip(1) {
+            named.push(part[..part.find('"').unwrap()].to_owned());
+        }
+    }
+    assert!(named.contains(&"/chat/owner.js".to_owned()), "{named:?}");
+    for path in &named {
+        assert!(
+            desktop::page::window(path).is_some(),
+            "the chat page names {path}, which the window does not serve"
+        );
+    }
+    let style = asset("style.css");
+    assert!(style.contains("url(\"/fraunces-latin-wght-normal.woff2\")"));
+    assert!(desktop::page::window("/fraunces-latin-wght-normal.woff2").is_some());
+    let served = |path: &str| desktop::page::window(path).unwrap().bytes;
+    assert_eq!(served("/chat/owner.js"), asset("chat-owner.js").as_bytes());
+    assert_eq!(served("/chat/chat.js"), asset("chat.js").as_bytes());
+    assert_eq!(desktop::page::CHAT_JS, asset("chat.js").as_bytes());
+    assert_eq!(served("/chat"), html.as_bytes());
 }

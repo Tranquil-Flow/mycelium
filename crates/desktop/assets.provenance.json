@@ -9,8 +9,6 @@
     "each divergence carries the reason it happened, so the difference is evidence rather than drift."
   ],
   "unchanged": {
-    "chat.css": "5dce5ce7198071e9186a65ecb02cf1277fa3c492a255af5c6bba91c0c8e7b7dd",
-    "chat.html": "68ae69a0e7225a301b1ee349fbd6ed4ecca8699e6f759c69b53770e7774b8463",
     "run.js": "300684580a99adaa9254888015a83a17a3a77e07f9b56b7bb30f5593efa96f84",
     "swarm.js": "1e5fb247356fb287ca893df0bb738c0b0132d1bb89352f84d687bc1a4c871fbe"
   },
@@ -34,6 +32,14 @@
     "chat.js": {
       "sha256": "57e71956a8ca38f5e51ce226d5a1352b24a320a0c42289b0bceddc0ecdd5dce7",
       "reason": "Lane CAP (owner ruling 15 Nov): the stage capacity is the model contract's serving context (4,096 then; 2,356 by the owner's ruling of 16 Nov, crates/api/contracts/divergences.json), and a prompt the page accepts (2,000 characters) can be up to 8,000 tokens with the byte-level tokenizer, so the route can refuse it (joined_route_context_exceeds_worker). The chat service names that refusal chat_context_too_long; this script gains its message and appends the context from the chat state's limits.context_tokens instead of showing the route's internal code. The page's own limits are unchanged."
+    },
+    "chat.html": {
+      "sha256": "b668935ee7cf66af2e80fb7e9b47ea6c08a38491d9e3dd4ecc9120514e643896",
+      "reason": "Lane CHATPAGE (owner, 16 Nov 21:58-22:15; brief CHATPAGE-2026-11-16 item 1): \"Open the chat on this Mac\" navigates the packaged window to mycelium://localhost/chat, and v0.1.4's page there had its own old look and NO way back to the main page, so the owner could reach neither Stop nor Quit from the window (v0.1.4 opened it in a browser tab beside the app; the packaged window pins every link into its one window). The window's chat page now loads the main page's style.css (the app's tokens, the Fraunces face, the header mark) before chat.css, shows a visible 'Back to Mycelium' link to / (a pinned destination) and a 'Stop the run' button wired by the window-only /chat/owner.js. Every element chat.js and the qualification probe drive keeps its v0.1.4 id (state, served, log, form, prompt, tokens, send) and the room notice is unchanged. The public relay never serves this page: it serves the api crate's pinned v0.1.4 chat.html and chat.css, with this crate's chat.js."
+    },
+    "chat.css": {
+      "sha256": "7a4c72ba36d2a81aa1a8258f1a33ff77987e3d1563829fe9f9ecbdb34d2b9b88",
+      "reason": "Lane CHATPAGE item 1: v0.1.4's chat.css declared its own palette (--bg #101b19, --panel #192923, ...) and system fonts, so the window's chat page did not look like the app. It is now only the chat's layout (log bubbles, the prompt row, the owner controls) on the app's tokens from style.css, which the window's chat.html loads first; it declares no :root palette of its own. Window only: the relay's chat page keeps the api crate's pinned v0.1.4 chat.css."
     }
   },
   "added": {
@@ -60,6 +66,10 @@
     "mark.svg": {
       "sha256": "aa4451a9a8cf6092869993115895461fb2e8b55ca83da211922bb1490e65b4c0",
       "reason": "mycelium colony mark (W2) replacing the inherited asterisk glyph; drawn for both the site and the app"
+    },
+    "chat-owner.js": {
+      "sha256": "e2f5b03a9d9b9a6b7c907b98d1c0b7aabcee5928d953b4c5af7be412d2e3627d",
+      "source": "app-local (lane CHATPAGE item 1): the window chat page's owner controls, served only by the window at /chat/owner.js. 'Stop the run' sends the main page's own Stop request (run.js act('/api/demo/stop', {}): POST, JSON, X-Mycelium-Action: 1) and is shown only to the owner, enabled only while the run is running or serving; the relay never serves this script and refuses an owner action whatever a page sends."
     }
   },
   "icon": {
