@@ -483,7 +483,20 @@ impl<H: MemberHost> MemberAgent<H> {
                     "member standing acceptor: {}",
                     failure.code.as_deref().unwrap_or("standing_accept_failed")
                 );
-                return;
+                // Lane CHATPAGE patch 2 (CP-03): a pending-offer read the owner could not answer
+                // (retryable: no offer was read, nothing was accepted) does not end the pass
+                // before the agent. v0.2's owner answers a joined Mac's mailbox only under the
+                // descriptor that Mac reported for the CURRENT run (`owner_observation` `guarded`;
+                // v0.1.4's `_member_guard`, managed_control.py:909-941 @ f4e366e9, checks the
+                // membership only), and the agent is what reads the next run's announcement and
+                // reports that descriptor (demo_target.py:437-470). Once the agent's last
+                // announcement no longer holds the offer (`stopped`, `idle`), ending the pass here
+                // kept the agent from ever reading the next run: the joined Mac never reported
+                // into it (merge-chat2 ten-row gate, run2 row 3 `two_macs_required`). Any other
+                // acceptor failure still ends the pass, as `auto_accept`'s exception does.
+                if !failure.retryable {
+                    return;
+                }
             }
         }
         match host.work_report() {
