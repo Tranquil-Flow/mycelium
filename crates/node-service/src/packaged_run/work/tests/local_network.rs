@@ -14,12 +14,15 @@ use std::net::SocketAddr;
 struct Scripted {
     answer: Mutex<Answer>,
     sent: Mutex<Vec<(std::net::IpAddr, SocketAddr)>>,
+    /// Notes, per datagram, whether the run had started work when it left.
+    watch: Mutex<Option<Arc<Watch>>>,
 }
 impl Scripted {
     fn new(answer: Answer) -> Arc<Self> {
         Arc::new(Self {
             answer: Mutex::new(answer),
             sent: Mutex::default(),
+            watch: Mutex::default(),
         })
     }
     fn answer(&self, answer: Answer) {
@@ -44,6 +47,9 @@ impl Scripted {
 }
 impl Probe for Scripted {
     fn send(&self, from: std::net::IpAddr, to: SocketAddr) -> Answer {
+        if let Some(watch) = self.watch.lock().unwrap().as_ref() {
+            watch.record();
+        }
         self.sent.lock().unwrap().push((from, to));
         *self.answer.lock().unwrap()
     }
@@ -261,21 +267,82 @@ fn a_step_6_dial_without_an_answer_is_named_on_the_mac_that_must_allow_it() {
     ports.work.teardown().unwrap();
 }
 
-/// Proves PHY-03 (lane PHY patch 2): the probe obeys the run's work-transport admission. A run
-/// whose own reading of this Mac's interfaces finds no single private network (`local_only:*`)
-/// has no admitted LAN path: it sends no datagram and is not refused for Local Network; its
-/// compose then refuses it by name as at the base, from the SAME resolution (one reading).
-#[test]
-fn a_run_whose_network_resolves_local_only_sends_no_probe() {
-    use api::lan_interface::{AMBIGUOUS_PRIVATE_INTERFACES, Selection};
+/// PHY2-01 (lane PHY patch 3): a reading of this Mac's interfaces that answers `first` to the run's
+/// first reading (its probe passes) and `then` to every later one (compose), with the count.
+fn changing(
+    first: api::lan_interface::Selection,
+    then: api::lan_interface::Selection,
+) -> (WorkNetwork, Arc<AtomicUsize>) {
     let reads = Arc::new(AtomicUsize::new(0));
     let counted = reads.clone();
     let owner = WorkNetwork::Read(
-        Arc::new(move || {
-            counted.fetch_add(1, Ordering::SeqCst);
-            Selection::LocalOnly(AMBIGUOUS_PRIVATE_INTERFACES)
+        Arc::new(move || match counted.fetch_add(1, Ordering::SeqCst) {
+            0 => first.clone(),
+            _ => then.clone(),
         }),
-        runtime::iroh_host::LanPolicy::private_only(),
+        runtime::iroh_host::LanPolicy::with_explicit(vec![LOOPBACK]).unwrap(),
+    );
+    (owner, reads)
+}
+const LOOPBACK: std::net::IpAddr = std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST);
+/// An address this Mac's interfaces no longer carry (the probe's LAN A that vanished before compose).
+const VANISHED: std::net::IpAddr = std::net::IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1));
+/// [`published`] with the worker walls a composed run carries.
+fn published_for_work(f: &mut Fixture, work: &Work, run: &str) -> RunState {
+    let mut state = published(f, work, run);
+    let wall = BudgetId::MemberChosenWall
+        .span(Entries::ZERO)
+        .unwrap()
+        .millis()
+        / 1000;
+    state.worker_wall_limits = state
+        .participants
+        .iter()
+        .cloned()
+        .map(|n| (n, wall))
+        .collect();
+    state
+}
+/// Every datagram's (from, to) and whether the run had started a work endpoint or composed its
+/// workflow when it left (a datagram compose sends must leave before either).
+fn watched(probe: &Scripted, resident: &Arc<Mutex<Resident>>) -> Arc<Watch> {
+    let watch = Arc::new(Watch {
+        resident: resident.clone(),
+        started: Mutex::default(),
+    });
+    *probe.watch.lock().unwrap() = Some(watch.clone());
+    watch
+}
+struct Watch {
+    resident: Arc<Mutex<Resident>>,
+    started: Mutex<Vec<bool>>,
+}
+impl Watch {
+    fn record(&self) {
+        let started = match self.resident.try_lock() {
+            Ok(resident) => resident.local.is_some() || resident.work.is_some(),
+            Err(_) => true,
+        };
+        self.started.lock().unwrap().push(started);
+    }
+}
+/// The run's preflight record is empty: no run, nothing reached, no held resolution.
+fn preflight_reset(work: &Work) -> bool {
+    let seen = lock(&work.local_network);
+    seen.run.is_empty() && seen.reached.is_empty() && seen.network.is_none()
+}
+
+/// Proves PHY-03 (lane PHY patch 2): a run whose reading of this Mac's interfaces finds no single
+/// private network (`local_only:*`) has no admitted LAN path: its probe passes send no datagram and
+/// are not refused for Local Network; its compose, reading the interfaces itself (patch 3,
+/// PHY2-01), refuses it by name as at the base. (Replaces the patch-2 test that required ONE
+/// reading across the probe and the compose.)
+#[test]
+fn a_run_whose_network_resolves_local_only_sends_no_probe() {
+    use api::lan_interface::{AMBIGUOUS_PRIVATE_INTERFACES, Selection};
+    let (owner, reads) = changing(
+        Selection::LocalOnly(AMBIGUOUS_PRIVATE_INTERFACES),
+        Selection::LocalOnly(AMBIGUOUS_PRIVATE_INTERFACES),
     );
     let mut f = Fixture::on_each(owner, lan_on_loopback());
     let ports = PackagedChainPorts::new(&f.host, None, None);
@@ -287,14 +354,288 @@ fn a_run_whose_network_resolves_local_only_sends_no_probe() {
     assert!(work.local_network(&state, false).is_ok());
     assert!(work.local_network(&state, true).is_ok());
     assert!(probe.sent().is_empty(), "{:?}", probe.sent());
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        1,
+        "the probe passes share one reading"
+    );
     let mut env = Env { at: Instant::now() };
     let (code, _) = refusal(work.compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env));
     assert_eq!(code, "owner_work_network_unavailable");
     assert_eq!(
         reads.load(Ordering::SeqCst),
-        1,
-        "the probe and the compose read the run's network once"
+        2,
+        "compose read the interfaces itself"
     );
+    assert!(probe.sent().is_empty(), "{:?}", probe.sent());
+}
+
+/// Proves PHY2-01 (lane PHY patch 3), local-only -> LAN: the probe passes found no single private
+/// network (nothing sent); by compose this Mac has one. Compose reads the interfaces afresh, binds
+/// that LAN address (no stale `owner_work_network_unavailable`), and, its resolution differing from
+/// the probe's, asks with one datagram from that address before it starts any work endpoint.
+#[test]
+fn compose_after_a_local_only_probe_uses_the_lan_it_now_finds() {
+    use api::lan_interface::{AMBIGUOUS_PRIVATE_INTERFACES, Selection};
+    let (owner, reads) = changing(
+        Selection::LocalOnly(AMBIGUOUS_PRIVATE_INTERFACES),
+        Selection::Lan(LOOPBACK),
+    );
+    let mut f = Fixture::on_each(owner, lan_on_loopback());
+    let ports = PackagedChainPorts::new(&f.host, None, None);
+    let probe = Scripted::new(Answer::Sent);
+    let mut work = ports.work.clone();
+    work.probe = probe.clone();
+    let watch = watched(&probe, &work.resident);
+    let state = published_for_work(&mut f, &work, "run-l2l");
+    let member = member_addresses(&f, &work, &state);
+    assert!(work.local_network(&state, false).is_ok());
+    assert!(work.local_network(&state, true).is_ok());
+    assert!(probe.sent().is_empty(), "{:?}", probe.sent());
+    let mut env = Env { at: Instant::now() };
+    let composed = work.compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env);
+    assert!(composed.is_ok(), "{composed:?}");
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        2,
+        "compose read the interfaces itself"
+    );
+    let bound = lock(&work.resident).network.clone();
+    assert_eq!(
+        bound.and_then(|n| n.0).map(|(ip, _)| ip),
+        Some(LOOPBACK),
+        "the run is bound to the LAN address compose found"
+    );
+    assert_eq!(probe.sent(), member, "one datagram per verified address");
+    assert!(
+        probe.from().iter().all(|from| *from == LOOPBACK),
+        "{:?}",
+        probe.from()
+    );
+    assert!(
+        watch.started.lock().unwrap().iter().all(|s| !s),
+        "a datagram left after a work endpoint started"
+    );
+    let _ = work.teardown();
+}
+
+/// Proves PHY2-01, LAN -> local-only: the probe passes reached the joined Mac on this Mac's LAN; by
+/// compose this Mac has no single private network. Compose reads the interfaces afresh and refuses
+/// the run by name exactly as at the base, before any work endpoint and with no further datagram.
+#[test]
+fn compose_after_a_lan_probe_refuses_by_name_when_the_lan_is_gone() {
+    use api::lan_interface::{AMBIGUOUS_PRIVATE_INTERFACES, Selection};
+    let (owner, reads) = changing(
+        Selection::Lan(LOOPBACK),
+        Selection::LocalOnly(AMBIGUOUS_PRIVATE_INTERFACES),
+    );
+    let mut f = Fixture::on_each(owner, lan_on_loopback());
+    let ports = PackagedChainPorts::new(&f.host, None, None);
+    let probe = Scripted::new(Answer::Sent);
+    let mut work = ports.work.clone();
+    work.probe = probe.clone();
+    let state = published_for_work(&mut f, &work, "run-l2o");
+    let member = member_addresses(&f, &work, &state);
+    assert!(work.local_network(&state, true).is_ok());
+    assert_eq!(probe.sent(), member);
+    let mut env = Env { at: Instant::now() };
+    let (code, message) =
+        refusal(work.compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env));
+    assert_eq!(code, "owner_work_network_unavailable", "{message}");
+    assert!(message.contains(AMBIGUOUS_PRIVATE_INTERFACES), "{message}");
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        2,
+        "compose read the interfaces itself"
+    );
+    assert_eq!(probe.sent(), member, "no datagram on a local-only compose");
+    let resident = lock(&work.resident);
+    assert!(resident.local.is_none() && resident.work.is_none() && resident.network.is_none());
+}
+
+/// Proves PHY2-01, LAN A -> LAN B: the probe passes reached the joined Mac from address A; by
+/// compose A is gone and this Mac's network is B. Compose binds B, drops what A reached and asks
+/// again from B before any work endpoint or dial: reached, the run composes on B; blocked, it is
+/// refused by name (`local_network_permission_required`) with nothing started.
+#[test]
+fn compose_on_a_new_lan_address_binds_it_and_asks_again_from_it_first() {
+    use api::lan_interface::Selection;
+    for at_compose in [Answer::Sent, Answer::Blocked] {
+        let (owner, reads) = changing(Selection::Lan(VANISHED), Selection::Lan(LOOPBACK));
+        let mut f = Fixture::on_each(owner, lan_on_loopback());
+        let ports = PackagedChainPorts::new(&f.host, None, None);
+        let probe = Scripted::new(Answer::Sent);
+        let mut work = ports.work.clone();
+        work.probe = probe.clone();
+        let watch = watched(&probe, &work.resident);
+        let state = published_for_work(&mut f, &work, "run-a2b");
+        let member = member_addresses(&f, &work, &state);
+        assert!(work.local_network(&state, false).is_ok());
+        assert!(work.local_network(&state, true).is_ok());
+        assert_eq!(probe.sent(), member, "reached once from A");
+        assert!(probe.from().iter().all(|from| *from == VANISHED));
+        probe.answer(at_compose);
+        let mut env = Env { at: Instant::now() };
+        let composed = work.compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env);
+        assert_eq!(
+            reads.load(Ordering::SeqCst),
+            2,
+            "compose read the interfaces itself"
+        );
+        let again: Vec<_> = probe.sent.lock().unwrap()[member.len()..].to_vec();
+        assert_eq!(
+            again,
+            member.iter().map(|to| (LOOPBACK, *to)).collect::<Vec<_>>(),
+            "{at_compose:?}: asked again from B, to the same verified addresses"
+        );
+        assert!(
+            watch.started.lock().unwrap().iter().all(|s| !s),
+            "{at_compose:?}: a datagram left after a work endpoint started"
+        );
+        match at_compose {
+            Answer::Sent => {
+                assert!(composed.is_ok(), "{composed:?}");
+                let bound = lock(&work.resident).network.clone();
+                assert_eq!(bound.and_then(|n| n.0).map(|(ip, _)| ip), Some(LOOPBACK));
+            }
+            _ => {
+                let (code, message) = refusal(composed);
+                assert_eq!(code, PERMISSION_REQUIRED, "{message}");
+                let resident = lock(&work.resident);
+                assert!(resident.local.is_none() && resident.work.is_none());
+            }
+        }
+        let _ = work.teardown();
+    }
+}
+
+/// Proves PHY2-01: a changed resolution re-asks only this run's CURRENT verified members. The joined
+/// Mac was reached from A, then revoked; by compose this Mac is on B. Compose reads afresh, sends
+/// nothing (no verified target), and is not refused for Local Network.
+#[test]
+fn a_changed_resolution_with_no_verified_member_sends_nothing() {
+    use api::lan_interface::Selection;
+    let (owner, reads) = changing(Selection::Lan(VANISHED), Selection::Lan(LOOPBACK));
+    let mut f = Fixture::on_each(owner, lan_on_loopback());
+    let ports = PackagedChainPorts::new(&f.host, None, None);
+    let probe = Scripted::new(Answer::Blocked);
+    let mut work = ports.work.clone();
+    work.probe = probe.clone();
+    let state = published_for_work(&mut f, &work, "run-nv");
+    assert!(work.local_network(&state, false).is_ok());
+    let first = probe.sent();
+    assert!(!first.is_empty());
+    let seed = f.host.with(|c| c.authority.seed.clone().unwrap());
+    let generation = lock(&f.member_authority)
+        .session
+        .as_ref()
+        .unwrap()
+        .generation()
+        .unwrap();
+    seed.coordinator
+        .advance_member_generation(&f.remote, generation, "STOPPED")
+        .unwrap();
+    let mut env = Env { at: Instant::now() };
+    let composed = work.compose(&state, f.plan(&state), Arc::new(NoCodec), &mut env);
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        2,
+        "compose read the interfaces itself"
+    );
+    assert_eq!(probe.sent(), first, "no datagram without a verified member");
+    if let Err(StepError::Refused(e)) = &composed {
+        assert_ne!(e.code, PERMISSION_REQUIRED, "{composed:?}");
+    }
+    let _ = work.teardown();
+}
+
+/// Proves PHY2-01 lifecycle: Stop (the chain's teardown) between the probe passes and compose
+/// drops the run's preflight record, so the next pass reads the interfaces again and asks again.
+#[test]
+fn stop_between_the_probe_and_compose_drops_the_preflight_record() {
+    use api::lan_interface::Selection;
+    let (owner, reads) = changing(Selection::Lan(LOOPBACK), Selection::Lan(LOOPBACK));
+    let mut f = Fixture::on_each(owner, lan_on_loopback());
+    let mut chain = Composed::new(&f.host, None, None);
+    let probe = Scripted::new(Answer::Sent);
+    chain.work.probe = probe.clone();
+    let state = published(&mut f, &chain.work, "run-stop");
+    assert!(chain.work.local_network(&state, false).is_ok());
+    let first = probe.sent();
+    assert!(!first.is_empty());
+    assert!(!preflight_reset(&chain.work));
+    let mut env = Env { at: Instant::now() };
+    let _ = chain.teardown(false, &mut env);
+    assert!(
+        preflight_reset(&chain.work),
+        "teardown kept the run's preflight record"
+    );
+    assert!(chain.work.local_network(&state, false).is_ok());
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        2,
+        "the pass after Stop read the interfaces again"
+    );
+    assert_eq!(
+        probe.sent().len(),
+        2 * first.len(),
+        "asked again after Stop"
+    );
+}
+
+/// Proves PHY2-01 lifecycle: a second run starts with an empty preflight record (`new_run`), reads
+/// the interfaces itself for its probe pass, and its compose reads them again.
+#[test]
+fn a_second_run_reads_the_interfaces_afresh() {
+    use api::lan_interface::Selection;
+    let (owner, reads) = changing(Selection::Lan(LOOPBACK), Selection::Lan(LOOPBACK));
+    let mut f = Fixture::on_each(owner, lan_on_loopback());
+    let mut chain = Composed::new(&f.host, None, None);
+    let probe = Scripted::new(Answer::Sent);
+    chain.work.probe = probe.clone();
+    let earlier = published(&mut f, &chain.work, "run-one");
+    assert!(chain.work.local_network(&earlier, false).is_ok());
+    let first = probe.sent().len();
+    assert!(first > 0);
+    chain.new_run(
+        "run-two",
+        "dep-run-two",
+        owner_run::Reason::Start,
+        None,
+        None,
+    );
+    assert!(
+        preflight_reset(&chain.work),
+        "new_run kept the earlier run's preflight record"
+    );
+    let second = published_for_work(&mut f, &chain.work, "run-two");
+    assert!(chain.work.local_network(&second, false).is_ok());
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        2,
+        "the second run read the interfaces"
+    );
+    assert_eq!(
+        probe.sent().len(),
+        2 * first,
+        "the second run asked its member"
+    );
+    let mut env = Env { at: Instant::now() };
+    let composed = chain
+        .work
+        .compose(&second, f.plan(&second), Arc::new(NoCodec), &mut env);
+    assert!(composed.is_ok(), "{composed:?}");
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        3,
+        "its compose read them again"
+    );
+    assert_eq!(
+        probe.sent().len(),
+        2 * first,
+        "an unchanged resolution is not asked again"
+    );
+    let _ = chain.work.teardown();
 }
 
 /// Proves PHY-03: a signed member address the run's transport would not dial is not probed: an
