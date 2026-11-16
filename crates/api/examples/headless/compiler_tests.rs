@@ -86,6 +86,7 @@ impl Fixture {
             node_ids: ids.clone(),
             managed_layer_ranges: ranges.clone(),
             layer_split: json!({"stages":ids.iter().zip(&ranges).map(|(n,r)|json!({"node_id":n,"start":r[0],"end":r[1]})).collect::<Vec<_>>()}),
+            serving_context_tokens: api::model_catalog::registered()[2].serving_context_tokens(),
         };
         let members = ids.into_iter().map(|n| (n.clone(), json!({"node_id":n,
             "generation":1,"incarnation":"controlled-incarnation","endpoint_id":format!("controlled-{n}"),
@@ -892,6 +893,11 @@ fn worker_fixture(f: Fixture, require_native: bool, stop_at_handoff: bool) {
             source_representation: "bfloat16-safetensors".into(),
             runtime_dtype: "float32".into(),
             runtime_quantization: "int8-weight-only".into(),
+            serving_context_tokens: api::model_catalog::find(
+                &f.request.model_id,
+                &f.request.resolved_commit,
+            )
+            .map_or(0, |m| m.serving_context_tokens()),
         },
         manifest_digest: f.source.manifest_digest.clone(),
         manifest: Value::Object(f.source.manifest.clone()),

@@ -80,6 +80,7 @@ impl Fixture {
             node_ids: ids.clone(),
             managed_layer_ranges: ranges.clone(),
             layer_split: json!({"stages":ids.iter().zip(&ranges).map(|(n,r)|json!({"node_id":n,"start":r[0],"end":r[1]})).collect::<Vec<_>>()}),
+            serving_context_tokens: crate::model_catalog::registered()[2].serving_context_tokens(),
         };
         let members = ids.into_iter().map(|n| (n.clone(), json!({"node_id":n,
             "generation":1,"incarnation":"controlled-incarnation","endpoint_id":format!("controlled-{n}"),

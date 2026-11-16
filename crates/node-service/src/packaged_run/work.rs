@@ -65,6 +65,77 @@ fn challenge_tokens(reference: &Value) -> Result<usize, StepError> {
         .ok_or_else(|| refused("native_reference_invalid"))?;
     Ok(prompt.len() + stage_contract::native_proof::CHALLENGE_OUTPUT_TOKENS)
 }
+/// Tokens every stage is prepared for (lane CAP, owner ruling 15 Nov): the serving context the
+/// compile planned each stage's memory for, carried by its builder request; never the startup
+/// check's own length, which left no room for any product chat. The startup check stays one
+/// request inside that capacity: a context that cannot hold it is refused here, by name, before
+/// any stage is prepared.
+fn stage_tokens(
+    request: &planner::chain_compile::BuildRequest,
+    reference: &Value,
+) -> Result<usize, StepError> {
+    let capacity = usize::try_from(request.serving_context_tokens)
+        .map_err(|_| refused("model_serving_context_invalid"))?;
+    if challenge_tokens(reference)? > capacity {
+        return Err(refused("startup_challenge_exceeds_context"));
+    }
+    Ok(capacity)
+}
+/// Lane CAP: every stage's memory consent must cover the worker's own reservation for the serving
+/// context (`native_selection::stage_reservation`, the figure the stage's prepare holds against
+/// `max_memory_bytes`). Known as soon as the compile assigned the ranges, so a consent that cannot
+/// cover it is refused here, at the slices step, by name and before any shard is pushed, never at
+/// the stage's prepare or the first chat. `consent(node)` is the memory the stage's own prepare
+/// will hold the worker to; a node without one is left to that prepare's check.
+fn check_stage_memory(
+    request: &planner::chain_compile::BuildRequest,
+    consent: &dyn Fn(&str) -> Option<u64>,
+    tokens: usize,
+) -> Result<(), StepError> {
+    use crate::native_selection::{Profile, stage_reservation};
+    let total = request
+        .managed_layer_ranges
+        .iter()
+        .map(|r| r[1])
+        .max()
+        .and_then(|end| u32::try_from(end).ok())
+        .ok_or_else(|| refused("compiler_run_changed"))?;
+    let context = u32::try_from(tokens).map_err(|_| refused("model_serving_context_invalid"))?;
+    for (node, range) in request.node_ids.iter().zip(&request.managed_layer_ranges) {
+        let Some(consent) = consent(node) else {
+            continue;
+        };
+        let (start, end) = (
+            u32::try_from(range[0]).map_err(|_| refused("compiler_run_changed"))?,
+            u32::try_from(range[1]).map_err(|_| refused("compiler_run_changed"))?,
+        );
+        let needed = stage_reservation(
+            &request.model_id,
+            Profile::PackedInt8,
+            start..end,
+            total,
+            context,
+        )
+        .map_err(|e| {
+            eprintln!("stage_reservation_refused:{e}");
+            refused("native_stage_unsupported")
+        })?;
+        if needed > consent {
+            let message = format!(
+                "Mac {node} consents to {consent} bytes of memory, but its stage (layers {start}-{}) \
+                 needs {needed} bytes for the model's {context}-token serving context",
+                end - 1
+            );
+            return Err(owner_run::OwnerRunError::with(
+                "stage_memory_consent_below_context",
+                Some(&message),
+                None,
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
 /// Retry the owners a failed close retained: first the member Work (its repeated teardown
 /// retries the exact unproven member links), and only once every member stage is proven,
 /// the local Service whose control loop those links reach. Unresolved owners stay retained.
@@ -356,7 +427,28 @@ impl Work {
             let oracle: Value =
                 serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE)
                     .map_err(|_| refused("native_reference_invalid"))?;
-            let tokens = challenge_tokens(&oracle)?;
+            let tokens = stage_tokens(request, &oracle)?;
+            // The memory each stage's prepare holds its worker to (`NativeShard::memory_limit`):
+            // the owner's own stage, its contributor's standing grant (the compile's records
+            // carry none for the owner: v0.1.4's owner holds no grant); a joined Mac's, its signed
+            // report's caps (`joined_member::planning_caps` = its standing consent).
+            let contributor = self
+                .host
+                .with(|c| owner_ports::contributor_dir(&c.authority.root));
+            let consent = |node: &str| {
+                if state.local_node.as_deref() == Some(node) {
+                    api::preferences::standing_consent::load(&contributor)
+                        .ok()
+                        .flatten()
+                        .and_then(|g| g["caps"]["max_memory_bytes"].as_u64())
+                } else {
+                    state
+                        .member_records
+                        .as_ref()
+                        .and_then(|r| r[node]["caps"]["max_memory_bytes"].as_u64())
+                }
+            };
+            check_stage_memory(request, &consent, tokens)?;
             // `_step_slices` (`demo_chain.py:838-839`): a whole-snapshot run has no slice to
             // fetch. v0.1.4 binds the snapshot each member already holds
             // (`bind_hf_prepositions`) and passes the step; only a stage-sharded compile has a
@@ -1002,6 +1094,177 @@ mod challenge_tokens_tests {
             prompt + stage_contract::native_proof::CHALLENGE_OUTPUT_TOKENS
         );
         assert!(reference.get("workload").is_none(), "no top-level workload");
+    }
+}
+
+#[cfg(test)]
+mod stage_tokens_tests {
+    //! Lane CAP: a stage is prepared for the serving context the compile planned (the model
+    //! contract's, `model_catalog::Model::serving_context_tokens`), never for the startup check's own length (35 + 4),
+    //! which left no room for any product chat (`joined_route_context_exceeds_worker`, D6). The
+    //! startup check stays one request inside that capacity.
+    fn request(context: u64) -> planner::chain_compile::BuildRequest {
+        planner::chain_compile::BuildRequest {
+            model_id: "Qwen/Qwen3-0.6B".into(),
+            resolved_commit: "c1899de289a04d12100db370d81485cdf75e47ca".into(),
+            deployment_id: "d".into(),
+            route_label: "a13",
+            stage_sharded: false,
+            compilation_cache_key: "k".into(),
+            node_ids: vec!["a".into(), "b".into()],
+            managed_layer_ranges: vec![[0, 19], [19, 28]],
+            layer_split: serde_json::json!({}),
+            serving_context_tokens: context,
+        }
+    }
+    fn oracle() -> serde_json::Value {
+        serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE).unwrap()
+    }
+    #[test]
+    fn every_stage_is_prepared_for_the_compiles_serving_context() {
+        let model = api::model_catalog::find(
+            "Qwen/Qwen3-0.6B",
+            "c1899de289a04d12100db370d81485cdf75e47ca",
+        )
+        .expect("the demo model is registered");
+        let contract = api::owner_compiler::model_contract(model);
+        assert_eq!(
+            contract.serving_context_tokens,
+            model.serving_context_tokens()
+        );
+        let tokens = super::stage_tokens(&request(contract.serving_context_tokens), &oracle())
+            .expect("the startup check fits the context");
+        assert_eq!(
+            tokens as u64,
+            model.serving_context_tokens(),
+            "the contract's context, not the startup check's length"
+        );
+        assert_ne!(tokens, super::challenge_tokens(&oracle()).unwrap());
+        // Whatever the compile planned is what the stage gets (no second figure).
+        assert_eq!(
+            super::stage_tokens(&request(1000), &oracle()).unwrap(),
+            1000
+        );
+    }
+    #[test]
+    fn a_context_that_cannot_hold_the_startup_check_is_refused_by_name() {
+        let challenge = super::challenge_tokens(&oracle()).unwrap();
+        assert_eq!(challenge, 39, "the recorded 35 prompt ids plus 4");
+        assert_eq!(
+            super::stage_tokens(&request(challenge as u64), &oracle()).unwrap(),
+            challenge
+        );
+        let refused = super::stage_tokens(&request(challenge as u64 - 1), &oracle())
+            .expect_err("the startup check does not fit");
+        assert!(
+            format!("{refused:?}").contains("startup_challenge_exceeds_context"),
+            "{refused:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod stage_memory_tests {
+    //! Lane CAP item 2: at the oracle's 4,096-token context (the contract's until the owner's
+    //! 16 Nov ruling), the stage worker reserves more memory than the owner's own 4 GB self-grant
+    //! (`owner_ports.rs`): measured from the worker's admission, 6,792,778,240 B for layers [0,19]
+    //! and 5,992,888,832 B for [19,28]. The run refuses that by name at the slices step instead of
+    //! failing at the stage's prepare. These tests drive the check at explicit token counts; the
+    //! contract's own figure is `work::tests::both_demo_stages_fit_the_owners_self_grant_…`.
+    use super::*;
+    const OWNER: u64 = 4_000_000_000;
+    const JOINED: u64 = 8_589_934_592;
+    fn request(ranges: [[usize; 2]; 2]) -> planner::chain_compile::BuildRequest {
+        planner::chain_compile::BuildRequest {
+            model_id: "Qwen/Qwen3-0.6B".into(),
+            resolved_commit: "c1899de289a04d12100db370d81485cdf75e47ca".into(),
+            deployment_id: "d".into(),
+            route_label: "a13",
+            stage_sharded: false,
+            compilation_cache_key: "k".into(),
+            node_ids: vec!["owner".into(), "joined".into()],
+            managed_layer_ranges: ranges.to_vec(),
+            layer_split: json!({}),
+            serving_context_tokens: 4096,
+        }
+    }
+    fn records(owner: Option<u64>, joined: Option<u64>) -> Value {
+        let caps = |m: Option<u64>| m.map_or(json!({}), |m| json!({"max_memory_bytes": m}));
+        json!({"owner": {"caps": caps(owner)}, "joined": {"caps": caps(joined)}})
+    }
+    fn check(
+        request: &planner::chain_compile::BuildRequest,
+        records: &Value,
+        tokens: usize,
+    ) -> Result<(), StepError> {
+        check_stage_memory(
+            request,
+            &|node| records[node]["caps"]["max_memory_bytes"].as_u64(),
+            tokens,
+        )
+    }
+    fn code(result: Result<(), StepError>) -> String {
+        match result {
+            Ok(()) => "ok".into(),
+            Err(StepError::Refused(e)) => {
+                assert!(
+                    e.message.as_deref().is_some_and(|m| m.contains("owner")
+                        && m.contains("4000000000")
+                        && m.contains("4096")),
+                    "the refusal names the Mac, its consent and the context: {e:?}"
+                );
+                e.code
+            }
+            Err(other) => format!("{other:?}"),
+        }
+    }
+    #[test]
+    fn the_worker_reservation_is_the_one_the_stage_prepare_holds() {
+        use crate::native_selection::{Profile, stage_reservation};
+        let at = |range: std::ops::Range<u32>, tokens| {
+            stage_reservation("Qwen/Qwen3-0.6B", Profile::PackedInt8, range, 28, tokens).unwrap()
+        };
+        assert_eq!(at(0..19, 39), 982_349_824);
+        assert_eq!(at(19..28, 39), 811_458_560);
+        assert_eq!(at(0..19, 4096), 6_792_778_240);
+        assert_eq!(at(19..28, 4096), 5_992_888_832);
+    }
+    #[test]
+    fn a_stage_whose_consent_cannot_cover_the_context_is_refused_by_name_at_slices() {
+        let owner_first = request([[0, 19], [19, 28]]);
+        assert_eq!(
+            code(check(
+                &owner_first,
+                &records(Some(OWNER), Some(JOINED)),
+                4096
+            )),
+            "stage_memory_consent_below_context"
+        );
+        let mut swapped = request([[19, 28], [0, 19]]);
+        swapped.node_ids = vec!["joined".into(), "owner".into()];
+        assert_eq!(
+            code(check(&swapped, &records(Some(OWNER), Some(JOINED)), 4096)),
+            "stage_memory_consent_below_context",
+            "the owner's 9 layers at 4,096 (5.99 GB) do not fit 4 GB either"
+        );
+        // The startup check's own 39 tokens fit both, and a joined Mac's 8 GiB covers either range.
+        assert_eq!(
+            code(check(&owner_first, &records(Some(OWNER), Some(JOINED)), 39)),
+            "ok"
+        );
+        assert_eq!(
+            code(check(
+                &owner_first,
+                &records(Some(JOINED), Some(JOINED)),
+                4096
+            )),
+            "ok"
+        );
+        // No cap in the record: the stage's own prepare is the check.
+        assert_eq!(
+            code(check(&owner_first, &records(None, Some(JOINED)), 4096)),
+            "ok"
+        );
     }
 }
 

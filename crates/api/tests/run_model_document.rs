@@ -3,10 +3,13 @@
 //! expected value in `fixtures/oracle_run_model.json` was produced by importing the read-only
 //! package at f4e366e9 and calling `run_model.document`, `model_resources.consent_document`
 //! and `DemoApp._choose_run_model` on Python 3.14.7 (`L10-evidence/r7-probe-run-model.py`).
+#[path = "support/oracle_context.rs"]
+mod oracle_context;
 use api::{
     model_catalog,
     preferences::run_model::{self, Facts},
 };
+use oracle_context::{ORACLE_CONTEXT_TOKENS, at_product_context};
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -32,10 +35,12 @@ fn outcome(r: Result<Value, api::schema::PublicError>) -> Value {
     }
 }
 fn expected(case: &Value) -> Value {
-    match case.get("ok") {
+    let mut expected = match case.get("ok") {
         Some(v) => json!({"ok": v}),
         None => json!({"err": case["err"]}),
-    }
+    };
+    at_product_context(&mut expected);
+    expected
 }
 fn memory(case: &Value) -> Option<u64> {
     case["device_memory_bytes"].as_u64()
@@ -65,7 +70,11 @@ fn ceilings_and_consent_documents_equal_model_resources_py() {
                 Some(expect["selected"]["model_id"].as_str().unwrap())
             };
             let commit = expect["selected"]["resolved_commit"].as_str();
-            let got = model_catalog::consent_document(selected.zip(commit), mem);
+            let got = model_catalog::consent_document_at(
+                selected.zip(commit),
+                mem,
+                ORACLE_CONTEXT_TOKENS,
+            );
             assert_eq!(&got, expect, "memory {label}, model {key}");
             checked += 1;
         }
@@ -93,7 +102,7 @@ fn memory_ceiling_and_options_match_the_oracle() {
 #[test]
 fn whole_model_member_limits_match_the_oracle() {
     for (model, expect) in oracle()["whole_model_members"].as_object().unwrap() {
-        let got = model_catalog::whole_model_member(model).unwrap();
+        let got = model_catalog::whole_model_member_at(model, ORACLE_CONTEXT_TOKENS).unwrap();
         for key in [
             "resident_bytes",
             "kv_bytes",
@@ -204,4 +213,31 @@ fn choose_matches_choose_run_model_for_every_oracle_trial() {
         assert!(leftovers.is_empty(), "{} left {leftovers:?}", case["label"]);
         fs::remove_dir_all(dir).unwrap();
     }
+}
+
+/// Owner ruling 16 Nov 2026: the product serves 2,356 tokens where v0.1.4 served 4,096. The
+/// divergence is recorded with both sources and the ruling, and the record is the product's
+/// figure for every registered model and the oracle's figure these fixtures were recorded at.
+#[test]
+fn the_serving_context_divergence_from_the_oracle_is_recorded() {
+    let record: Value =
+        serde_json::from_str(include_str!("../contracts/divergences.json")).unwrap();
+    assert_eq!(record["oracle"], oracle()["oracle"]);
+    let context = &record["diverged"]["serving_context_tokens"];
+    assert_eq!(context["oracle_value"], json!(ORACLE_CONTEXT_TOKENS));
+    for key in ["oracle_source", "product_source", "ruling", "reason"] {
+        assert!(
+            context[key].as_str().is_some_and(|s| !s.is_empty()),
+            "{key}"
+        );
+    }
+    for model in model_catalog::registered() {
+        assert_eq!(
+            json!(model.serving_context_tokens()),
+            context["product_value"],
+            "{}",
+            model.model_id
+        );
+    }
+    assert_ne!(context["product_value"], context["oracle_value"]);
 }

@@ -482,6 +482,97 @@ fn the_owners_own_contributor_grant_admits_the_wall_the_compile_gives_the_local_
         "{grant:?}"
     );
 }
+/// Owner ruling 16 Nov 2026 (REPORT-laneCAP option 2): the demo model serves 2,356 tokens so
+/// that its stages fit the owner's own 4 GB self-grant. With the consents the slices step reads
+/// (the owner's stage: its contributor's grant exactly as the contributor step leaves it; the
+/// joined Mac's: the gate's 8 GiB standing consent, `tests/packaged_ten_rows.rs` `MEMORY`), both
+/// ranges of Qwen3-0.6B pass the check at the model contract's serving context, whichever Mac
+/// holds which, and the same check still refuses them by name at the oracle's 4,096.
+#[test]
+fn both_demo_stages_fit_the_owners_self_grant_at_the_contracts_serving_context() {
+    const JOINED: u64 = 8_589_934_592;
+    let f = Fixture::product_contributor();
+    let grant = standing_consent::load(&owner_ports::contributor_dir(&f.root.join("owner")))
+        .unwrap()
+        .expect("the contributor step's grant");
+    let owner = grant["caps"]["max_memory_bytes"]
+        .as_u64()
+        .expect("a memory cap");
+    let consent = |node: &str| match node {
+        "owner" => Some(owner),
+        "joined" => Some(JOINED),
+        _ => None,
+    };
+    let model = api::model_catalog::find(
+        "Qwen/Qwen3-0.6B",
+        "c1899de289a04d12100db370d81485cdf75e47ca",
+    )
+    .expect("the demo model");
+    let contract = api::owner_compiler::model_contract(model).serving_context_tokens;
+    let reference: Value =
+        serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE).unwrap();
+    let request = |owner_range: [usize; 2], joined_range: [usize; 2], context: u64| {
+        planner::chain_compile::BuildRequest {
+            model_id: model.model_id.into(),
+            resolved_commit: model.resolved_commit.into(),
+            deployment_id: "d".into(),
+            route_label: "a13",
+            stage_sharded: false,
+            compilation_cache_key: "k".into(),
+            node_ids: vec!["owner".into(), "joined".into()],
+            managed_layer_ranges: vec![owner_range, joined_range],
+            layer_split: json!({}),
+            serving_context_tokens: context,
+        }
+    };
+    for (owner_range, joined_range) in [([0, 19], [19, 28]), ([19, 28], [0, 19])] {
+        let at_contract = request(owner_range, joined_range, contract);
+        let tokens = stage_tokens(&at_contract, &reference).expect("the startup check fits");
+        assert_eq!(tokens as u64, contract);
+        if let Err(e) = check_stage_memory(&at_contract, &consent, tokens) {
+            panic!("owner {owner_range:?} at {contract} tokens on {owner} B: {e:?}");
+        }
+        let at_oracle = request(owner_range, joined_range, 4096);
+        let tokens = stage_tokens(&at_oracle, &reference).expect("the startup check fits");
+        match check_stage_memory(&at_oracle, &consent, tokens) {
+            Err(StepError::Refused(e)) => {
+                assert_eq!(e.code, "stage_memory_consent_below_context");
+                assert!(
+                    e.message
+                        .as_deref()
+                        .is_some_and(|m| m.contains("Mac owner")),
+                    "{e:?}"
+                );
+            }
+            other => panic!("owner {owner_range:?} at 4,096 tokens: {other:?}"),
+        }
+    }
+}
+/// Owner ruling 16 Nov 2026 (R2): the owner's fresh self-grant holds 5,000 commands. At 1,000 one
+/// run's own stage served the startup check and then about 995 tokens of answers before it refused
+/// mid-answer (REPORT-laneCAP measurement run: the fourth 256-token answer stopped after 60). 5,000
+/// is what a joined Mac's own page grants (`app.js` `max_commands:5000`) and what the compile
+/// offers every stage (`DemoChainMaxCommands`, demo_chain.py:220). It stays inside every bound on
+/// the figure: the standing consent's maximum (10,000, standing_consent.py:103, checked when the
+/// grant is written) and the worker limits' (`standing_limits`, at most 10,000).
+#[test]
+fn the_owners_fresh_self_grant_holds_five_thousand_commands() {
+    let f = Fixture::product_contributor();
+    let grant = standing_consent::load(&owner_ports::contributor_dir(&f.root.join("owner")))
+        .unwrap()
+        .expect("the contributor step's grant");
+    assert_eq!(grant["caps"]["max_commands"], json!(5000), "{grant:?}");
+    let count = |id: BudgetId| id.count().map(|n| n.get()).unwrap();
+    assert!(5000 <= count(BudgetId::PyMyceliumA13MacosStandingConsentMaxCommandsMaximumL103));
+    assert!(count(BudgetId::PyFinalMyceliumA13MacosDemoChainMaxCommandsL220C12) <= 5000);
+    let share = json!({"max_wall_seconds": 1800, "max_rss_bytes": 2_625_486_324u64,
+        "max_disk_bytes": 1_074_471_271u64});
+    assert_eq!(
+        standing_consent::standing_limits(&grant, Some(&share)).map(|l| l["max_commands"].clone()),
+        Ok(json!(5000)),
+        "{grant:?}"
+    );
+}
 /// This Mac's private LAN address, as the `lan-real` gate step exports it (`ipconfig getifaddr
 /// en0`). Absent or not private: the test FAILS, it never skips.
 fn lan_ip() -> std::net::IpAddr {

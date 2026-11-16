@@ -118,6 +118,8 @@ pub fn inputs_of(i: &Value) -> CompileInputs {
             source_representation: p["source_representation"].as_str().unwrap().into(),
             runtime_dtype: p["runtime_dtype"].as_str().unwrap().into(),
             runtime_quantization: p["runtime_quantization"].as_str().unwrap().into(),
+            // The oracle's `DEMO_CONTEXT_TOKENS` (model_resources.py:76), its fixtures' context.
+            serving_context_tokens: 4096,
         },
         manifest_digest: p["manifest_digest"].as_str().unwrap().into(),
         manifest: p["manifest"].clone(),

@@ -1,7 +1,6 @@
 {
-  "_source": "v0.1.4 @ f4e366e98a1f705dfaf182897044500d290dbd7f: layer_split.policy_for_runtime (split) and model_resources constants lines 40-95 (resources); values equal the oracle sweep inputs in tests/fixtures/planning.json",
+  "_source": "v0.1.4 @ f4e366e98a1f705dfaf182897044500d290dbd7f: layer_split.policy_for_runtime (split) and model_resources constants lines 40-95 (resources); values equal the oracle sweep inputs in tests/fixtures/planning.json. The serving context (the oracle sweep's context_tokens, DEMO_CONTEXT_TOKENS) is not here: it is the model contract's (ModelContract::serving_context_tokens), so the compile charges exactly what every stage is prepared for",
   "resources": {
-    "context_tokens": 4096,
     "control_archive_bytes": 67108864,
     "disk_headroom": [
       11,

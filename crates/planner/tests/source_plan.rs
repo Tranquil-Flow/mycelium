@@ -394,6 +394,7 @@ impl Fixture {
             node_ids: node_files.keys().cloned().collect(),
             managed_layer_ranges: serde_json::from_value(row["ranges"].clone()).unwrap(),
             layer_split: json!({"stages":node_files.keys().zip(row["ranges"].as_array().unwrap()).map(|(n,r)|json!({"node_id":n,"start":r[0],"end":r[1]})).collect::<Vec<_>>()}),
+            serving_context_tokens: 4096,
         };
         Self {
             root,

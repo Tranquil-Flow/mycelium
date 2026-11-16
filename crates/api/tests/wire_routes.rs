@@ -4,6 +4,8 @@
 //! order, `\uXXXX` escapes). Expected bytes are produced by EXECUTING the oracle's own
 //! functions and serialising their result objects as `send_value` does
 //! (`L10-evidence/r8-probe-wire-routes.py` -> `fixtures/oracle_wire_routes.json`).
+#[path = "support/oracle_context.rs"]
+mod oracle_context;
 use api::{
     actions::{Action, Backend, Control},
     desktop::Service,
@@ -12,6 +14,7 @@ use api::{
     schema::PublicError,
     wire::{Json, Text},
 };
+use oracle_context::at_product_context_bytes;
 use serde_json::{Map, Value, json};
 use std::{fs, path::PathBuf};
 
@@ -103,7 +106,8 @@ fn run_model_documents_are_byte_identical_over_state_env_memory() {
         }
         let env = (parts[1] != "None").then_some(parts[1]);
         let got = run_model::document_json(&dir, env, memory(parts[2])).unwrap();
-        assert_eq!(&bytes(&got), expected, "{key}");
+        let expected = at_product_context_bytes(expected.as_str().unwrap());
+        assert_eq!(bytes(&got), expected, "{key}");
         fs::remove_dir_all(dir).unwrap();
     }
 }
@@ -128,7 +132,8 @@ fn run_model_choose_bodies_are_byte_identical() {
         let got = app(&dir, host)
             .action_json("/api/run-model", &body(&case["body"]))
             .unwrap();
-        assert_eq!(&bytes(&got), expected.as_str().unwrap(), "{label}");
+        let expected = at_product_context_bytes(expected.as_str().unwrap());
+        assert_eq!(bytes(&got), expected, "{label}");
         fs::remove_dir_all(dir).unwrap();
     }
     assert_eq!(routes["run_model_choose"].as_object().unwrap().len(), 5);
@@ -178,7 +183,8 @@ fn standing_withdraw_bodies_are_byte_identical() {
         let got = app(&dir, FakeHost::default())
             .action_json("/api/consent/standing/withdraw", &body(&case["body"]))
             .unwrap();
-        assert_eq!(&bytes(&got), expected.as_str().unwrap(), "{label}");
+        let expected = at_product_context_bytes(expected.as_str().unwrap());
+        assert_eq!(bytes(&got), expected, "{label}");
         seen += 1;
         fs::remove_dir_all(dir).unwrap();
     }
@@ -291,7 +297,10 @@ mod http {
             want.contains("\\u2014"),
             "the picker labels carry an em dash"
         );
-        assert_eq!(String::from_utf8(reply.body).unwrap(), want);
+        assert_eq!(
+            String::from_utf8(reply.body).unwrap(),
+            super::at_product_context_bytes(want)
+        );
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]

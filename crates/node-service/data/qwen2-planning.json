@@ -32,7 +32,7 @@
     "speed_clamp_low_numerator": 1
   },
   "resources": {
-    "context_tokens": 4096,
+    "context_tokens": 2356,
     "control_archive_bytes": 67108864,
     "disk_headroom": [
       11,

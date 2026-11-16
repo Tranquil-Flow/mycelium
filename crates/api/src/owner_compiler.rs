@@ -21,6 +21,19 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 
+/// The compile's model contract for a registered model: its pinned identity, the runtime the
+/// owner's compile builds for, and the model's own serving context, which the compile charges KV
+/// memory for and every stage is then prepared for.
+pub fn model_contract(model: &crate::model_catalog::Model) -> ModelContract {
+    ModelContract {
+        model_id: model.model_id.into(),
+        resolved_commit: model.resolved_commit.into(),
+        source_representation: "bfloat16-safetensors".into(),
+        runtime_dtype: "float32".into(),
+        runtime_quantization: "int8-weight-only".into(),
+        serving_context_tokens: model.serving_context_tokens(),
+    }
+}
 fn failure() -> PublicError {
     PublicError::new(409, "action_not_completed")
 }
@@ -438,13 +451,7 @@ impl<H: ChainHost> Compiler<H> {
             owner_ready: true,
             already_started: false,
             resource_denied: false,
-            model: ModelContract {
-                model_id: model.model_id.into(),
-                resolved_commit: model.resolved_commit.into(),
-                source_representation: "bfloat16-safetensors".into(),
-                runtime_dtype: "float32".into(),
-                runtime_quantization: "int8-weight-only".into(),
-            },
+            model: model_contract(model),
             manifest_digest: source.manifest_digest.clone(),
             manifest: Value::Object(source.manifest.clone()),
             source_bytes: Some(source.source_bytes),

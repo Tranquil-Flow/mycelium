@@ -20,7 +20,18 @@ const GROUP_FIXED_BYTES: u128 = 1 << 30;
 const RESIDENT_FACTOR: (u128, u128) = (501, 1000);
 /// float32 KV element size (every registered contract).
 const KV_BYTES_PER_ELEMENT: u128 = 4;
-const DEMO_CONTEXT_TOKENS: u128 = 4096;
+/// The serving context of every registered model today, in tokens: one request's prompt plus its
+/// new tokens. Owner ruling 16 Nov 2026 (REPORT-laneCAP option 2): 2,356, v0.1.4's own derivation
+/// (model_resources.py:72-76 @ f4e366e9: a 2,000-character prompt, a template under 100 tokens and
+/// 256 new tokens) WITHOUT its rounding up to 4,096 (`DEMO_CONTEXT_TOKENS`). At 4,096 each stage
+/// worker's own reservation (backend-mlx `admission::requirements`: a single prefill of the whole
+/// context, quadratic in it) exceeds a 4 GB memory consent for every registered model (Qwen3-0.6B:
+/// 6.79 GB for layers [0,19], 5.99 GB for [19,28]; every other model's single-layer prefill
+/// scratch alone is above 4.6 GB), so every registered model gets 2,356. Divergence from the oracle
+/// recorded in `contracts/divergences.json`; oracle fixtures are compared at 4,096. Owner ruling
+/// 15 Nov: the stage capacity is this per-model setting; raising it is a contract value plus the
+/// memory consent that covers it (or chunked prefill, v0.2.x), not a code change.
+const SERVING_CONTEXT_TOKENS: u64 = 2356;
 /// Largest guard limit a member may run under, as a share of its RAM.
 const MEMBER_PEAK_MEMORY_FRACTION: (u128, u128) = (3, 4);
 const MEMORY_CAP_CHOICES: [(u128, u128); 3] = [(1, 2), (5, 8), (3, 4)];
@@ -55,6 +66,8 @@ pub struct Model {
     pub resolved_commit: &'static str,
     shape: Shape,
     anchor: Option<Anchor>,
+    /// Tokens one request may hold on every stage (prompt plus new tokens).
+    serving_context_tokens: u64,
 }
 
 /// `serving.REGISTERED_MODELS` order: candidate, A9 route, Qwen3 0.6B / 8B / 14B.
@@ -82,6 +95,7 @@ static REGISTERED: [Model; 5] = [
             member_disk_bytes: 11_297_336_366,
             owner_storage_bytes: 23_052_975_062,
         }),
+        serving_context_tokens: SERVING_CONTEXT_TOKENS,
     },
     Model {
         model_id: "Qwen/Qwen2.5-0.5B-Instruct",
@@ -102,6 +116,7 @@ static REGISTERED: [Model; 5] = [
             stores_tied_lm_head: false,
         },
         anchor: None,
+        serving_context_tokens: SERVING_CONTEXT_TOKENS,
     },
     Model {
         model_id: "Qwen/Qwen3-0.6B",
@@ -122,6 +137,7 @@ static REGISTERED: [Model; 5] = [
             stores_tied_lm_head: true,
         },
         anchor: None,
+        serving_context_tokens: SERVING_CONTEXT_TOKENS,
     },
     Model {
         model_id: "Qwen/Qwen3-8B",
@@ -142,6 +158,7 @@ static REGISTERED: [Model; 5] = [
             stores_tied_lm_head: false,
         },
         anchor: None,
+        serving_context_tokens: SERVING_CONTEXT_TOKENS,
     },
     Model {
         model_id: "Qwen/Qwen3-14B",
@@ -162,6 +179,7 @@ static REGISTERED: [Model; 5] = [
             stores_tied_lm_head: false,
         },
         anchor: None,
+        serving_context_tokens: SERVING_CONTEXT_TOKENS,
     },
 ];
 
@@ -173,6 +191,11 @@ impl Model {
     /// `ModelContract.architecture` (`_MODEL_ARCHITECTURES`, default `qwen2`).
     pub fn architecture(&self) -> &'static str {
         crate::serving_source::architecture(self)
+    }
+    /// The serving context of this model's contract, in tokens: the one source the compile's
+    /// memory plan, every stage's prepare and the route's refusal read.
+    pub fn serving_context_tokens(&self) -> u64 {
+        self.serving_context_tokens
     }
 }
 /// `run_model.choice_for_model(model).name`: the picker choice that pins this model (the 7B candidate has none).
@@ -192,6 +215,16 @@ pub fn find(model_id: &str, resolved_commit: &str) -> Option<&'static Model> {
     REGISTERED
         .iter()
         .find(|m| m.model_id == model_id && m.resolved_commit == resolved_commit)
+}
+/// The serving context of the registered contract with this model id (ids are unique in the
+/// catalog), for a reader that knows only the run's model id (the chat page's `limits`).
+pub fn serving_context_for(model_id: &str) -> Option<u64> {
+    let mut matching = REGISTERED.iter().filter(|m| m.model_id == model_id);
+    let model = matching.next()?;
+    matching
+        .next()
+        .is_none()
+        .then_some(model.serving_context_tokens)
 }
 /// `serving._RUN_MODEL_NAMES`: the environment override accepts `candidate` as well.
 pub fn by_run_model_name(name: &str) -> Option<&'static Model> {
@@ -275,13 +308,15 @@ fn budget_bytes(id: BudgetId) -> u128 {
 fn budget_count(id: BudgetId) -> u128 {
     id.count().map_or(0, |c| u128::from(c.get()))
 }
-/// `_member_resource` for the whole-model split (slice mode, no owner, no memory report).
-fn whole_member(model: &Model) -> Member {
+/// `_member_resource` for the whole-model split (slice mode, no owner, no memory report), with
+/// KV charged for `context_tokens` (the product passes the model contract's serving context; the
+/// oracle-parity tests pass the oracle's `DEMO_CONTEXT_TOKENS`, 4,096, explicitly).
+fn whole_member(model: &Model, context_tokens: u64) -> Member {
     let shape = &model.shape;
     let stage = shape.whole_stage_bytes();
     let resident = ceil_ratio(stage, RESIDENT_FACTOR);
     let kv_per_layer = 2 * shape.kv_heads * shape.head_dim * KV_BYTES_PER_ELEMENT;
-    let kv = shape.num_layers * kv_per_layer * DEMO_CONTEXT_TOKENS;
+    let kv = shape.num_layers * kv_per_layer * u128::from(context_tokens);
     let (peak, disk_need, basis) = match &model.anchor {
         Some(a) => (a.group_peak_bytes, a.member_disk_bytes, "measured"),
         None => (
@@ -310,10 +345,17 @@ fn u(value: u128) -> u64 {
     u64::try_from(value).unwrap_or(u64::MAX)
 }
 
-/// `member_resources(model, whole split)[0]` of the registered model, by id.
+/// `member_resources(model, whole split)[0]` of the registered model, by id, at its contract's
+/// serving context.
 pub fn whole_model_member_json(model_id: &str) -> Option<Json> {
     let model = REGISTERED.iter().find(|m| m.model_id == model_id)?;
-    let m = whole_member(model);
+    whole_model_member_json_at(model_id, model.serving_context_tokens)
+}
+/// [`whole_model_member_json`] with KV charged for `context_tokens` instead of the contract's
+/// serving context (the oracle-parity tests: v0.1.4 computed it at 4,096).
+pub fn whole_model_member_json_at(model_id: &str, context_tokens: u64) -> Option<Json> {
+    let model = REGISTERED.iter().find(|m| m.model_id == model_id)?;
+    let m = whole_member(model, context_tokens);
     Some(crate::jobj! {
         "node_id" => "whole-model", "start" => 0u64, "end" => u(model.shape.num_layers),
         "layers" => u(model.shape.num_layers), "stage_source_bytes" => u(m.stage_source_bytes),
@@ -327,6 +369,9 @@ pub fn whole_model_member_json(model_id: &str) -> Option<Json> {
 pub fn whole_model_member(model_id: &str) -> Option<Value> {
     whole_model_member_json(model_id).map(|j| j.to_value())
 }
+pub fn whole_model_member_at(model_id: &str, context_tokens: u64) -> Option<Value> {
+    whole_model_member_json_at(model_id, context_tokens).map(|j| j.to_value())
+}
 
 /// Storage the owner must consent to for this model (snapshot + 10%; 7B: the measured figure).
 pub fn owner_storage_requirement(model: &Model) -> u64 {
@@ -338,7 +383,8 @@ pub fn owner_storage_requirement(model: &Model) -> u64 {
 /// Pairing quota a model can give one member: the whole model (anchored: its proposal, i.e.
 /// `RUNNER_LIMIT_DIVISOR` x the member disk limit).
 fn quota_of(model: &Model) -> u128 {
-    let disk = whole_member(model).max_disk_bytes;
+    // Disk does not depend on the context.
+    let disk = whole_member(model, model.serving_context_tokens).max_disk_bytes;
     if model.anchor.is_some() {
         RUNNER_LIMIT_DIVISOR * disk
     } else {
@@ -376,8 +422,8 @@ pub fn memory_cap_options(memory_bytes: u64) -> Vec<u64> {
     values.into_iter().collect()
 }
 
-fn model_row(model: &Model) -> Json {
-    let whole = whole_member(model);
+fn model_row(model: &Model, context: Option<u64>) -> Json {
+    let whole = whole_member(model, context.unwrap_or(model.serving_context_tokens));
     crate::jobj! {
         "model_id" => model.model_id, "resolved_commit" => model.resolved_commit,
         "label" => model.shape.label, "snapshot_bytes" => u(model.shape.snapshot_bytes),
@@ -388,19 +434,36 @@ fn model_row(model: &Model) -> Json {
     }
 }
 /// `consent_document(model, device_memory_bytes=...)`: the numbers the consent UI shows, in the
-/// source's dict order.
+/// source's dict order; every model's whole-model figures at its contract's serving context.
 pub fn consent_document_json(
     selected: Option<(&str, &str)>,
     device_memory_bytes: Option<u64>,
 ) -> Json {
+    consent_document_with(selected, device_memory_bytes, None)
+}
+/// [`consent_document_json`] with every model's whole-model KV charged for `context_tokens`
+/// instead of its contract's serving context (the oracle-parity tests: v0.1.4 computed the
+/// document at 4,096).
+pub fn consent_document_at(
+    selected: Option<(&str, &str)>,
+    device_memory_bytes: Option<u64>,
+    context_tokens: u64,
+) -> Value {
+    consent_document_with(selected, device_memory_bytes, Some(context_tokens)).to_value()
+}
+fn consent_document_with(
+    selected: Option<(&str, &str)>,
+    device_memory_bytes: Option<u64>,
+    context: Option<u64>,
+) -> Json {
     let selected_row = selected
         .and_then(|(id, commit)| find(id, commit))
-        .map_or(Json::Null, model_row);
+        .map_or(Json::Null, |m| model_row(m, context));
     let mut document = crate::jobj! {
         "storage_consent_ceiling_bytes" => storage_consent_ceiling(),
         "pairing_quota_ceiling_bytes" => pairing_quota_ceiling(),
         "selected" => selected_row,
-        "models" => REGISTERED.iter().map(model_row).collect::<Vec<_>>(),
+        "models" => REGISTERED.iter().map(|m| model_row(m, context)).collect::<Vec<_>>(),
         "device_memory_bytes" => device_memory_bytes,
         "memory_cap_ceiling_bytes" => Json::Null,
         "memory_cap_options" => Json::Arr(Vec::new()),

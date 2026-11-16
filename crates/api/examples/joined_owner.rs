@@ -357,6 +357,7 @@ impl Owner {
             node_ids: ids.clone(),
             managed_layer_ranges: ranges.clone(),
             layer_split: json!({"stages":ids.iter().zip(&ranges).map(|(id,r)|json!({"node_id":id,"start":r[0],"end":r[1]})).collect::<Vec<_>>()}),
+            serving_context_tokens: api::model_catalog::registered()[2].serving_context_tokens(),
         };
         let mut rows = BTreeMap::new();
         for id in &ids {

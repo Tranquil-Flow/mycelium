@@ -310,6 +310,11 @@ impl RouteGateway for HttpRouteGateway {
         let accepted =
             match self.exchange("POST", "/v1/inference", "", &document.to_string(), idle)? {
                 (202, accepted) => accepted,
+                // Lane CAP: the route refuses a prompt plus answer above its stages' serving
+                // context before any work; the page names that limit (its `limits` carry it).
+                (400, body) if body["error"] == "joined_route_context_exceeds_worker" => {
+                    return Err(GatewayError::new("chat_context_too_long"));
+                }
                 (status, body) => return Err(http_code("post", "/v1/inference", status, &body)),
             };
         let field = |name: &str| {
@@ -972,6 +977,9 @@ impl ChatService {
             "max_new_tokens": BudgetId::ChatMaxNewTokensCap.count().map(|n| n.get()).ok(),
             "per_client_per_minute": BudgetId::ChatPerClientPerWindow.count().map(|n| n.get()).ok(),
             "swarm_per_minute": BudgetId::ChatGlobalPerWindow.count().map(|n| n.get()).ok(),
+            // Prompt plus answer, in tokens: the model contract's serving context, which every
+            // stage of the run is prepared for (lane CAP).
+            "context_tokens": self.inner.run.model_id().as_deref().and_then(crate::model_catalog::serving_context_for),
         });
         json!({"available":serving.is_some(),"busy":busy,
             "switching_runs":serving.is_none() && switching(&status),
