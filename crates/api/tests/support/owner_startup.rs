@@ -343,9 +343,10 @@ fn product_stop_tokens_do_not_truncate_the_startup_challenge() {
         "{serving}"
     );
     released(&serving, "completed");
-    // A product request on the same epoch still stops at the product stop token.
+    // A product request on the same epoch still stops at the product stop token, which it never
+    // emits (lane CHATFIX item 2, route.py:5094-5098; this line pinned `[11, EOS]` before).
     let all = chat(&work.gateway().unwrap());
-    assert_eq!(token_ids(&all), [11, u64::from(EOS)], "{all:?}");
+    assert_eq!(token_ids(&all), [11], "{all:?}");
     work.teardown().unwrap();
 }
 
