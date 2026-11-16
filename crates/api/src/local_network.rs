@@ -22,10 +22,12 @@
 //! Mac); Apple documents the same `EHOSTUNREACH` for it. [`Probe`] is the seam; [`Udp`] the app's.
 //!
 //! The probe sends only to an address the app was already going to dial: a joined Mac's work
-//! address, signed by that Mac's currently enrolled key (`member_control::joined::verify`), and only
-//! when it is a private local-network address ([`is_local_network`]). Never a scan, a broadcast or
+//! address in the current run, signed by that Mac's currently enrolled key
+//! (`member_control::joined::verify`), admitted by the run's work transport (the caller's
+//! `NetworkChoice::allows`), from the run's selected local address, and only when it is a private
+//! local-network address ([`is_local_network`]). Never a scan, a broadcast or
 //! a multicast: the bundle's usage text promises that (`desktop::bundle::LOCAL_NETWORK_USAGE`).
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
+use std::net::{IpAddr, SocketAddr, UdpSocket};
 
 /// Start or step 6 refused because this Mac (the owner's) may not reach the local network yet.
 pub const PERMISSION_REQUIRED: &str = "local_network_permission_required";
@@ -74,19 +76,17 @@ pub trait Probe: Send + Sync {
     fn send(&self, from: IpAddr, to: SocketAddr) -> Answer;
 }
 
-/// The app's probe: one one-byte UDP datagram from an unbound port to `to`. A QUIC endpoint drops
-/// a datagram that short unread; the closed port's ICMP reply comes from the kernel, not the app.
+/// The app's probe: one one-byte UDP datagram from `from` (the run's selected local address, an
+/// ephemeral port) to `to`. A QUIC endpoint drops a datagram that short unread; the closed port's
+/// ICMP reply comes from the kernel, not the app. Nothing is sent to an address that is not a
+/// private local-network one, or of another family than `from`.
 pub struct Udp;
 impl Probe for Udp {
-    fn send(&self, _from: IpAddr, to: SocketAddr) -> Answer {
-        if !is_local_network(to.ip()) {
+    fn send(&self, from: IpAddr, to: SocketAddr) -> Answer {
+        if !is_local_network(to.ip()) || from.is_ipv4() != to.is_ipv4() {
             return Answer::NotLocal;
         }
-        let any: SocketAddr = match to {
-            SocketAddr::V4(_) => (Ipv4Addr::UNSPECIFIED, 0).into(),
-            SocketAddr::V6(_) => (Ipv6Addr::UNSPECIFIED, 0).into(),
-        };
-        match UdpSocket::bind(any) {
+        match UdpSocket::bind(SocketAddr::new(from, 0)) {
             Ok(socket) => classify(socket.send_to(&[0], to)),
             Err(e) => Answer::Failed(e.raw_os_error().unwrap_or(0)),
         }
@@ -125,6 +125,7 @@ pub fn dial_unanswered(cause: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::{Ipv4Addr, Ipv6Addr};
 
     /// Proves: the measured signature (EHOSTUNREACH = pending/denied; anything else is not it).
     #[test]

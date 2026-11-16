@@ -200,13 +200,6 @@ pub(super) struct Work {
     /// What the probe reached in the current run (never a target list: see [`LocalNetwork`]).
     local_network: Arc<Mutex<LocalNetwork>>,
 }
-/// RED stub (PHY-03): the wildcard address of `to`'s family, as the probe binds today.
-fn unspecified(to: std::net::SocketAddr) -> std::net::IpAddr {
-    match to {
-        std::net::SocketAddr::V4(_) => std::net::Ipv4Addr::UNSPECIFIED.into(),
-        std::net::SocketAddr::V6(_) => std::net::Ipv6Addr::UNSPECIFIED.into(),
-    }
-}
 /// Lane PHY item 2, patch 2 (PHY-02): what one run's probes reached. Targets are never cached:
 /// every pass reads them afresh from this run's current, verified member records
 /// (`Inbox::get` -> `joined::verify`: current enrollment, lease, generation, run and share
@@ -214,10 +207,24 @@ fn unspecified(to: std::net::SocketAddr) -> std::net::IpAddr {
 /// generation in the same run, and it is dropped when the run changes.
 #[derive(Default)]
 struct LocalNetwork {
-    /// The run the `reached` set belongs to.
+    /// The run the `reached` set and the `network` belong to.
     run: String,
     /// (node, generation, address) a datagram reached in this run.
     reached: std::collections::BTreeSet<(String, String, std::net::SocketAddr)>,
+    /// PHY-03: this run's work transport, resolved by its first probe pass with a joined Mac
+    /// (`Network::resolve_run_network`, the rule step 6 uses) and handed to its compose, so the
+    /// probe and the step-6 dial obey ONE reading of this Mac's interfaces.
+    network: Option<crate::packaged_work::Resolved>,
+}
+impl LocalNetwork {
+    /// Bind this record to `run`, forgetting another run's reached addresses and network.
+    fn bind(&mut self, run: &str) {
+        if self.run != run {
+            self.run = run.to_owned();
+            self.reached.clear();
+            self.network = None;
+        }
+    }
 }
 impl Work {
     pub(super) fn new(host: PackagedRun) -> Self {
@@ -248,25 +255,39 @@ impl Work {
     /// and is never refused here.
     fn local_network(&self, state: &RunState, refuse: bool) -> Result<(), StepError> {
         use api::local_network::Answer;
-        let Some(seed) = self.host.with(|c| c.authority.seed.clone()) else {
-            return Ok(());
-        };
-        // (node, generation, address) of every current verified joined member's work address.
-        let mut targets = Vec::new();
-        for node in state
+        let joined: Vec<&String> = state
             .participants
             .iter()
             .filter(|node| Some(*node) != state.local_node.as_ref())
-        {
+            .collect();
+        if joined.is_empty() {
+            return Ok(());
+        }
+        let Some(seed) = self.host.with(|c| c.authority.seed.clone()) else {
+            return Ok(());
+        };
+        // PHY-03: the run's network first (the resolution its compose will use); with no admitted
+        // LAN path (`local_only:*`, or a loopback-only run) nothing is sent: compose refuses a run
+        // with a joined Mac on it by name, as at the base.
+        let resolved = self.run_resolution(&state.run_id);
+        let Some((from, _)) = resolved.choice.0.clone() else {
+            eprintln!("local_network_probe_skipped:{}", resolved.transport);
+            return Ok(());
+        };
+        // (node, generation, address) of every current verified joined member's work address
+        // that this run's transport admits (family, loopback rule, exact hosts).
+        let mut targets = Vec::new();
+        for node in joined {
             // The address step 6 will dial, verified as it will be (signed by the joined Mac's
-            // currently enrolled key, for this run); not published yet: nothing to ask with.
+            // currently enrolled key, for this run, admitted by the run's transport); not
+            // published yet or not admitted: nothing to ask with.
             let Ok(verified) = seed.work_members.get(
                 &seed.coordinator,
                 node,
                 self.owner.public(),
                 &state.run_id,
                 &state.deployment_id,
-                &|_| true,
+                &|address| resolved.choice.allows(address),
             ) else {
                 continue;
             };
@@ -276,17 +297,14 @@ impl Work {
             }
         }
         let mut seen = lock(&self.local_network);
-        if seen.run != state.run_id {
-            seen.run = state.run_id.clone();
-            seen.reached.clear();
-        }
+        seen.bind(&state.run_id);
         let mut blocked = None;
         for target in targets {
             if seen.reached.contains(&target) {
                 continue;
             }
             let to = target.2;
-            let answer = self.probe.send(unspecified(to), to);
+            let answer = self.probe.send(from, to);
             eprintln!("local_network_probe:{to}:{answer:?}");
             match answer {
                 Answer::Sent => {
@@ -316,19 +334,30 @@ impl Work {
         if !dial_unanswered(cause) {
             return None;
         }
-        // The joined Macs it dialed; the owner's own contributor is this Mac.
+        // The joined Macs it dialed (this run's verified bindings, admitted by its transport at
+        // compose); the owner's own contributor is this Mac. Sent from the run's bound address;
+        // a run with no LAN address sends nothing and keeps its own failure.
         let local = self
             .host
             .with(|c| c.run.contributor.as_ref().map(|n| n.node.clone()));
-        let dialed: Vec<std::net::SocketAddr> = lock(&self.resident)
+        let resident = lock(&self.resident);
+        let Some(network) = resident.network.clone() else {
+            return None;
+        };
+        let Some((from, _)) = network.0.clone() else {
+            return None;
+        };
+        let dialed: Vec<std::net::SocketAddr> = resident
             .bindings
             .iter()
             .filter(|v| Some(v.node_id()) != local.as_deref())
             .flat_map(|v| v.address().ip_addrs().copied().collect::<Vec<_>>())
+            .filter(|address| network.allows(*address))
             .collect();
+        drop(resident);
         let mut silent = None;
         for to in dialed {
-            let answer = self.probe.send(unspecified(to), to);
+            let answer = self.probe.send(from, to);
             eprintln!("local_network_probe:{to}:{answer:?} after {cause}");
             match answer {
                 Answer::Blocked => {
@@ -360,6 +389,29 @@ impl Work {
     fn named_step_failure(&self) -> Option<StepError> {
         let cause = lock(&self.resident).work.as_ref()?.failure_cause()?;
         self.named_dial_failure(&cause)
+    }
+    /// PHY-03: the run's work transport as its first probe pass resolved it (held for that run),
+    /// resolving it now if no pass has; `compose` takes it from here (`take_resolution`).
+    fn run_resolution(&self, run: &str) -> crate::packaged_work::Resolved {
+        let mut seen = lock(&self.local_network);
+        seen.bind(run);
+        match &seen.network {
+            Some(resolved) => resolved.clone(),
+            None => {
+                let resolved = self.host.network.resolve_run_network("owner_run");
+                seen.network = Some(resolved.clone());
+                resolved
+            }
+        }
+    }
+    /// The resolution the run's probe already made, taken by its compose (one reading per run);
+    /// `None` when no probe pass resolved it (compose reads this Mac's interfaces itself).
+    fn take_resolution(&self, run: &str) -> Option<crate::packaged_work::Resolved> {
+        let mut seen = lock(&self.local_network);
+        if seen.run != run {
+            return None;
+        }
+        seen.network.take()
     }
     /// The run's transport, resolved at `compose`; a work announcement before any compose (none
     /// in the chain's order) resolves its own.
@@ -578,8 +630,12 @@ impl Work {
             .host
             .with(|c| c.authority.seed.clone())
             .ok_or_else(|| refused("owner_exchange_unavailable"))?;
-        // One transport per run, read from this Mac's interfaces as the run starts its work.
-        let resolved = self.host.network.resolve_run_network("owner_run");
+        // One transport per run, read from this Mac's interfaces as the run starts its work, or
+        // as its first Local Network probe pass did (PHY-03: the probe and the dial obey one
+        // reading).
+        let resolved = self
+            .take_resolution(&state.run_id)
+            .unwrap_or_else(|| self.host.network.resolve_run_network("owner_run"));
         // No single private network here while a joined Mac is in the run: refused by name now,
         // before the local worker starts or anything is dialed (lane LAN round 2, F6).
         if let Some(reason) = resolved.local_only
