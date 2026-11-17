@@ -238,7 +238,8 @@ function render(value) {
   // PHY-05): a failed renewal pass alone is no verdict on the owner's relay, and a reachable owner
   // can end or replace a membership; only an expired one gets the restart/reconnect advice.
   const why=String(value.recovery_error || value.renewal_error).replaceAll('_',' ');
-  const relayAdvice={retrying:`Renewal with the owner’s swarm failed (${why}); Mycelium keeps retrying while this Mac’s membership is current.`,
+  const relayAdvice={stopped:`This Mac is stopped: resuming its saved membership with the owner’s swarm failed (${why}), and Mycelium does not try again by itself. Press “Start / reconnect” (Pause, restart, or leave) once the owner’s swarm is reachable again.`,
+    retrying:`Renewal with the owner’s swarm failed (${why}); Mycelium keeps retrying while this Mac’s membership is current.`,
     renewing:`Renewal with the owner’s swarm failed (${why}); Mycelium keeps retrying with this Mac’s saved membership.`,
     lapsed:`Renewal with the owner’s swarm failed (${why}) and this Mac’s membership has expired. If the owner’s temporary relay closed (it closes 30 minutes after it starts unless a run is serving), a relay started again gets a new address: keep Mycelium open, ask the owner to start the relay again and to reconnect this Mac to the new address. Until then this Mac takes no part in runs.`,
     ended:`The owner ended or replaced this Mac’s membership (${why}). This Mac takes no part in runs until the owner adds this Mac again.`,
@@ -246,7 +247,7 @@ function render(value) {
     unrecognised:`The owner’s swarm doesn’t recognise this Mac — ask the owner to add it again (${why}).`,
     unknown:`The state of this Mac’s membership is not known yet (${why}).`};
   const relayLine={current:'retrying',retained:'renewing',expired:'lapsed',revoked:'ended',stale:'ended',absent:'none',unknown:'unrecognised'};
-  if(target && (value.renewal_error || value.recovery_error))rung('Owner relay',relayAdvice[relayLine[a.membership_state] ?? 'unknown']);
+  if(target && (value.renewal_error || value.recovery_error))rung('Owner relay',relayAdvice[!value.running && value.recovery_error ? 'stopped' : relayLine[a.membership_state] ?? 'unknown']);
   const capabilityStates={self_report_accepted:'Self-report accepted · not independently qualified',
     not_reported:'Not reported',stale:'Stale · report again'};
   rung('Capability',capabilityStates[a.capability_state] ?? 'Not independently qualified');
