@@ -29,16 +29,22 @@ impl Network {
         self.native_program.clone()
     }
     pub fn close_work(&self) {
+        self.close_work_proven().unwrap_or(());
+    }
+    /// [`Self::close_work`] with its verdict: `Err` while the service still owns member custody.
+    pub(super) fn close_work_proven(&self) -> Result<(), String> {
         let mut slot = lock(&self.work);
         let Some(mut work) = slot.take() else {
-            return;
+            return Ok(());
         };
         if let Err(code) = work.close() {
             // The service still owns member custody: keep the exact owner in its slot so the
             // next close retries it, instead of dropping it into a false success.
             eprintln!("packaged_work_cleanup_unproven:{code}");
             *slot = Some(work);
+            return Err(code);
         }
+        Ok(())
     }
     pub fn sync_work_session(&self, authority: &Mutex<Authority>) {
         let a = lock(authority);

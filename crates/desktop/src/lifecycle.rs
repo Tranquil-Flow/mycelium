@@ -33,6 +33,10 @@ pub enum CleanupError {
     Poll,
     Clock,
     InvalidBudget,
+    /// The steps ended but a cleanup they own is not PROVEN (owner ruling 15 Nov, ledger row 57:
+    /// Quit says `Verified` only when cleanup is proven, otherwise `Unproven` with the named
+    /// reason). Exit 3 as v0.1.4's `cleanup_incomplete` (`__main__.py:219-223 @ f4e366e9`).
+    Unproven(&'static str),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Poll {

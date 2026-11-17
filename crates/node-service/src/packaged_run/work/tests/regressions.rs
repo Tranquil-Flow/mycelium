@@ -3,7 +3,7 @@
 use super::*;
 use std::os::unix::fs::PermissionsExt;
 
-fn setup() -> (Fixture, PackagedChainPorts, RunState, Env) {
+pub(super) fn setup() -> (Fixture, PackagedChainPorts, RunState, Env) {
     let mut f = Fixture::new();
     let ports = PackagedChainPorts::new(&f.host, None, None);
     let seed = f.host.with(|c| c.authority.seed.clone().unwrap());
@@ -38,9 +38,9 @@ fn setup() -> (Fixture, PackagedChainPorts, RunState, Env) {
     (f, ports, state, Env { at: Instant::now() })
 }
 
-struct Rescue {
-    work: Work,
-    mode: Option<PathBuf>,
+pub(super) struct Rescue {
+    pub(super) work: Work,
+    pub(super) mode: Option<PathBuf>,
 }
 impl Drop for Rescue {
     fn drop(&mut self) {
@@ -287,7 +287,7 @@ fn panicked_member_work_handoff_must_not_turn_a_later_close_into_success() {
     );
 }
 
-fn stage_root(root: &Path) -> PathBuf {
+pub(super) fn stage_root(root: &Path) -> PathBuf {
     let runs = root.join("chain-runs");
     let mut dirs: Vec<_> = fs::read_dir(&runs)
         .unwrap()

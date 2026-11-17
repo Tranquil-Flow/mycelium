@@ -1071,6 +1071,59 @@ fn rollback_swaps_current_and_previous_relinks_and_rolls_forward_again() {
     );
 }
 
+/// Proves: B12 (lane B), the desktop flake `install::rollback_refusals_change_nothing`
+/// (`install_already_running` where `no_previous_version` was expected right after an install;
+/// REPORT-laneA-release.md p2-desktop, laneTEN p2-r1). A `flock` belongs to the lock file's open
+/// file description, and a child that another test's thread forked while the install held its lock
+/// shares that description until its exec closes its copy (installs themselves spawn `ditto`,
+/// `xattr`, `sw_vers`); closing the guard's descriptor then leaves the lock held, and the next
+/// install or rollback right after is refused. Here a child is forked while the lock is held and
+/// kept before its exec (a `pre_exec` that waits); the guard is dropped and the lock taken again.
+#[test]
+#[allow(unsafe_code)]
+fn the_install_lock_is_free_once_its_guard_dropped_although_a_child_forked_while_it_was_held() {
+    use std::io::{Read, Write};
+    use std::os::{
+        fd::{AsRawFd, FromRawFd},
+        unix::process::CommandExt,
+    };
+    let tree = Tree::new();
+    let roots = tree.roots();
+    let held = install::hold_lock(&roots).unwrap();
+    let (mut entered, entered_w) = std::io::pipe().unwrap();
+    let (release_r, mut release_w) = std::io::pipe().unwrap();
+    let (signal, wait) = (entered_w.as_raw_fd(), release_r.as_raw_fd());
+    let spawner = std::thread::spawn(move || {
+        let mut child = std::process::Command::new("/usr/bin/true");
+        // SAFETY: between fork and exec only one `write` and one `read` run, on two pipe
+        // descriptors this test keeps open until the spawn returned; neither allocates.
+        unsafe {
+            child.pre_exec(move || {
+                let mut out = std::mem::ManuallyDrop::new(std::fs::File::from_raw_fd(signal));
+                let mut input = std::mem::ManuallyDrop::new(std::fs::File::from_raw_fd(wait));
+                let mut byte = [1u8];
+                out.write_all(&byte)?;
+                input.read_exact(&mut byte)?;
+                Ok(())
+            });
+        }
+        let spawned = child.spawn().and_then(|mut c| c.wait());
+        drop((entered_w, release_r));
+        spawned
+    });
+    let mut byte = [0u8];
+    entered.read_exact(&mut byte).unwrap();
+    drop(held);
+    let again = install::hold_lock(&roots).map(drop).map_err(|e| e.0);
+    release_w.write_all(&[1]).unwrap();
+    assert!(spawner.join().unwrap().is_ok(), "the held child ran");
+    assert_eq!(
+        again,
+        Ok(()),
+        "the install lock stayed held by a child forked while it was held"
+    );
+}
+
 #[test]
 fn rollback_refusals_change_nothing() {
     // No previous version.

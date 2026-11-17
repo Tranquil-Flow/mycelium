@@ -42,7 +42,10 @@ fn scratch(tag: &str) -> PathBuf {
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).expect("mode");
     dir
 }
+/// B12: a port the test binds and frees for a relay to bind next is bound and freed inside the
+/// relay's fork boundary, so no other test's spawn in flight holds a copy of it.
 fn free_port() -> u16 {
+    let _forks = api::relay::fork_boundary();
     TcpListener::bind("127.0.0.1:0")
         .and_then(|l| l.local_addr())
         .map(|a| a.port())
@@ -100,7 +103,10 @@ fn run_scenario(fx: &Value, sc: &Value) -> Vec<String> {
         clock: Arc::new(Mutex::new(1000.0)),
         serving: Arc::new(Mutex::new(0)),
     };
-    let busy = TcpListener::bind("127.0.0.1:0").expect("busy");
+    let busy = {
+        let _forks = api::relay::fork_boundary();
+        TcpListener::bind("127.0.0.1:0").expect("busy")
+    };
     let mut busy = Some(busy);
     let busy_port = busy
         .as_ref()
@@ -232,6 +238,7 @@ fn run_scenario(fx: &Value, sc: &Value) -> Vec<String> {
                     status(r)
                 }
                 "free_busy" => {
+                    let _forks = api::relay::fork_boundary();
                     busy = None;
                     json!({"ok": true})
                 }
@@ -780,6 +787,73 @@ fn a_closed_proxy_frees_its_port_while_a_request_is_still_in_flight() {
     );
 }
 
+/// Proves: B12 (lane B): `a_closed_proxy_frees_its_port_while_a_request_is_still_in_flight` failed
+/// 22 of 120 whole-binary runs at 8x under load (qualification/laneB/repeat/probe1) with `AddrInUse`
+/// on the rebind, while an immediate second bind succeeded, the proxy's own process held no listener
+/// on the port, and a child of the test process was mid-spawn (`(ps)`, state R) at that instant: a
+/// fork in flight in another test's thread held a copy of the proxy's listener until its exec. Here
+/// that fork is held between its fork and its exec (a `pre_exec` that waits), as any concurrent
+/// spawn is for a moment, entering the relay's fork boundary as every relay spawn does. The proxy
+/// is closed while it is held and its port bound again. The child is released when the rebind ran
+/// (the old order) or when the close waits at the boundary for that spawn (never on time).
+#[test]
+#[allow(unsafe_code)]
+fn a_proxy_closed_while_a_spawn_is_in_flight_frees_its_port() {
+    use std::os::{fd::AsRawFd, unix::process::CommandExt};
+    let proxy = Proxy::start(0, true).expect("proxy");
+    let port = proxy.port();
+    let (mut entered, entered_w) = std::io::pipe().expect("pipe");
+    let (release_r, mut release_w) = std::io::pipe().expect("pipe");
+    let (signal, wait) = (entered_w.as_raw_fd(), release_r.as_raw_fd());
+    let spawner = std::thread::spawn(move || {
+        let _forks = api::relay::fork_boundary();
+        let mut child = std::process::Command::new("/usr/bin/true");
+        // SAFETY: between fork and exec only `write` and `read` run (async-signal-safe), on two
+        // pipe descriptors this test owns and keeps open until the spawn returned.
+        unsafe {
+            child.pre_exec(move || {
+                let mut byte = [1u8];
+                libc::write(signal, byte.as_ptr().cast(), 1);
+                libc::read(wait, byte.as_mut_ptr().cast(), 1);
+                Ok(())
+            });
+        }
+        let spawned = child.spawn().and_then(|mut c| c.wait());
+        drop((entered_w, release_r));
+        spawned
+    });
+    let mut byte = [0u8];
+    entered
+        .read_exact(&mut byte)
+        .expect("the child is held before its exec");
+    let (rebound_tx, rebound_rx) = mpsc::channel::<()>();
+    let releaser = std::thread::spawn(move || {
+        let until = Instant::now() + secs(60);
+        while rebound_rx.try_recv().is_err()
+            && api::relay::fork_boundary_waiting() == 0
+            && Instant::now() < until
+        {
+            std::thread::yield_now();
+        }
+        release_w.write_all(&[1]).expect("release");
+    });
+    proxy.close();
+    let rebound = TcpListener::bind(("127.0.0.1", port))
+        .map(drop)
+        .map_err(|e| e.kind());
+    rebound_tx.send(()).unwrap_or(());
+    releaser.join().expect("releaser");
+    assert!(
+        spawner.join().expect("spawner").is_ok(),
+        "the held child ran"
+    );
+    assert_eq!(
+        rebound,
+        Ok(()),
+        "a child forked before the proxy's close kept its port bound"
+    );
+}
+
 /// A typed budget (`budgets` table) as a `Duration`.
 fn budget(id: budgets::BudgetId) -> Duration {
     Duration::from_millis(id.span(budgets::Entries::new(0)).expect("budget").millis())
@@ -799,6 +873,7 @@ impl SilentTunnel {
         };
         let hold = dir.join("hold");
         for fifo in [&tunnel.started, &hold] {
+            let _forks = api::relay::fork_boundary();
             let made = std::process::Command::new("/usr/bin/mkfifo")
                 .arg("-m")
                 .arg("600")
@@ -843,6 +918,7 @@ impl SilentTunnel {
     /// Every live process running this script (`Command::spawn` returns once the child has
     /// exec'd, so a spawned client is visible here as soon as `start` answered).
     fn running(&self) -> Vec<i32> {
+        let _forks = api::relay::fork_boundary();
         let out = std::process::Command::new("/bin/ps")
             .args(["-axww", "-o", "pid=,command="])
             .output()
@@ -992,6 +1068,7 @@ impl BundledFake {
         let native = root.join("Mycelium.app/Contents/MacOS/native");
         std::fs::create_dir_all(&native).expect("bundle dirs");
         let hold = root.join("hold");
+        let _forks = api::relay::fork_boundary();
         let made = std::process::Command::new("/usr/bin/mkfifo")
             .arg("-m")
             .arg("600")

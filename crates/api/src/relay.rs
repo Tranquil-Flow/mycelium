@@ -265,6 +265,39 @@ struct ProxyShared {
     trust_client_ip: bool,
     handlers: Mutex<Handlers>,
 }
+/// Lane B, B12: the relay's fork boundary. A child forked while a socket is open holds its own copy
+/// of that socket until its exec closes it (std marks it close-on-exec, and macOS has no atomic
+/// `SOCK_CLOEXEC`: `socket()` then `FIOCLEX`). A proxy closed in that window still has its listener
+/// bound in the child, so a relay started right after cannot bind the same port, and a child forked
+/// between `socket()` and `FIOCLEX` keeps it for its whole life. The relay's own child spawn
+/// (the quick tunnel's client) and its proxy listener's bind and close take this boundary, so
+/// neither can land inside the other's window; a caller of this module that forks beside a relay
+/// (and its tests) takes the same boundary around its spawn. v0.1.4 spawns with Python's
+/// `close_fds=True` under the GIL, which has neither window.
+struct ForkBoundary {
+    lock: Mutex<()>,
+    waiting: AtomicUsize,
+}
+static FORKS: ForkBoundary = ForkBoundary {
+    lock: Mutex::new(()),
+    waiting: AtomicUsize::new(0),
+};
+/// Enter the relay's fork boundary (see [`ForkBoundary`]): held across a spawn, or across a socket's
+/// bind or close whose port must not be held by a child.
+pub fn fork_boundary() -> MutexGuard<'static, ()> {
+    FORKS.waiting.fetch_add(1, Ordering::SeqCst);
+    let entered = FORKS
+        .lock
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    FORKS.waiting.fetch_sub(1, Ordering::SeqCst);
+    entered
+}
+/// How many threads wait to enter the fork boundary now (a test observes a close that waits for a
+/// spawn in flight).
+pub fn fork_boundary_waiting() -> usize {
+    FORKS.waiting.load(Ordering::SeqCst)
+}
 /// `SeedRelayProxy`: a loopback HTTP server the public front forwards into.
 pub struct Proxy {
     shared: Arc<ProxyShared>,
@@ -274,7 +307,11 @@ pub struct Proxy {
 impl Proxy {
     /// `SeedRelayProxy(port, trust_client_ip).start()`; an `OSError` is the caller's.
     pub fn start(port: u16, trust_client_ip: bool) -> std::io::Result<Arc<Proxy>> {
-        let listener = TcpListener::bind(("127.0.0.1", port))?;
+        // B12: no relay spawn lands between the listener's `socket()` and its close-on-exec.
+        let listener = {
+            let _forks = fork_boundary();
+            TcpListener::bind(("127.0.0.1", port))?
+        };
         let port = listener.local_addr()?.port();
         let shared = Arc::new(ProxyShared {
             stop: AtomicBool::new(false),
@@ -321,10 +358,13 @@ impl Proxy {
         lock(&self.shared.handlers).swarm = handler;
     }
     /// `SeedRelayProxy.close`: stop accepting, join the accept thread (in-flight connections finish).
+    /// B12: the listener is closed inside the fork boundary, so a relay spawn in flight (which holds
+    /// a copy of it until its exec) has exec'd first and no later one can copy it.
     pub fn close(&self) {
         if self.shared.stop.swap(true, Ordering::SeqCst) {
             return;
         }
+        let _forks = fork_boundary();
         // unblock `accept`
         TcpStream::connect(("127.0.0.1", self.port))
             .map(drop)
@@ -1154,7 +1194,12 @@ impl Relay {
         command
             .stdout(write_end.try_clone().map_err(|_| "relay_start_failed")?)
             .stderr(write_end);
-        let child = command.spawn().map_err(|_| "relay_start_failed")?;
+        let child = {
+            // B12: the client is forked inside the relay's fork boundary.
+            let _forks = fork_boundary();
+            command.spawn()
+        }
+        .map_err(|_| "relay_start_failed")?;
         drop(command);
         let weak = self.inner.clone();
         let (ended, reader_ended) = mpsc::channel();
@@ -1581,8 +1626,10 @@ pub trait EndpointHost {
     fn configure_public_endpoint(&mut self, origin: &str, port: u16) -> Result<(), PublicError>;
     /// `endpoint_recovery.attach_public_endpoint` (a swarm created without a relay).
     fn attach_public_endpoint(&mut self, origin: &str, port: u16) -> Result<(), PublicError>;
-    /// `endpoint_recovery.relocate_authority` (the swarm moves to a new origin).
-    fn relocate_authority(&mut self, origin: &str, port: u16) -> Result<(), PublicError>;
+    /// `endpoint_recovery.relocate_authority` (the swarm moves to a new origin): the signed recovery
+    /// card from the old origin to the new one (lane B, B10), `None` from a host that signs none.
+    fn relocate_authority(&mut self, origin: &str, port: u16)
+    -> Result<Option<Value>, PublicError>;
     /// `authority.seed_server` as the relay's verified-TLS hop; `None` while no seed server exists.
     fn seed_backend(&self) -> Option<Arc<dyn SeedBackend>>;
     /// `self.running = True`.
@@ -1591,6 +1638,12 @@ pub trait EndpointHost {
     fn bind_public_routes(&mut self, proxy: &Arc<Proxy>);
     /// `_materialize_pending_windows`.
     fn materialize_pending_windows(&mut self);
+    /// `getattr(self, 'local_contributor', None) is not None`: the owner's own contributor is
+    /// enrolled (whatever its Session slot holds while a renewal has it out). A host without one
+    /// answers `false`.
+    fn local_contributor_present(&self) -> bool {
+        false
+    }
 }
 
 /// `DemoApp.public_relay` and the relay-related methods of the app.
@@ -1815,6 +1868,100 @@ impl OwnerRelay {
         let status = relay.status();
         self.relay = Some(relay);
         Ok(status)
+    }
+    /// `/api/network/restart` (app.py:1444-1475 @ f4e366e9) after the persistent backend's closed
+    /// check and the dispatch's role/swarm/shape check (lane B, B10): an external restart takes the
+    /// address it does not name from the remembered one; the new relay is validated before the old
+    /// one is closed; once it runs, the seed moves to its origin with a signed recovery card
+    /// (`relocate_authority`), unless an external address did not change (no card then). Any
+    /// failure after the start closes the new relay. Answers `{'network', 'recovery_card'}`.
+    pub fn restart_public_relay(
+        &mut self,
+        body: &Map<String, Value>,
+        host: &mut dyn EndpointHost,
+        probe: Probe,
+    ) -> Result<Json, PublicError> {
+        let external = body.get("provider").is_some_and(|v| v == "external");
+        let spec = if external {
+            let mut spec = self.saved_external_address()?;
+            spec.extend(body.clone());
+            spec
+        } else {
+            body.clone()
+        };
+        // app.py:1451-1453: a present contributor refuses any restart that would relocate the
+        // seed it is enrolled on (lane B review B-01): only an external restart on the origin the
+        // retained authority answers on may proceed, judged on the merged spec, before anything
+        // is closed, configured, signed or reopened.
+        if host.local_contributor_present() {
+            let unchanged = external
+                && host.configured_public_origin().is_some_and(|configured| {
+                    crate::join_link::validate_external_origin(
+                        spec.get("public_origin").unwrap_or(&Value::Null),
+                    )
+                    .is_ok_and(|origin| origin == configured)
+                });
+            if !unchanged {
+                return Err(PublicError::new(
+                    400,
+                    "network_stop_local_contributor_required",
+                ));
+            }
+        }
+        if external && !(spec.contains_key("public_origin") && spec.contains_key("proxy_port")) {
+            return Err(PublicError::new(400, "relay_origin_invalid"));
+        }
+        // validated before the old relay is touched
+        let fresh = self.new_relay(&spec, &probe)?;
+        if let Some(old) = self.relay.take() {
+            old.close();
+        }
+        if let Some(guard) = &self.guard {
+            guard.adopt(&fresh)?;
+        }
+        fresh
+            .start(&body["relay_acknowledged"], &body["max_seconds"])
+            .map_err(|_| value_error())?;
+        let outcome = (|| -> Result<Option<Value>, PublicError> {
+            let origin = fresh.public_origin().unwrap_or_default();
+            let port = free_seed_port(fresh.proxy_port())?;
+            let card = if external && host.configured_public_origin().as_deref() == Some(&origin) {
+                None // the address did not change: members need no recovery card
+            } else {
+                host.relocate_authority(&origin, port)?
+            };
+            if let Some(proxy) = fresh.proxy() {
+                proxy.bind_seed(host.seed_backend());
+            }
+            Ok(card)
+        })();
+        let card = match outcome {
+            Ok(card) => card,
+            Err(error) => {
+                fresh.close();
+                return Err(error);
+            }
+        };
+        host.set_running();
+        if external {
+            self.remember_external_address(&spec)?;
+        }
+        if let Some(proxy) = fresh.proxy() {
+            host.bind_public_routes(&proxy);
+        }
+        let network = fresh.status();
+        self.relay = Some(fresh);
+        Ok(Json::from(serde_json::json!({
+            "network": network.to_value(),
+            "recovery_card": card,
+        })))
+    }
+    /// `_saved_external_address`: what `_remember_external_address` kept, `{}` when nothing.
+    fn saved_external_address(&self) -> Result<Map<String, Value>, PublicError> {
+        let limit = crate::preferences::private_state::private_json_limit().unwrap_or(0);
+        crate::preferences::private_state::load(&self.root.join("external-origin.json"), limit)
+            .map(Option::unwrap_or_default)
+            .map_err(|e| PublicError::new(409, e.0).raised_by(Raised::Authority))
     }
     /// `_remember_external_address`: kept so a later restart reuses it.
     fn remember_external_address(&self, spec: &Map<String, Value>) -> Result<(), PublicError> {

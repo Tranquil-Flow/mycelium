@@ -724,8 +724,13 @@ impl EndpointHost for Endpoint {
         }
         Ok(())
     }
-    fn relocate_authority(&mut self, origin: &str, port: u16) -> Result<(), PublicError> {
-        self.attach_public_endpoint(origin, port)
+    /// The headless launcher signs no recovery card (lane B, B10 is the packaged host's).
+    fn relocate_authority(
+        &mut self,
+        origin: &str,
+        port: u16,
+    ) -> Result<Option<serde_json::Value>, PublicError> {
+        self.attach_public_endpoint(origin, port).map(|()| None)
     }
     fn seed_backend(&self) -> Option<Arc<dyn SeedBackend>> {
         self.with(|c| {

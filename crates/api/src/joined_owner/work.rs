@@ -1468,6 +1468,11 @@ struct Counted {
     inner: Box<dyn MemberLink + Send>,
     outstanding: usize,
     custody: bool,
+    /// The member answered a `prepare_native` and no `native_close` or `serve` since: its stage
+    /// worker may be live, and a member refuses `discard` while it is (`NativeShard::discard`,
+    /// `joined_native_cleanup_required`), so the exit closes it first (lane B, B5/QV; rows 67, 69
+    /// F1).
+    prepared: bool,
     /// Commands begun and not yet answered, in order (member replies are FIFO).
     begun: std::collections::VecDeque<String>,
     /// The run's Stop: the worker's own member waits end at once (F2); the exit drains.
@@ -1483,7 +1488,14 @@ impl Counted {
             return None;
         }
         self.outstanding = self.outstanding.saturating_sub(1);
-        Some((self.begun.pop_front().unwrap_or_default(), reply))
+        let command = self.begun.pop_front().unwrap_or_default();
+        match (command.as_str(), &reply) {
+            ("prepare_native", Ok(_)) => self.prepared = true,
+            // A member's serve ends with its compute closed (EP2); its own close closes it.
+            ("native_close" | "serve", Ok(_)) => self.prepared = false,
+            _ => {}
+        }
+        Some((command, reply))
     }
 }
 impl MemberLink for Counted {
@@ -1525,6 +1537,7 @@ impl Member {
                 inner: m.link,
                 outstanding: 0,
                 custody: false,
+                prepared: false,
                 begun: std::collections::VecDeque::new(),
                 stop,
                 poll,
@@ -1615,7 +1628,10 @@ impl Worker {
     /// 2. every other operation a member still runs is cancelled (`cancel_operation`);
     /// 3. every member's replies are collected round-robin, and each member that began a
     ///    `receive` is asked to `discard` as soon as nothing of it is outstanding, so a silent
-    ///    member never delays another's discard (F3);
+    ///    member never delays another's discard (F3); a member whose stage prepared its native
+    ///    worker (and did not serve or close it since) is first asked to `native_close` it, the
+    ///    member's own close, since it refuses `discard` while that worker is live (lane B,
+    ///    B5/QV: a publish that failed after a prepare, rows 67 and 69 F1);
     /// 4. at `end`, a member whose discard is not confirmed (`inert_bytes_discarded` or
     ///    `nothing_owned`) is `owner_target_cleanup_unproven` (:1392-1396), per member, never
     ///    swallowed.
@@ -1632,10 +1648,20 @@ impl Worker {
         }
         let n = self.members.len();
         let (mut rows, mut asked) = (vec![None; n], vec![false; n]);
+        // Per member: `native_close` asked, and the code it failed with.
+        let (mut closing, mut closes): (Vec<bool>, Vec<Option<String>>) =
+            (vec![false; n], vec![None; n]);
         let mut reports = Vec::new();
         loop {
             for (i, m) in self.members.iter_mut().enumerate() {
                 if m.link.outstanding == 0 && m.link.custody && !asked[i] {
+                    if m.link.prepared && !closing[i] {
+                        closing[i] = true;
+                        match m.link.begin(json!({"command":"native_close"})) {
+                            Ok(()) => continue,
+                            Err(Refusal(code)) => closes[i] = Some(code),
+                        }
+                    }
                     asked[i] = true;
                     if let Err(Refusal(code)) = m.link.begin(json!({"command":"discard"})) {
                         rows[i] = Some(json!({"node_id":m.node_id,"discarded":false,"code":code}));
@@ -1664,6 +1690,11 @@ impl Worker {
                 };
                 match command.as_str() {
                     "serve" => reports.push(serve_row(&m.node_id, reply)),
+                    "native_close" => {
+                        if let Err(Refusal(code)) = reply {
+                            closes[i] = Some(code);
+                        }
+                    }
                     "discard" => {
                         rows[i] = Some(match reply {
                             Ok(r)
@@ -1692,11 +1723,19 @@ impl Worker {
             .members
             .iter()
             .zip(rows)
-            .filter(|(m, row)| row.is_some() || m.link.custody)
-            .map(|(m, row)| {
-                row.unwrap_or_else(
+            .zip(closes)
+            .filter(|((m, row), _)| row.is_some() || m.link.custody)
+            .map(|((m, row), close)| {
+                let mut row = row.unwrap_or_else(
                     || json!({"node_id":m.node_id,"discarded":false,"code":REPLY_TIMEOUT}),
-                )
+                );
+                // The prepared stage's close failed: its own code beside the discard's.
+                if let Some(code) = close
+                    && row["discarded"] != true
+                {
+                    row["native_close"] = json!(code);
+                }
+                row
             })
             .collect();
         let refusals = open.map(|epoch| epoch.close_until(end));

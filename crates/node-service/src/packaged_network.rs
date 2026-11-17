@@ -24,7 +24,7 @@ mod work;
 use api::{
     actions::{Action, Backend},
     app_host::{self, Cell, HostView, NETWORK_FILE, RelayOrigin, cap},
-    app_status, joined_member,
+    app_status, endpoint_recovery, joined_member,
     persistent::RelayState,
     preferences::private_state,
     relay::{EndpointHost, Hooks, OwnerRelay, Probe, Proxy, RichHandler, SeedBackend, StartGuard},
@@ -136,6 +136,9 @@ pub struct Network {
     /// the run's chat service with the relay's client key (lane CHATS item 2). `None` until the
     /// composition gives one (`DesktopServices::with_chat_run`).
     relay_chat: Mutex<Option<RichHandler>>,
+    /// The owner run's fields (`DemoApp.local_contributor`), bound by the packaged run host: the
+    /// relay restart refuses to relocate the seed under an enrolled contributor (lane B, B-01).
+    run_fields: Mutex<std::sync::Weak<Mutex<api::owner_ports::RunFields>>>,
 }
 fn lock<T>(cell: &Mutex<T>) -> MutexGuard<'_, T> {
     // Plain values and handles: a panicked holder cannot leave them half-written.
@@ -182,7 +185,18 @@ impl Network {
             work_closed: AtomicBool::new(false),
             serving: std::sync::Arc::new(AtomicBool::new(false)),
             relay_chat: Mutex::new(None),
+            run_fields: Mutex::new(std::sync::Weak::new()),
         })
+    }
+    /// The owner run's fields this host's relay reads for `local_contributor` (lane B, B-01).
+    pub fn bind_run_fields(&self, run: &Arc<Mutex<api::owner_ports::RunFields>>) {
+        *lock(&self.run_fields) = Arc::downgrade(run);
+    }
+    /// `self.local_contributor is not None`: the owner's contributor is enrolled (its state is
+    /// present, whether or not a renewal has its Session out).
+    pub fn local_contributor_present(&self) -> bool {
+        let run = lock(&self.run_fields).upgrade();
+        run.is_some_and(|run| lock(&run).contributor.is_some())
     }
     /// The chat the relay's `/chat` and `/chat/api/*` answer from (`bind_chat`, app.py:1073-1077),
     /// bound at every relay start ([`EndpointHost::bind_public_routes`]). The packaged composition
@@ -250,11 +264,15 @@ impl Network {
     /// Quit's relay step (`DemoApp.close`, app.py:1831, 1848-1850): a relay a Start is still
     /// bringing up is closed at once and no later Start brings one up (`application_closed`),
     /// then the relay this host keeps is closed.
-    pub fn quit(&self) {
+    ///
+    /// Lane B, B5/QV (owner ruling 15 Nov, row 57): `Err` names a work service whose close did
+    /// not prove its member custody (a stage it still holds): Quit must not say `Verified` then.
+    pub fn quit(&self) -> Result<(), String> {
         self.work_closed.store(true, Ordering::SeqCst);
-        self.close_work();
+        let work = self.close_work_proven();
         self.start_guard.close();
         self.close();
+        work
     }
     /// `_leave_fence`: no new work once a leave began.
     pub fn fenced(&self) -> bool {
@@ -313,6 +331,76 @@ impl Network {
         if *renewing {
             eprintln!("member_leave_renewal_still_running");
         }
+    }
+    /// `/api/network/restart` (app.py:1444-1475 @ f4e366e9, lane B B10) as [`Network::start`]
+    /// runs the Start: the relay is taken out of this host while the new one starts.
+    pub fn restart(
+        &self,
+        authority: &Arc<Mutex<Authority>>,
+        body: &serde_json::Map<String, Value>,
+    ) -> Result<Json, PublicError> {
+        let mut relay = std::mem::replace(
+            &mut *lock(&self.relay),
+            Self::fresh(&self.root, &self.hooks),
+        );
+        relay.set_start_guard(self.start_guard.clone());
+        let probe = self.serving_probe();
+        let outcome = relay.restart_public_relay(
+            body,
+            &mut Endpoint {
+                authority: authority.clone(),
+                network: self,
+            },
+            probe,
+        );
+        *lock(&self.relay) = relay;
+        outcome
+    }
+    /// `/api/network/recovery-card` (app.py:1436-1442, `refresh_endpoint_card`,
+    /// endpoint_recovery.py:117-142 @ f4e366e9, lane B B10): the owner's persisted card reissued
+    /// for the origin its seed answers on now.
+    pub fn recovery_card(
+        &self,
+        authority: &Arc<Mutex<Authority>>,
+        body: &serde_json::Map<String, Value>,
+    ) -> Result<Json, PublicError> {
+        let (seed, root) = {
+            let a = lock(authority);
+            (a.seed.clone(), a.root.clone())
+        };
+        let configured = app_host::configured_public_origin(&self.cell(authority));
+        let old = endpoint_recovery::load_card(&root)?;
+        let (Some(old), Some(configured), Some(seed)) = (old, configured, seed) else {
+            // `endpoint_recovery_requires_retained_authority` (a `ValueError`)
+            return Err(endpoint_recovery::value_error());
+        };
+        let c = &seed.coordinator;
+        let card = endpoint_recovery::refresh_endpoint_card(
+            c.signer(),
+            c.swarm_id(),
+            c.seed_node_id(),
+            &configured,
+            &old,
+            body.get("previous_origin"),
+            app_host::now(),
+        )?;
+        endpoint_recovery::store_card(&root, &card)?;
+        Ok(Json::from(json!({"recovery_card": card})))
+    }
+    /// `/api/network/reconnect` (app.py:1427-1435 @ f4e366e9, lane B B10): the joined Mac follows
+    /// its owner's seed to the origin the card names, over its own seed path.
+    pub fn reconnect(
+        &self,
+        authority: &Arc<Mutex<Authority>>,
+        body: &serde_json::Map<String, Value>,
+    ) -> Result<Json, PublicError> {
+        let options = self.seams.member_seed.clone();
+        endpoint_recovery::reconnect_peer(&self.cell(authority), &options, &body["card"])
+            .map(Json::from)
+    }
+    /// Quit has closed this host's relay start (`application_closed` for every later action).
+    pub fn closed(&self) -> bool {
+        self.start_guard.closed()
     }
     /// `_start_public_relay` after the persistent backend's closed/role/shape checks: the relay is
     /// taken out of this host while it starts, so the endpoint seams (which lock the authority)
@@ -408,6 +496,15 @@ impl Endpoint<'_> {
     fn cell(&self) -> PackagedCell<'_> {
         self.network.cell(&self.authority)
     }
+    /// The running seed is closed and opened again on the configured origin.
+    fn reopen_seed(&self) -> Result<(), PublicError> {
+        let old = lock(&self.authority).seed.take();
+        if let Some(old) = old {
+            old.close();
+            app_host::open_owner_seed(&self.cell())?;
+        }
+        Ok(())
+    }
 }
 impl EndpointHost for Endpoint<'_> {
     fn swarm_created(&self) -> bool {
@@ -434,15 +531,41 @@ impl EndpointHost for Endpoint<'_> {
     /// A swarm that exists answers on the new origin: its seed is reopened bound to it.
     fn attach_public_endpoint(&mut self, origin: &str, port: u16) -> Result<(), PublicError> {
         self.configure_public_endpoint(origin, port)?;
-        let old = lock(&self.authority).seed.take();
-        if let Some(old) = old {
-            old.close();
-            app_host::open_owner_seed(&self.cell())?;
-        }
-        Ok(())
+        self.reopen_seed()
     }
-    fn relocate_authority(&mut self, origin: &str, port: u16) -> Result<(), PublicError> {
-        self.attach_public_endpoint(origin, port)
+    /// `endpoint_recovery.relocate_authority` (endpoint_recovery.py:39-57 @ f4e366e9, lane B B10):
+    /// a retained configuration and seed sign the card from the old origin to the new one; the new
+    /// configuration and the card are persisted, then the seed is reopened on the new origin.
+    fn relocate_authority(
+        &mut self,
+        origin: &str,
+        port: u16,
+    ) -> Result<Option<Value>, PublicError> {
+        let previous = self.configured_public_origin();
+        let (seed, root) = {
+            let a = lock(&self.authority);
+            (a.seed.clone(), a.root.clone())
+        };
+        let (Some(previous), Some(seed)) = (previous, seed) else {
+            return Err(
+                PublicError::new(409, "network_recovery_requires_retained_authority")
+                    .raised_by(Raised::Authority),
+            );
+        };
+        let c = &seed.coordinator;
+        let card = endpoint_recovery::endpoint_card(
+            c.signer(),
+            c.swarm_id(),
+            c.seed_node_id(),
+            &Value::from(previous),
+            &Value::from(origin),
+            app_host::now(),
+        )?;
+        self.configure_public_endpoint(origin, port)?;
+        // Identity, journals and the card stay inspectable whatever the reopen does.
+        endpoint_recovery::store_card(&root, &card)?;
+        self.reopen_seed()?;
+        Ok(Some(card))
     }
     fn seed_backend(&self) -> Option<Arc<dyn SeedBackend>> {
         let a = lock(&self.authority);
@@ -465,6 +588,9 @@ impl EndpointHost for Endpoint<'_> {
         proxy.bind_chat(self.network.relay_chat());
     }
     /// `_materialize_pending_windows`: codes asked for before the relay exist from now on.
+    fn local_contributor_present(&self) -> bool {
+        self.network.local_contributor_present()
+    }
     fn materialize_pending_windows(&mut self) {
         let (windows, origin, seed) = {
             let a = lock(&self.authority);
@@ -691,7 +817,13 @@ impl PackagedActions {
 }
 impl Backend for PackagedActions {
     fn prepare(&mut self, action: Action, body: &Map<String, Value>) -> Result<(), PublicError> {
-        if action == Action::NetworkStart {
+        if matches!(
+            action,
+            Action::NetworkStart
+                | Action::NetworkRestart
+                | Action::NetworkRecoveryCard
+                | Action::NetworkReconnect
+        ) {
             return Ok(());
         }
         self.serving.prepare(action, body)
@@ -712,6 +844,35 @@ impl Backend for PackagedActions {
                 .map_err(|code| PublicError::new(409, code))?;
             return self.network.start(authority, body);
         }
+        // Lane B, B10: the endpoint recovery routes (app.py:1427-1475 @ f4e366e9). Each refuses
+        // the other role (and a restart without a swarm) as its consent refusal, as the source.
+        if matches!(
+            action,
+            Action::NetworkRestart | Action::NetworkRecoveryCard | Action::NetworkReconnect
+        ) {
+            if self.network.closed() {
+                return Err(PublicError::new(400, "application_closed"));
+            }
+            let authority = self
+                .authority
+                .as_ref()
+                .map_err(|code| PublicError::new(409, code))?;
+            let target = lock(authority).target;
+            let swarm = app_host::swarm_created(&self.network.cell(authority));
+            let allowed = match action {
+                Action::NetworkReconnect => target,
+                Action::NetworkRestart => !target && swarm,
+                _ => !target,
+            };
+            if !allowed {
+                return Err(PublicError::new(400, "network_consent_required"));
+            }
+            return match action {
+                Action::NetworkRestart => self.network.restart(authority, body),
+                Action::NetworkRecoveryCard => self.network.recovery_card(authority, body),
+                _ => self.network.reconnect(authority, body),
+            };
+        }
         self.serving.execute_json(action, body)
     }
     fn publish(&mut self) -> Result<(), PublicError> {
@@ -727,26 +888,44 @@ impl Backend for PackagedActions {
 pub struct RelayClose {
     network: Arc<Network>,
     closing: RelayClosing,
+    /// TEST ONLY (lane B, CP3-01): the close thread waits for this before it closes anything, as
+    /// a tunnel child still unreaped after its terminate/wait and kill/wait would hold it.
+    #[cfg(test)]
+    held: Option<std::sync::mpsc::Receiver<()>>,
 }
 enum RelayClosing {
     NotStarted,
     Running {
-        worker: std::thread::JoinHandle<()>,
+        worker: std::thread::JoinHandle<Result<(), String>>,
         until: std::time::Instant,
     },
     /// Past the deadline: the close is left to the process exit (the handle stays owned here).
-    Late(std::thread::JoinHandle<()>),
+    Late(std::thread::JoinHandle<Result<(), String>>),
     Done(Result<(), desktop::lifecycle::CleanupError>),
 }
+/// The relay step's close did not end within its own close budgets (REVIEW-laneCHATPAGE-p3-astra
+/// CP3-01): v0.1.4's `public_relay.close()` raises then (its `process.wait(5)` after `kill()`,
+/// public_relay.py:445-447 @ f4e366e9), `DemoApp.close` records `relay_stop_failed`
+/// (app.py:1848-1850) and the launcher exits 3 (`cleanup_incomplete`, __main__.py:219-223). It is
+/// not the run's join running out (`Deadline`, exit 0).
+const RELAY_STOP_FAILED: desktop::lifecycle::CleanupError =
+    desktop::lifecycle::CleanupError::Unproven("relay_stop_failed");
 impl RelayClose {
     pub fn new(network: Arc<Network>) -> Self {
         Self {
             network,
             closing: RelayClosing::NotStarted,
+            #[cfg(test)]
+            held: None,
         }
     }
+    /// TEST ONLY: see [`RelayClose::held`].
+    #[cfg(test)]
+    pub(crate) fn hold(&mut self, release: std::sync::mpsc::Receiver<()>) {
+        self.held = Some(release);
+    }
     /// The relay's own close budgets, summed.
-    fn allowance() -> Result<std::time::Duration, desktop::lifecycle::CleanupError> {
+    pub(crate) fn allowance() -> Result<std::time::Duration, desktop::lifecycle::CleanupError> {
         use budgets::{BudgetId as B, Entries};
         [
             B::PyMyceliumA13MacosPublicRelayTemporaryhttpsrelayCloseSelfProcessWaitL446,
@@ -776,10 +955,17 @@ impl RelayClose {
             }
         };
         let network = self.network.clone();
+        #[cfg(test)]
+        let held = self.held.take();
         self.closing = match std::thread::Builder::new()
             .name("packaged-relay-close".into())
-            .spawn(move || network.quit())
-        {
+            .spawn(move || {
+                #[cfg(test)]
+                if let Some(held) = held {
+                    held.recv().unwrap_or(());
+                }
+                network.quit()
+            }) {
             Ok(worker) => RelayClosing::Running {
                 worker,
                 until: std::time::Instant::now() + allowance,
@@ -802,17 +988,25 @@ impl RelayClose {
             RelayClosing::Running { worker, .. } if !worker.is_finished() => {
                 eprintln!("relay_stop_failed: relay_close_deadline");
                 self.closing = RelayClosing::Late(worker);
-                Some(Err(desktop::lifecycle::CleanupError::Deadline))
+                Some(Err(RELAY_STOP_FAILED))
             }
             RelayClosing::Late(worker) => {
                 self.closing = RelayClosing::Late(worker);
-                Some(Err(desktop::lifecycle::CleanupError::Deadline))
+                Some(Err(RELAY_STOP_FAILED))
             }
             RelayClosing::Running { worker, .. } => {
-                let result = worker.join().map_err(|_| {
-                    eprintln!("relay_stop_failed: relay_close_panicked");
-                    desktop::lifecycle::CleanupError::Poll
-                });
+                let result = match worker.join() {
+                    Ok(Ok(())) => Ok(()),
+                    // Lane B, B5/QV: the joined Mac's work service still holds a stage (its
+                    // close printed `packaged_work_cleanup_unproven:<code>`).
+                    Ok(Err(_)) => Err(desktop::lifecycle::CleanupError::Unproven(
+                        "member_work_cleanup_unproven",
+                    )),
+                    Err(_) => {
+                        eprintln!("relay_stop_failed: relay_close_panicked");
+                        Err(desktop::lifecycle::CleanupError::Poll)
+                    }
+                };
                 self.closing = RelayClosing::Done(result);
                 Some(result)
             }

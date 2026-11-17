@@ -261,9 +261,13 @@ fn quit_outside_the_serving_step_releases_a_blocked_work_call_at_once() {
         assert!(stopper.1.send(()).is_ok(), "the blocked work call listens");
     }));
     let mut close = RunClose::new(config.clone());
+    let began = Instant::now();
     close.begin();
-    // Synchronously within `begin`: the run's Stop first, then the work stop.
-    let at_begin = seen.try_recv();
+    // As Quit begins: the run's Stop first, then the work stop. Lane B, B5/QV c (row 44): the
+    // workflow Stop runs on its own thread (`packaged-workflow-stop`), so a Stop that never returns
+    // cannot hold the window; the work stop is still issued at once, not after `run.join(60)`.
+    let at_begin = seen.recv_timeout(span(BudgetId::OwnerPoll).unwrap());
+    let issued_within = began.elapsed();
     let until = Instant::now() + patience();
     let closed = loop {
         if let Some(result) = close.poll() {
@@ -279,7 +283,7 @@ fn quit_outside_the_serving_step_releases_a_blocked_work_call_at_once() {
     assert_eq!(
         at_begin,
         Ok(Some(json!("stopping"))),
-        "Quit stops the workflow as it begins, after the run's Stop"
+        "Quit stops the workflow as it begins, after the run's Stop (waited {issued_within:?})"
     );
     assert!(matches!(closed, Some(Ok(()))), "Quit ended the run");
     assert_eq!(last["state"], "stopped", "{last}");
