@@ -130,7 +130,24 @@ pub fn follow(
             NetworkChoice(Some((*ip, across(policy)))),
         )),
         WorkNetwork::Fixed(NetworkChoice(None)) => Err(UNAVAILABLE),
-        WorkNetwork::Across { .. } => Ok(configured.clone()),
+        WorkNetwork::Across { .. } => Ok(WorkNetwork::Across {
+            reach: relay.clone(),
+            portmapping,
+        }),
+    }
+}
+/// Lane XB patch 3 (REVIEW XB2-01): after resolution, a run signed across networks must have
+/// resolved to exactly that mode at the signed relay; anything else (no usable interface, an
+/// ambiguous or VPN selection, an unreadable one: a loopback-only result) is the named refusal
+/// [`UNAVAILABLE`], never a loopback-only service. A same-network run keeps its deliberate
+/// local-only behaviour.
+pub fn bound_as_signed(signed: &RunReach, choice: &NetworkChoice) -> Result<(), &'static str> {
+    match signed {
+        RunReach::SameNetwork => Ok(()),
+        RunReach::Relay(url) => match &choice.0 {
+            Some((_, policy)) if policy.relay() == Some(url) => Ok(()),
+            _ => Err(UNAVAILABLE),
+        },
     }
 }
 /// The owner's choice for the run starting now, in its signed form (its relay: this Mac's).

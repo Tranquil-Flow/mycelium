@@ -82,6 +82,8 @@ impl Network {
             resolved.transport,
             signed.name()
         );
+        // Lane XB patch 3 (REVIEW XB2-01): the bound mode is the signed mode, or a named refusal.
+        reach::bound_as_signed(&signed, &resolved.choice)?;
         Ok(resolved.choice)
     }
     /// The configured work transport (not resolved).

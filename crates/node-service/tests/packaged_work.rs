@@ -339,6 +339,12 @@ struct ReachMember {
 #[cfg(feature = "desktop-shell")]
 impl ReachMember {
     fn new() -> Self {
+        Self::reading(api::lan_interface::Selection::Lan(std::net::IpAddr::from([
+            127, 0, 0, 1,
+        ])))
+    }
+    /// A joined Mac whose reading of its interfaces answers `selection` every time.
+    fn reading(selection: api::lan_interface::Selection) -> Self {
         use node_service::{
             packaged_network::{MemberSeams, Network, NetworkConfig, PackagedMember},
             packaged_run::Authority,
@@ -366,7 +372,7 @@ impl ReachMember {
                     ..Default::default()
                 },
                 work_network: WorkNetwork::Read(
-                    Arc::new(move || api::lan_interface::Selection::Lan(loopback)),
+                    Arc::new(move || selection.clone()),
                     LanPolicy::with_explicit(vec![loopback]).unwrap(),
                 ),
                 relay: Reach::Hermetic("http://127.0.0.1:1".parse().unwrap()),
@@ -546,4 +552,61 @@ fn a_joined_mac_whose_relay_is_unreachable_refuses_by_name_before_announcing_rea
         "bounded: {elapsed:?}"
     );
     m.close();
+}
+/// Lane XB patch 3 (REVIEW XB2-01, decisions D1/D3): a run the owner signed across networks
+/// never becomes a loopback-only work service on the joined Mac. Whatever reading of its
+/// interfaces leaves this Mac without a usable network (no private address, an ambiguous / VPN
+/// selection, only bridge interfaces), the signed relay mode cannot be bound: the joined Mac
+/// refuses `work_network_unavailable` on its card and in its report to the owner, binds nothing
+/// and publishes no work endpoint (never a silent local-only service).
+#[cfg(feature = "desktop-shell")]
+#[test]
+fn a_signed_relay_run_never_binds_a_loopback_only_service_on_the_joined_mac() {
+    use api::{lan_interface, run_exchange::work_network::RunReach};
+    for reason in [
+        lan_interface::NO_PRIVATE_ADDRESS,
+        lan_interface::AMBIGUOUS_PRIVATE_INTERFACES,
+        lan_interface::ONLY_BRIDGE_INTERFACES,
+        lan_interface::INTERFACES_UNREADABLE,
+    ] {
+        let mut m = ReachMember::reading(lan_interface::Selection::LocalOnly(reason));
+        // Its own relay (the test's dead loopback port): the signed relay is this Mac's.
+        m.p.seed
+            .exchange
+            .set_work_network(RunReach::Relay("http://127.0.0.1:1".parse().unwrap()));
+        m.tick();
+        let (reach_status, card) = m.status();
+        assert_eq!(
+            reach_status["error"], "work_network_unavailable",
+            "{reason}: {reach_status}"
+        );
+        assert_eq!(
+            reach_status["active"],
+            serde_json::Value::Null,
+            "{reason}: {reach_status}"
+        );
+        assert_eq!(card["state"], "error", "{reason}: {card}");
+        assert_eq!(card["detail"], "work_network_unavailable", "{reason}: {card}");
+        let report = m.report();
+        assert_eq!(
+            (report["state"].as_str(), report["detail"].as_str()),
+            (Some("error"), Some("work_network_unavailable")),
+            "{reason}: {report}"
+        );
+        assert!(
+            m.p.seed
+                .work_members
+                .get(
+                    &m.p.seed.coordinator,
+                    m.p.session.node_id(),
+                    m.p.owner.public(),
+                    "run-s4cb2",
+                    "dep-s4cb2",
+                    &|_| true,
+                )
+                .is_err(),
+            "{reason}: no work endpoint is published"
+        );
+        m.close();
+    }
 }
