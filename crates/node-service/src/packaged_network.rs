@@ -136,6 +136,9 @@ pub struct Network {
     /// the run's chat service with the relay's client key (lane CHATS item 2). `None` until the
     /// composition gives one (`DesktopServices::with_chat_run`).
     relay_chat: Mutex<Option<RichHandler>>,
+    /// The owner run's fields (`DemoApp.local_contributor`), bound by the packaged run host: the
+    /// relay restart refuses to relocate the seed under an enrolled contributor (lane B, B-01).
+    run_fields: Mutex<std::sync::Weak<Mutex<api::owner_ports::RunFields>>>,
 }
 fn lock<T>(cell: &Mutex<T>) -> MutexGuard<'_, T> {
     // Plain values and handles: a panicked holder cannot leave them half-written.
@@ -182,7 +185,18 @@ impl Network {
             work_closed: AtomicBool::new(false),
             serving: std::sync::Arc::new(AtomicBool::new(false)),
             relay_chat: Mutex::new(None),
+            run_fields: Mutex::new(std::sync::Weak::new()),
         })
+    }
+    /// The owner run's fields this host's relay reads for `local_contributor` (lane B, B-01).
+    pub fn bind_run_fields(&self, run: &Arc<Mutex<api::owner_ports::RunFields>>) {
+        *lock(&self.run_fields) = Arc::downgrade(run);
+    }
+    /// `self.local_contributor is not None`: the owner's contributor is enrolled (its state is
+    /// present, whether or not a renewal has its Session out).
+    pub fn local_contributor_present(&self) -> bool {
+        let run = lock(&self.run_fields).upgrade();
+        run.is_some_and(|run| lock(&run).contributor.is_some())
     }
     /// The chat the relay's `/chat` and `/chat/api/*` answer from (`bind_chat`, app.py:1073-1077),
     /// bound at every relay start ([`EndpointHost::bind_public_routes`]). The packaged composition
@@ -574,6 +588,9 @@ impl EndpointHost for Endpoint<'_> {
         proxy.bind_chat(self.network.relay_chat());
     }
     /// `_materialize_pending_windows`: codes asked for before the relay exist from now on.
+    fn local_contributor_present(&self) -> bool {
+        self.network.local_contributor_present()
+    }
     fn materialize_pending_windows(&mut self) {
         let (windows, origin, seed) = {
             let a = lock(&self.authority);

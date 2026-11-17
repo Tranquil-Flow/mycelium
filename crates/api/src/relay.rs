@@ -1638,6 +1638,12 @@ pub trait EndpointHost {
     fn bind_public_routes(&mut self, proxy: &Arc<Proxy>);
     /// `_materialize_pending_windows`.
     fn materialize_pending_windows(&mut self);
+    /// `getattr(self, 'local_contributor', None) is not None`: the owner's own contributor is
+    /// enrolled (whatever its Session slot holds while a renewal has it out). A host without one
+    /// answers `false`.
+    fn local_contributor_present(&self) -> bool {
+        false
+    }
 }
 
 /// `DemoApp.public_relay` and the relay-related methods of the app.
@@ -1883,6 +1889,25 @@ impl OwnerRelay {
         } else {
             body.clone()
         };
+        // app.py:1451-1453: a present contributor refuses any restart that would relocate the
+        // seed it is enrolled on (lane B review B-01): only an external restart on the origin the
+        // retained authority answers on may proceed, judged on the merged spec, before anything
+        // is closed, configured, signed or reopened.
+        if host.local_contributor_present() {
+            let unchanged = external
+                && host.configured_public_origin().is_some_and(|configured| {
+                    crate::join_link::validate_external_origin(
+                        spec.get("public_origin").unwrap_or(&Value::Null),
+                    )
+                    .is_ok_and(|origin| origin == configured)
+                });
+            if !unchanged {
+                return Err(PublicError::new(
+                    400,
+                    "network_stop_local_contributor_required",
+                ));
+            }
+        }
         if external && !(spec.contains_key("public_origin") && spec.contains_key("proxy_port")) {
             return Err(PublicError::new(400, "relay_origin_invalid"));
         }

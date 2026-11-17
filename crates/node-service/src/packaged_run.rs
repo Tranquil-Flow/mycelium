@@ -235,12 +235,14 @@ impl PackagedRun {
         model: ModelHooks,
         sidecar: Option<PathBuf>,
     ) -> Self {
+        let run = Arc::new(Mutex::new(RunFields::default()));
+        network.bind_run_fields(&run);
         Self {
             authority,
             network,
             node,
             model: Arc::new(model),
-            run: Arc::default(),
+            run,
             lifecycle: Arc::default(),
             custody: Arc::default(),
             sidecar,
