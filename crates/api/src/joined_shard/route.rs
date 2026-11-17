@@ -403,6 +403,38 @@ pub fn token_event(path: &Path, token_index: u64, token_id: u32) -> Value {
     json!({"request_id":path.request_id,"path_id":path.path_id,"path_attempt":path.path_attempt,
         "token_index":token_index,"token_id":token_id,"sampling_counter":token_index + 1})
 }
+/// Lane A, release blocker B6 (ledger row 87 R2): the Router `FailureReport` a v2 stage sends
+/// its owner when it can no longer serve the request in flight (a step failed, or its own
+/// consent ended mid-answer). `reason` is the member's closed code; the owner names the answer's
+/// end from it instead of waiting out a hop deadline.
+pub fn failure_report(path: &Path, token_index: u64, stage_index: usize, reason: &str) -> Value {
+    json!({"request_id":path.request_id,"path_id":path.path_id,"path_attempt":path.path_attempt,
+        "token_index":token_index,"scope":"stage","reason":reason,
+        "placement_id":format!("stage-{stage_index}")})
+}
+/// The member code a stage reported, the closed owner code the answer ends with: a spent
+/// command grant or consent wall ends the answer `joined_route_member_consent_exhausted`, any
+/// other stage failure `joined_route_stage_failed`. `None`: not a FailureReport of `path`.
+pub fn reported_failure(frame: &router_wire::DecodedFrame, path: &Path) -> Option<&'static str> {
+    let b = frame.body();
+    if frame.message_type() != "FailureReport"
+        || b["request_id"] != path.request_id.as_str()
+        || b["path_id"] != path.path_id.as_str()
+        || b["path_attempt"] != path.path_attempt
+        || b["scope"] != "stage"
+    {
+        return None;
+    }
+    Some(match b["reason"].as_str() {
+        Some("joined_native_consent_exhausted") => MEMBER_CONSENT_EXHAUSTED,
+        _ => STAGE_FAILED,
+    })
+}
+/// The owner's code for an answer a stage ended because its consent (command grant or wall) was
+/// spent: the route leaves service under this name.
+pub const MEMBER_CONSENT_EXHAUSTED: &str = "joined_route_member_consent_exhausted";
+/// The owner's code for an answer a stage ended for any other reported failure.
+pub const STAGE_FAILED: &str = "joined_route_stage_failed";
 /// Normalized body equality, so defaulted fields cannot hide a mismatch.
 pub fn body_matches(frame: &router_wire::DecodedFrame, kind: &str, expected: &Value) -> bool {
     frame.message_type() == kind

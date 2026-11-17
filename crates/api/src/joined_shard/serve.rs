@@ -190,6 +190,53 @@ fn stop(compute: &mut dyn StageCompute, interrupted: bool) -> Outcome<Value> {
         .map_err(|e| e.0.to_owned())
 }
 /// Serve one owner-signed route epoch with this member's verified compute.
+/// Lane A (B6): tell the owner, by name, that this stage ends the request in flight (`path`, at
+/// token `t`): a confirmed `FailureReport` on the data connection, the next frame the owner
+/// reads from this stage. Best effort, bounded by the hop wait: the compute is already released,
+/// and an owner that is gone still gets its hop deadline.
+#[allow(clippy::too_many_arguments)]
+fn report_failure(
+    sender: &mut impl transport::Transport,
+    clock: &HostClock,
+    base: ConnectionFence,
+    sent: &mut u128,
+    path: &route::Path,
+    t: u64,
+    index: usize,
+    reason: &str,
+    wait: Duration,
+) {
+    let frame = match router_wire::encode_frame(
+        "FailureReport",
+        &route::failure_report(path, t, index, reason),
+        &[],
+    ) {
+        Ok(frame) => frame,
+        Err(e) => {
+            eprintln!("serve: failure report not encoded: {e:?}");
+            return;
+        }
+    };
+    let deadline = match mono(clock, wait) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("serve: failure report deadline: {e}");
+            return;
+        }
+    };
+    let request = Exchange {
+        peer: base,
+        channel: Channel::Router,
+        message_id: sent.to_be_bytes(),
+        payload: frame,
+        deadline,
+        maximum_response_bytes: protocol::remote::REMOTE_MAX_FRAME_BYTES,
+    };
+    match transport::exchange(sender, &request, clock) {
+        Ok(_) => *sent += 1,
+        Err(e) => eprintln!("serve: failure report not delivered ({reason}): {e:?}"),
+    }
+}
 pub fn serve(
     s: &Serve<'_, '_>,
     compute: &mut dyn StageCompute,
@@ -502,7 +549,6 @@ pub fn serve(
                     };
                 if let Some((teardown, code)) = ending {
                     cancel.store(true, Ordering::SeqCst);
-                    data_cancel.request_cancel();
                     let native_stop = match released.take() {
                         Some(v) => v,
                         None => stop(compute, interrupted)?,
@@ -510,6 +556,26 @@ pub fn serve(
                     if failure.is_none() {
                         failure = code;
                     }
+                    // B6: a request still in flight when this member's own consent ended
+                    // (command grant, wall, membership) ends now, by name: the owner reads the
+                    // report instead of waiting out its hop deadline. Compute is released first;
+                    // the data connection is cancelled only after the report.
+                    if teardown == "member_consent_ended"
+                        && let (Some(p), Some(reason)) = (path.as_ref(), failure.as_deref())
+                    {
+                        report_failure(
+                            &mut sender,
+                            s.clock,
+                            base,
+                            &mut sent,
+                            p,
+                            t,
+                            index,
+                            reason,
+                            hop_wait(t)?,
+                        );
+                    }
+                    data_cancel.request_cancel();
                     if teardown == "operator_cancelled" {
                         return Ok(
                             json!({"teardown":"operator_cancelled","native":native_stop,"failure":failure}),
@@ -663,8 +729,27 @@ pub fn serve(
                         {
                             // Release compute now; keep waiting for the owner's
                             // teardown so it can settle against an ACK.
-                            failure = Some(code);
+                            failure = Some(code.clone());
                             released = Some(stop(compute, interrupted)?);
+                            // B6: a step refused because this member's command grant or
+                            // consent wall is spent: v2 tells the owner by name at once.
+                            // Other step failures keep the owner's hop deadline (unchanged).
+                            if multi
+                                && code == "joined_native_consent_exhausted"
+                                && let Some(p) = path.as_ref()
+                            {
+                                report_failure(
+                                    &mut sender,
+                                    s.clock,
+                                    base,
+                                    &mut sent,
+                                    p,
+                                    t,
+                                    index,
+                                    &code,
+                                    hop_wait(t)?,
+                                );
+                            }
                         }
                     }
                     Message::Teardown(body, received, done, acked) if multi => {

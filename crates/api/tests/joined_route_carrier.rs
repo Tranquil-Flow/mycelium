@@ -3781,11 +3781,27 @@ fn a_stage_whose_command_grant_runs_out_mid_answer_ends_it_by_name_and_leaves_se
         "the next chat is refused by the same name"
     );
     assert!(r.until_closed(), "the epoch's carrier closed: {}", r.state());
+    let shown = r.state();
+    {
+        let o = r.handle.state.lock().unwrap();
+        // The exhausted member returned at once (compute released), so the owner's first
+        // PathCancellation to it finds its link closed; the bounded re-dial is ACKed.
+        assert!(
+            o.stages.iter().all(|s| s.acknowledged_ms.is_some()),
+            "the owner's teardown is proven by every member's ACK: {shown}"
+        );
+    }
     let logs: Vec<_> = r.members.iter().map(|m| m.log.clone()).collect();
     let reports = r.finish();
     assert_eq!(
         reports[1]["failure"], "joined_native_consent_exhausted",
         "{:?}",
+        reports[1]
+    );
+    assert_eq!(reports[1]["teardown"], "member_consent_ended", "{:?}", reports[1]);
+    assert!(
+        reports[1]["redial_ack_ms"].is_number(),
+        "the exhausted member ACKed the owner's re-dial: {:?}",
         reports[1]
     );
     for (stage, log) in logs.iter().enumerate() {
