@@ -99,8 +99,20 @@ fn portmapping_is_off_unless_the_cross_network_policy_asks_for_it() {
 fn status_names_a_portmapped_direct_address() {
     let at = |s: &str| s.parse::<std::net::SocketAddr>().unwrap();
     let (bound, qad) = ([at("192.168.1.20:51000")], [at("203.0.113.9:40001")]);
-    assert_eq!(direct_addr_kind(at("192.168.1.20:51000"), &bound, &qad, true), "local");
-    assert_eq!(direct_addr_kind(at("203.0.113.9:40001"), &bound, &qad, true), "qad");
-    assert_eq!(direct_addr_kind(at("203.0.113.9:51000"), &bound, &qad, true), "portmapped");
-    assert_eq!(direct_addr_kind(at("203.0.113.9:51000"), &bound, &qad, false), "public");
+    assert_eq!(
+        direct_addr_kind(at("192.168.1.20:51000"), &bound, &qad, true),
+        "local"
+    );
+    assert_eq!(
+        direct_addr_kind(at("203.0.113.9:40001"), &bound, &qad, true),
+        "qad"
+    );
+    assert_eq!(
+        direct_addr_kind(at("203.0.113.9:51000"), &bound, &qad, true),
+        "portmapped"
+    );
+    assert_eq!(
+        direct_addr_kind(at("203.0.113.9:51000"), &bound, &qad, false),
+        "public"
+    );
 }

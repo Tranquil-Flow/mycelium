@@ -89,12 +89,21 @@ fn the_cross_network_choice_relaxes_only_the_address_class() {
     let across = across();
     assert_eq!(across.reach(), "relay");
     assert_eq!(across.relay(), Some(&dead_relay()));
-    for public in ["8.8.8.8", "100.84.252.4", "203.0.113.9", "127.0.0.1", "2001:db8::1"] {
+    for public in [
+        "8.8.8.8",
+        "100.84.252.4",
+        "203.0.113.9",
+        "127.0.0.1",
+        "2001:db8::1",
+    ] {
         assert!(!same.allows(ip(public)), "same network: {public}");
         assert!(across.allows(ip(public)), "across networks: {public}");
     }
     for private in ["10.1.2.3", "172.20.10.4", "192.168.1.5", "fd12:3456::1"] {
-        assert!(same.allows(ip(private)) && across.allows(ip(private)), "{private}");
+        assert!(
+            same.allows(ip(private)) && across.allows(ip(private)),
+            "{private}"
+        );
     }
     // Never an address, on any network.
     for never in ["0.0.0.0", "255.255.255.255", "224.0.0.1", "::", "ff02::1"] {
@@ -130,7 +139,13 @@ fn a_peer_on_another_network_is_refused_on_the_same_network_rule_and_reached_acr
     let clock = Mono(Instant::now());
     // Today's rule: an endpoint cannot even bind outside the private-LAN class ...
     assert_eq!(
-        bind(&rt, &clock, &SecretKey::generate(), LanPolicy::private_only()).err(),
+        bind(
+            &rt,
+            &clock,
+            &SecretKey::generate(),
+            LanPolicy::private_only()
+        )
+        .err(),
         Some(Error::Authentication)
     );
     let (server_key, client_key) = (SecretKey::generate(), SecretKey::generate());
@@ -181,7 +196,11 @@ fn a_peer_on_another_network_is_refused_on_the_same_network_rule_and_reached_acr
             recv.read_to_end(64).await.unwrap()
         });
         assert_eq!(echoed, vec![7u8; 32]);
-        assert_eq!(accepted.join().unwrap(), 256 * 1024, "a shard-sized chunk arrived");
+        assert_eq!(
+            accepted.join().unwrap(),
+            256 * 1024,
+            "a shard-sized chunk arrived"
+        );
         c.close(0u32.into(), b"done");
     });
     close(&mut client, &clock);
@@ -201,7 +220,11 @@ fn an_unadmitted_peer_is_still_refused_across_networks_and_counted() {
     );
     let mut server = bind(&rt, &clock, &server_key, across()).unwrap();
     server.admit_peer_ids(&[admitted.public()]).unwrap();
-    assert_eq!(server.lan_dropped_datagrams(), Some(0), "no refused handshake yet");
+    assert_eq!(
+        server.lan_dropped_datagrams(),
+        Some(0),
+        "no refused handshake yet"
+    );
     let address = server.address().unwrap();
     let signed = EndpointAddr::from_parts(
         address.id,
@@ -225,7 +248,11 @@ fn an_unadmitted_peer_is_still_refused_across_networks_and_counted() {
         }
         assert_eq!(refused.join().unwrap(), Some(Error::Authentication));
     });
-    assert_eq!(server.lan_dropped_datagrams(), Some(1), "the refused handshake is counted");
+    assert_eq!(
+        server.lan_dropped_datagrams(),
+        Some(1),
+        "the refused handshake is counted"
+    );
     // Unusable signed addresses: refused before any packet, counted as refused_out.
     assert_eq!(intruder.lan_refused_datagrams(), Some(0));
     for unusable in [
@@ -235,7 +262,11 @@ fn an_unadmitted_peer_is_still_refused_across_networks_and_counted() {
     ] {
         assert_eq!(
             intruder
-                .connect(&unusable, &clock, deadline(&clock, B::SidecarLocalHandshake))
+                .connect(
+                    &unusable,
+                    &clock,
+                    deadline(&clock, B::SidecarLocalHandshake)
+                )
                 .err(),
             Some(Error::Authentication)
         );
@@ -244,7 +275,6 @@ fn an_unadmitted_peer_is_still_refused_across_networks_and_counted() {
     close(&mut intruder, &clock);
     close(&mut server, &clock);
 }
-
 
 /// Lane XB3: across networks the relay is the rendezvous. With it unreachable the run fails
 /// closed with the explicit `relay_unreachable` code, inside its bound, and never falls back to
@@ -267,7 +297,11 @@ fn an_unreachable_relay_fails_closed_with_relay_unreachable() {
     );
     // Nothing else to fall back to: the address names exactly the one (dead) relay.
     assert_eq!(
-        host.address().unwrap().relay_urls().cloned().collect::<Vec<_>>(),
+        host.address()
+            .unwrap()
+            .relay_urls()
+            .cloned()
+            .collect::<Vec<_>>(),
         vec![dead_relay()]
     );
     close(&mut host, &clock);

@@ -224,7 +224,13 @@ mod tests {
         )
         .unwrap();
         let mapped = effective(&dir, &WorkNetwork::ThisMac).resolution_with(|| reading("10.0.0.7"));
-        assert!(mapped.choice.0.as_ref().is_some_and(|(_, p)| p.portmapping()));
+        assert!(
+            mapped
+                .choice
+                .0
+                .as_ref()
+                .is_some_and(|(_, p)| p.portmapping())
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

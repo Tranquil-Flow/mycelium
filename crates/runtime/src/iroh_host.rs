@@ -274,7 +274,10 @@ pub fn relay_reachable(interface: IpAddr, policy: &LanPolicy) -> Result<(), &'st
     let clock = crate::iroh_cross::ProbeClock::default();
     let after = |id: BudgetId| -> Result<MonoInstant, &'static str> {
         let span = id.span(Entries::ZERO).map_err(|_| RELAY_UNREACHABLE)?;
-        clock.monotonic().checked_add(span).map_err(|_| RELAY_UNREACHABLE)
+        clock
+            .monotonic()
+            .checked_add(span)
+            .map_err(|_| RELAY_UNREACHABLE)
     };
     let mut host = LoopbackHost::bind_lan(
         &runtime,

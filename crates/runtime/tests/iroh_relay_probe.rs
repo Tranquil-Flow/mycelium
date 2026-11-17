@@ -98,10 +98,20 @@ fn probe_two_endpoints_exchange_a_shard_chunk_through_the_mycelium_relay_only() 
             })
         });
         let began = Instant::now();
-        let c = client.connect_channel(&address, Channel::ArtifactChunk, &clock, deadline(&clock, 30))
+        let c = client
+            .connect_channel(
+                &address,
+                Channel::ArtifactChunk,
+                &clock,
+                deadline(&clock, 30),
+            )
             .expect("connected through the relay");
         let connected_ms = began.elapsed().as_millis();
-        assert_eq!(selected_path(&c), Some("relay"), "the relay is the only path");
+        assert_eq!(
+            selected_path(&c),
+            Some("relay"),
+            "the relay is the only path"
+        );
         let began = Instant::now();
         let acknowledged = rt.block_on(async {
             let (mut send, mut recv) = c.open_bi().await.unwrap();
@@ -112,7 +122,10 @@ fn probe_two_endpoints_exchange_a_shard_chunk_through_the_mycelium_relay_only() 
             recv.read_to_end(8).await.unwrap()
         });
         let transfer_ms = began.elapsed().as_millis();
-        assert_eq!(acknowledged, ((CHUNK * CHUNKS) as u64).to_be_bytes().to_vec());
+        assert_eq!(
+            acknowledged,
+            ((CHUNK * CHUNKS) as u64).to_be_bytes().to_vec()
+        );
         c.close(0u32.into(), b"done");
         (connected_ms, transfer_ms, served.join().unwrap())
     });

@@ -90,7 +90,11 @@ fn a_second_epoch_to_the_same_peer_reuses_the_established_path_without_a_rendezv
         let ms = began.elapsed().as_millis();
         (c, ms, accepted.join().unwrap())
     });
-    assert_eq!(selected_path(&first), Some("direct"), "epoch 1 runs on the IP path");
+    assert_eq!(
+        selected_path(&first),
+        Some("direct"),
+        "epoch 1 runs on the IP path"
+    );
     drop(served);
     // The single-use epoch ends: its connection closes (the endpoint and its peer state stay).
     first.close(0u32.into(), b"epoch_done");
@@ -138,7 +142,10 @@ fn a_second_epoch_to_the_same_peer_reuses_the_established_path_without_a_rendezv
     eprintln!("xb4_path_reuse epoch1_ms={first_ms} epoch2_ms={second_ms} path={socket}");
     second.close(0u32.into(), b"done");
     drop((second, served));
-    client.close(&clock, deadline(&clock, B::RouterClose)).unwrap();
-    server.close(&clock, deadline(&clock, B::RouterClose)).unwrap();
+    client
+        .close(&clock, deadline(&clock, B::RouterClose))
+        .unwrap();
+    server
+        .close(&clock, deadline(&clock, B::RouterClose))
+        .unwrap();
 }
-

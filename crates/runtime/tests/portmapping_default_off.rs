@@ -31,7 +31,11 @@ fn every_endpoint_builder_in_the_workspace_sets_portmapping_explicitly() {
     let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let mut files = Vec::new();
     sources(&crates, &mut files);
-    assert!(files.len() > 100, "scanned the workspace crates: {}", files.len());
+    assert!(
+        files.len() > 100,
+        "scanned the workspace crates: {}",
+        files.len()
+    );
     let mut builders = 0;
     let mut silent = Vec::new();
     for file in files {

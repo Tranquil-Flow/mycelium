@@ -154,13 +154,15 @@ impl WorkNetwork {
             }
             Self::ThisMac => (read(), LanPolicy::private_only()),
             Self::Read(reader, policy) => (reader(), policy.clone()),
-            Self::Across { reach, portmapping } => match reach::across_policy(reach, *portmapping) {
-                Some(policy) => (read(), policy),
-                None => (
-                    api::lan_interface::Selection::LocalOnly("relay_invalid"),
-                    LanPolicy::private_only(),
-                ),
-            },
+            Self::Across { reach, portmapping } => {
+                match reach::across_policy(reach, *portmapping) {
+                    Some(policy) => (read(), policy),
+                    None => (
+                        api::lan_interface::Selection::LocalOnly("relay_invalid"),
+                        LanPolicy::private_only(),
+                    ),
+                }
+            }
         };
         match selection {
             api::lan_interface::Selection::Lan(ip) => Resolved {

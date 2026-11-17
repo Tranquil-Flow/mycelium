@@ -358,7 +358,11 @@ impl Work {
         // run with a joined Mac on it by name, as at the base.
         let resolved = resolve();
         // Lane XB2: across networks the joined Mac is not on this LAN; the relay is the path.
-        let Some((from, _)) = resolved.choice.0.clone().filter(|_| resolved.reach != "relay")
+        let Some((from, _)) = resolved
+            .choice
+            .0
+            .clone()
+            .filter(|_| resolved.reach != "relay")
         else {
             eprintln!("local_network_probe_skipped:{}", resolved.transport);
             return Ok(());
