@@ -241,7 +241,7 @@ impl MemberShard {
                 &root.join(REFUND),
                 private_state::private_json_limit().map_err(state)?,
             )
-            .map_err(state)?
+            .map_err(|e| named_state(&root.join(REFUND), e))?
             .ok_or(fail("compiler_storage_reservation_changed"))?;
             row = saved
                 .get("reservation")
@@ -261,7 +261,7 @@ impl MemberShard {
             &root.join(RECORD),
             private_state::private_json_limit().map_err(state)?,
         )
-        .map_err(state)?;
+        .map_err(|e| named_state(&root.join(RECORD), e))?;
         let saved = Value::Object(saved.ok_or(fail("member_shard_pins_changed"))?);
         record["file_identity"] = saved["file_identity"].clone();
         record["stage_identity"] = saved["stage_identity"].clone();

@@ -31,6 +31,20 @@ fn state(error: private_state::StateError) -> Error {
 /// what it should (lane A, B11 (a)).
 #[cfg(test)]
 pub(crate) static DIAGNOSTICS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+/// Lane A, B11 (a) (owner ruling 4 a, ledger row 77): a private state file this module cannot
+/// read is NAMED in the log beside its closed code (`authority_state_invalid:<path>`); the code
+/// the run reports stays the closed one. Row 77's indented ledger said only "authority state
+/// invalid", and finding which file took a whole session.
+fn named_state(path: &Path, error: private_state::StateError) -> Error {
+    let line = format!("{}:{}", error.0, path.display());
+    eprintln!("{line}");
+    #[cfg(test)]
+    DIAGNOSTICS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(line);
+    state(error)
+}
 
 pub fn validate_hosts(document: &Value, facts: usize) -> Result<()> {
     let rows = document["observations"]
@@ -515,8 +529,9 @@ impl InputArtifact {
         }
         let max = private_state::private_json_limit().map_err(state)?;
         for (name, expected) in &self.documents {
-            let actual = private_state::load(&self.root.join(name), max)
-                .map_err(state)?
+            let path = self.root.join(name);
+            let actual = private_state::load(&path, max)
+                .map_err(|e| named_state(&path, e))?
                 .map(Value::Object)
                 .ok_or(Error("compiler_inputs_changed"))?;
             // The private writer canonicalizes numeric spellings (e.g. a real
@@ -787,13 +802,11 @@ fn storage_ledger(runs: &Path) -> Result<(fs::File, Value)> {
     }
     lock.try_lock()
         .map_err(|_| Error("compiler_storage_busy"))?;
-    let ledger = private_state::load(
-        &runs.join(STORAGE_LEDGER),
-        private_state::private_json_limit().map_err(state)?,
-    )
-    .map_err(state)?
-    .map(Value::Object)
-    .unwrap_or_else(|| json!({"protocol":"mycelium.compiler_storage.v1","entries":{}}));
+    let path = runs.join(STORAGE_LEDGER);
+    let ledger = private_state::load(&path, private_state::private_json_limit().map_err(state)?)
+        .map_err(|e| named_state(&path, e))?
+        .map(Value::Object)
+        .unwrap_or_else(|| json!({"protocol":"mycelium.compiler_storage.v1","entries":{}}));
     if ledger["protocol"] != "mycelium.compiler_storage.v1" || !ledger["entries"].is_object() {
         return Err(Error("compiler_storage_ledger_invalid"));
     }
