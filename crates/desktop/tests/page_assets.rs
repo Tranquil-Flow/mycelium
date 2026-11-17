@@ -466,3 +466,43 @@ fn the_network_section_says_what_crosses_which_path() {
         "no unqualified privacy promise"
     );
 }
+
+/// Lane VL (owner: "it should show the version being used somewhere. minor thing but still,
+/// worth having in"): one small muted line in the page footer, `Mycelium <version>` and, when the
+/// status names it, ` · build <first 8 of the source revision>`, read from `status.app_version`.
+/// Plain text (`textContent`), so it is selectable and read by assistive technology; the line's
+/// height is reserved so filling it moves nothing.
+#[test]
+fn the_page_footer_shows_the_running_app_version_from_status() {
+    let footer = &INDEX_HTML[INDEX_HTML.find("<footer>").expect("a footer")..];
+    let footer = &footer[..footer.find("</footer>").expect("a closed footer")];
+    assert!(
+        footer.contains(r#"<p id="app-version" class="app-version"></p>"#),
+        "index.html: the footer lacks the empty version line: {footer}"
+    );
+    let script = script_without_comments(APP_JS);
+    let begin = script.find("function renderAppVersion(").expect("app.js renders the version");
+    let body = &script[begin..begin + script[begin..].find("\n}").expect("a closed function")];
+    for needed in [
+        "value.app_version",
+        "$('app-version').textContent",
+        "`Mycelium ${",
+        " · build ${",
+        ".slice(0,8)",
+        "/^[0-9a-f]{40}$/",
+    ] {
+        assert!(body.contains(needed), "renderAppVersion lacks {needed}: {body}");
+    }
+    assert!(!body.contains("innerHTML"), "the version line is plain text");
+    let render = &script[script.find("function render(value) {").unwrap()..];
+    let render = &render[..render.find("\n}").unwrap()];
+    assert!(
+        render.contains("renderAppVersion(value);"),
+        "render() does not fill the version line"
+    );
+    const CSS: &str = include_str!("../assets/style.css");
+    assert!(
+        CSS.contains(".app-version{margin:6px 0 0;min-height:1.6em}"),
+        "style.css: the version line's height is not reserved"
+    );
+}

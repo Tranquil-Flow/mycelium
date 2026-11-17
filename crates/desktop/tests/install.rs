@@ -418,6 +418,54 @@ fn fresh_install_is_versioned_verified_linked_recorded_and_leaves_state_empty() 
     assert!(!cleared[0].starts_with(&bundle));
 }
 
+/// Lane VL (owner: "it should show the version being used somewhere"): the page's build line
+/// takes its source revision from the install record, read-only, and only when the record's
+/// current version is this build's own version AND the running executable is that version's
+/// installed copy. A copy run from anywhere else, or an install of another version, names no
+/// build rather than one that may not be the running one.
+#[test]
+fn the_running_build_is_named_only_for_this_versions_installed_copy() {
+    let revision = "0123456789abcdef0123456789abcdef01234567";
+    let tree = Tree::new();
+    let roots = tree.roots();
+    let elsewhere = tree.path("elsewhere/Mycelium.app/Contents/MacOS/mycelium");
+    put(&elsewhere, b"exe", 0o755);
+    // Nothing installed: no record, no build.
+    assert_eq!(install::running_source_revision(&roots, &elsewhere), None);
+
+    let bundle = make(&tree, &Pkg::new("own", desktop::bundle::VERSION));
+    install::install(&bundle, &roots, &ok().seams).unwrap();
+    let installed = roots
+        .version_dir(desktop::bundle::VERSION)
+        .join(install::PAYLOAD_DIRECTORY)
+        .join("Contents/MacOS/mycelium");
+    assert_eq!(
+        install::running_source_revision(&roots, &installed).as_deref(),
+        Some(revision)
+    );
+    // Launched through the Applications entry (a link into programs/<version>).
+    let entry = roots.application_entry().join("Contents/MacOS/mycelium");
+    assert_eq!(
+        install::running_source_revision(&roots, &entry).as_deref(),
+        Some(revision)
+    );
+    // The same build run from a downloaded bundle or a build folder is not the installed copy.
+    assert_eq!(install::running_source_revision(&roots, &elsewhere), None);
+    let downloaded = bundle.join(install::PAYLOAD_DIRECTORY).join("Contents/MacOS/mycelium");
+    assert_eq!(install::running_source_revision(&roots, &downloaded), None);
+
+    // Another version installed: its record describes that version's bytes, not this build.
+    let other = Tree::new();
+    let other_roots = other.roots();
+    let newer = make(&other, &Pkg::new("newer", "99.0.0"));
+    install::install(&newer, &other_roots, &ok().seams).unwrap();
+    let newer_exe = other_roots
+        .version_dir("99.0.0")
+        .join(install::PAYLOAD_DIRECTORY)
+        .join("Contents/MacOS/mycelium");
+    assert_eq!(install::running_source_revision(&other_roots, &newer_exe), None);
+}
+
 #[test]
 fn every_check_refuses_before_any_write() {
     type Case = (
