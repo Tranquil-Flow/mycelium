@@ -768,3 +768,47 @@ fn an_unreadable_storage_ledger_is_named_in_the_log() {
     let lines = DIAGNOSTICS.lock().unwrap().clone();
     assert!(lines.contains(&named), "{named} not in {lines:?}");
 }
+
+/// Lane A, B12 (ledger row 96), the same mechanism at this module's other `flock`s: a holder's
+/// lock description still held by a child this process forked (from fork to exec), after the
+/// holder itself let go. Modelled without a close-on-exec window in the parent: the holder's
+/// description is handed to `/bin/sleep 1` as its stdin, then the holder drops it.
+fn held_by_a_child(path: &Path) -> std::process::Child {
+    let holder = fs::File::open(path).unwrap();
+    holder.try_lock().unwrap();
+    let child = std::process::Command::new("/bin/sleep")
+        .arg("1")
+        .stdin(std::process::Stdio::from(holder.try_clone().unwrap()))
+        .spawn()
+        .unwrap();
+    drop(holder);
+    child
+}
+
+/// The storage ledger's lock (`compiler_storage_busy`, 2 of the first 30 full `api --lib` repeats
+/// after the member shard fix, under load ~17).
+#[test]
+fn a_ledger_lock_copy_still_held_by_a_forked_child_does_not_refuse_the_next_compile() {
+    let f = Fixture::new();
+    let runs = f.root.join("chain-runs");
+    directory(&runs).unwrap();
+    drop(storage_ledger(&runs).unwrap());
+    let mut child = held_by_a_child(&runs.join(STORAGE_LOCK));
+    let got = storage_ledger(&runs).map(drop).map_err(|e| e.0);
+    child.wait().unwrap();
+    assert_eq!(got, Ok(()), "a lock only a forked child's copy held refused the ledger");
+}
+
+/// A dead run's directory lock (the retirement pass read it as a live run: 1 of the same 30).
+#[test]
+fn a_dead_runs_lock_copy_still_held_by_a_forked_child_does_not_keep_it_live() {
+    let mut f = Fixture::new();
+    f.request.stage_sharded = true;
+    let mut dead = f.emit_run("dead");
+    dead.produce_stage_shards(&f.members, 0.0).unwrap();
+    drop(dead);
+    let mut child = held_by_a_child(&f.root.join("chain-runs").join("dead"));
+    let retirement = compiler_inputs::retire_dead_runs(&f.root).map(|r| r.retired);
+    child.wait().unwrap();
+    assert_eq!(retirement.map_err(|e| e.0), Ok(vec!["dead".to_owned()]));
+}
