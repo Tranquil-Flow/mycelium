@@ -184,8 +184,17 @@ function rung(label, value) {
   $('ladder').append(dt,dd);
 }
 let modelPointedAt=null;
+// Lane VL: the running app's version in the footer, from status.app_version. The build part is
+// shown only when the status names this installed copy's 40-hex source revision. Plain text.
+function renderAppVersion(value){
+  const v=value.app_version;
+  if(!v||typeof v.version!=='string'){$('app-version').textContent='';return;}
+  const rev=typeof v.source_revision==='string'&&/^[0-9a-f]{40}$/.test(v.source_revision)?v.source_revision:'';
+  $('app-version').textContent=`Mycelium ${v.version}`+(rev?` · build ${rev.slice(0,8)}`:'');
+}
 function render(value) {
   latest=value; connected=true; $('private').hidden=false;
+  renderAppVersion(value);
   const a=value.authority;
   const m=value.model_contract;
   $('model-contract').textContent=m ? `${m.model_id}\nRevision ${m.resolved_commit}\n${m.runtime_backend} · ${m.runtime_dtype} · ${m.runtime_quantization}\n${m.decoding} · seed ${m.sampling_seed}\nSelected contract only — no model loaded` : 'Model contract unavailable';

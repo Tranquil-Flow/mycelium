@@ -426,13 +426,7 @@ fn read_record(roots: &Roots) -> Result<Option<Rec>> {
     {
         return Err(untrusted());
     }
-    let mut bytes = Vec::new();
-    File::open(&path)
-        .and_then(|f| f.take(MAX_RECORD_BYTES + 1).read_to_end(&mut bytes))
-        .map_err(|_| untrusted())?;
-    if bytes.len() as u64 != meta.len() {
-        return Err(untrusted());
-    }
+    let bytes = read_checked(&path, &meta).ok_or_else(untrusted)?;
     let invalid = || Refusal("installation_record_invalid");
     let Ok(Value::Object(record)) = serde_json::from_slice::<Value>(&bytes) else {
         return Err(invalid());
@@ -441,6 +435,33 @@ fn read_record(roots: &Roots) -> Result<Option<Rec>> {
         return Err(invalid());
     }
     Ok(Some(record))
+}
+/// The record file whose path metadata `checked` was admitted, read through one descriptor (lane
+/// VL patch round 1, REVIEW-laneUI-astra VL-01): opened without following a link or waiting on a
+/// FIFO (`O_NOFOLLOW | O_NONBLOCK`), and read only when the opened object itself is that same
+/// single-link, owner-only regular file within the size bound, so a swap between the path check
+/// and the open is refused, never waited on. `None`: anything else.
+fn read_checked(path: &Path, checked: &fs::Metadata) -> Option<Vec<u8>> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .ok()?;
+    let opened = file.metadata().ok()?;
+    if !opened.file_type().is_file()
+        || (opened.dev(), opened.ino()) != (checked.dev(), checked.ino())
+        || opened.nlink() != 1
+        || opened.uid() != checked.uid()
+        || opened.mode() & 0o7777 != 0o600
+        || opened.len() > MAX_RECORD_BYTES
+    {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_RECORD_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (bytes.len() as u64 == opened.len()).then_some(bytes)
 }
 fn write_record(roots: &Roots, record: &Rec) -> Result<()> {
     let programs = roots.programs();
@@ -901,6 +922,43 @@ pub fn uninstall(roots: &Roots, seams: &Seams, delete_state: bool) -> Result<Val
     }))
 }
 
+/// The source revision of the running build, for the page's version line (lane VL): the
+/// `source_revision` the install record holds for its current version, only when that version
+/// is this build's own ([`crate::bundle::VERSION`]) and `executable` is that version's admitted
+/// installed copy (lane VL patch 1, REVIEW-laneUI-astra VL-02): the very executable file of
+/// `programs/<version>/Mycelium.app` (the same file, so launching through the Applications link,
+/// which points at that payload, still names it), whose version folder and payload are the
+/// installer's own plain folders, never a link to a copy elsewhere, and still have the digest the
+/// record holds (`installed_digest`, the check the installer itself uses to accept an installed
+/// copy). Read-only, no lock. Any doubt (no or untrusted record, another version, a copy run from
+/// elsewhere, a linked or changed copy, a revision that is not 40 lower-case hex digits) is
+/// `None`, never a guess. Reads the whole payload once when the executable is the installed one;
+/// the packaged host runs it off every request path (`node_service::desktop_host::AppRevision`).
+pub fn running_source_revision(roots: &Roots, executable: &Path) -> Option<String> {
+    let record = read_record(roots).ok()??;
+    let current = current_of(&record);
+    if version_of(current) != crate::bundle::VERSION {
+        return None;
+    }
+    let revision = field(current, "source_revision")
+        .filter(|r| r.len() == 40 && r.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))?;
+    let version_directory = roots.version_dir(crate::bundle::VERSION);
+    let running = fs::metadata(executable).ok()?;
+    let macos = version_directory
+        .join(PAYLOAD_DIRECTORY)
+        .join("Contents/MacOS");
+    let is_running = |name: &&str| {
+        fs::symlink_metadata(macos.join(name)).is_ok_and(|m| {
+            m.file_type().is_file() && (m.dev(), m.ino()) == (running.dev(), running.ino())
+        })
+    };
+    if !EXECUTABLES.iter().any(is_running) {
+        return None;
+    }
+    (installed_digest(&version_directory)?.as_str() == field(current, "payload_digest")?)
+        .then(|| revision.to_string())
+}
+
 pub fn status(roots: &Roots) -> Result<Value> {
     let installed = read_record(roots)?;
     Ok(json!({
@@ -909,4 +967,73 @@ pub fn status(roots: &Roots) -> Result<Value> {
         "previous": installed.as_ref().and_then(previous_of).map(|p| version_of(p).to_string()),
         "publisher_key_digest": installed.as_ref().and_then(|r| field(r, "publisher_key_digest")),
     }))
+}
+
+#[cfg(test)]
+mod record_tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// Lane VL patch round 1 (REVIEW-laneUI-astra VL-01): the record checked as an owner-only
+    /// regular file by its path, then swapped for a FIFO with no writer before it is opened, is
+    /// refused at once: the open neither follows a link nor waits on a FIFO, and the opened object
+    /// itself is checked against what was admitted. An unchanged record still reads.
+    #[test]
+    fn a_record_swapped_for_a_fifo_after_its_check_is_refused_without_waiting() {
+        let dir = std::env::temp_dir().canonicalize().unwrap().join(format!(
+            "v02-vl-record-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(RECORD);
+        let write = |bytes: &[u8]| {
+            OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)
+                .unwrap()
+                .write_all(bytes)
+                .unwrap();
+        };
+        let read_within = |checked: fs::Metadata| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let path = path.clone();
+            std::thread::spawn(move || {
+                tx.send(read_checked(&path, &checked)).unwrap_or_default();
+            });
+            rx.recv_timeout(Duration::from_secs(10))
+                .expect("the record read waited on what was opened")
+        };
+        write(b"{}");
+        let checked = fs::symlink_metadata(&path).unwrap();
+        assert_eq!(read_within(checked.clone()).as_deref(), Some(&b"{}"[..]));
+
+        fs::remove_file(&path).unwrap();
+        let made = Command::new("/usr/bin/mkfifo")
+            .args(["-m", "600"])
+            .arg(&path)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        assert_eq!(read_within(checked.clone()), None, "a FIFO swapped in");
+
+        // Another regular file of the same size and mode swapped in is not the one checked.
+        fs::remove_file(&path).unwrap();
+        write(b"[]");
+        assert_eq!(
+            read_within(checked.clone()),
+            None,
+            "another file swapped in"
+        );
+
+        // A link swapped in for the checked file is not followed.
+        let target = dir.join("target.json");
+        fs::rename(&path, &target).unwrap();
+        symlink(&target, &path).unwrap();
+        let target_checked = fs::symlink_metadata(&target).unwrap();
+        assert_eq!(read_within(target_checked), None, "a link swapped in");
+        fs::remove_dir_all(&dir).unwrap();
+    }
 }

@@ -20,6 +20,8 @@ service-composition = ["dev-shell", "node-service/desktop-shell"]
 
 [dependencies]
 budgets = { path = "../budgets" }
+# O_NOFOLLOW | O_NONBLOCK for the install record (lane VL patch 1); the workspace's pinned libc.
+libc = "=0.2.190"
 sha2 = "=0.10.9"
 ed25519-dalek = "=2.2.0"
 serde = { version = "=1.0.229", features = ["derive"] }

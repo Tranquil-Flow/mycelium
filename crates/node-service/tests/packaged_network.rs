@@ -191,6 +191,25 @@ fn packaged_owner_opens_the_network_window_and_quit_closes_it() {
     std::fs::remove_dir_all(&state).unwrap_or_default();
 }
 
+/// Lane VL: the packaged status names the running app's version (`desktop::bundle::VERSION`, the
+/// version the bundle's Info.plist and finalize carry) in an additive `app_version` block, and a
+/// source revision only when this executable is the installed copy of that version (a test binary
+/// never is: `null`, never invented).
+#[test]
+fn the_packaged_status_names_the_running_app_version() {
+    let state = state_root("version");
+    let (core, mut cleanup) = packaged_core(&state);
+    let version = &status(&core)["app_version"];
+    assert_eq!(
+        version,
+        &json!({"version": desktop::bundle::VERSION, "source_revision": null}),
+        "{version}"
+    );
+    assert_eq!(quit(&mut cleanup), Ok(Poll::Verified));
+    drop(core);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
+
 /// A code asked for before the relay exists waits for it (`_open_pending_window`); the Start that
 /// brings the relay up turns it into a live window (`_materialize_pending_windows`, app.py:823-834).
 #[test]

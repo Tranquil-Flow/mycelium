@@ -418,6 +418,174 @@ fn fresh_install_is_versioned_verified_linked_recorded_and_leaves_state_empty() 
     assert!(!cleared[0].starts_with(&bundle));
 }
 
+/// Lane VL (owner: "it should show the version being used somewhere"): the page's build line
+/// takes its source revision from the install record, read-only, and only when the record's
+/// current version is this build's own version AND the running executable is that version's
+/// installed copy. A copy run from anywhere else, or an install of another version, names no
+/// build rather than one that may not be the running one.
+#[test]
+fn the_running_build_is_named_only_for_this_versions_installed_copy() {
+    let revision = "0123456789abcdef0123456789abcdef01234567";
+    let tree = Tree::new();
+    let roots = tree.roots();
+    let elsewhere = tree.path("elsewhere/Mycelium.app/Contents/MacOS/mycelium");
+    put(&elsewhere, b"exe", 0o755);
+    // Nothing installed: no record, no build.
+    assert_eq!(install::running_source_revision(&roots, &elsewhere), None);
+
+    let bundle = make(&tree, &Pkg::new("own", desktop::bundle::VERSION));
+    install::install(&bundle, &roots, &ok().seams).unwrap();
+    let installed = roots
+        .version_dir(desktop::bundle::VERSION)
+        .join(install::PAYLOAD_DIRECTORY)
+        .join("Contents/MacOS/mycelium");
+    assert_eq!(
+        install::running_source_revision(&roots, &installed).as_deref(),
+        Some(revision)
+    );
+    // Launched through the Applications entry (a link into programs/<version>).
+    let entry = roots.application_entry().join("Contents/MacOS/mycelium");
+    assert_eq!(
+        install::running_source_revision(&roots, &entry).as_deref(),
+        Some(revision)
+    );
+    // The same build run from a downloaded bundle or a build folder is not the installed copy.
+    assert_eq!(install::running_source_revision(&roots, &elsewhere), None);
+    let downloaded = bundle
+        .join(install::PAYLOAD_DIRECTORY)
+        .join("Contents/MacOS/mycelium");
+    assert_eq!(install::running_source_revision(&roots, &downloaded), None);
+
+    // Another version installed: its record describes that version's bytes, not this build.
+    let other = Tree::new();
+    let other_roots = other.roots();
+    let newer = make(&other, &Pkg::new("newer", "99.0.0"));
+    install::install(&newer, &other_roots, &ok().seams).unwrap();
+    let newer_exe = other_roots
+        .version_dir("99.0.0")
+        .join(install::PAYLOAD_DIRECTORY)
+        .join("Contents/MacOS/mycelium");
+    assert_eq!(
+        install::running_source_revision(&other_roots, &newer_exe),
+        None
+    );
+}
+
+/// Lane VL patch round 1 (REVIEW-laneUI-astra VL-02, VL-01): the build is named only when the
+/// running executable is the very executable of the copy the installer admitted: the version
+/// folder and payload are the installer's own plain folders under `programs` (never a link to a
+/// copy elsewhere), the payload still has the digest the record holds, and the running file is
+/// that payload's executable (by identity, so the Applications link still names it). The record
+/// is never waited on: a FIFO or an oversized file in its place is refused at once.
+#[test]
+fn the_build_is_named_only_for_the_admitted_installed_copy() {
+    let revision = Some("0123456789abcdef0123456789abcdef01234567");
+    let tree = Tree::new();
+    let (home, apps) = (tree.path("home"), tree.path("apps"));
+    // Each answer on its own thread within a bound: a reader that blocks fails, never hangs.
+    let named = |exe: &Path| -> Option<String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (home, apps, exe) = (home.clone(), apps.clone(), exe.to_path_buf());
+        std::thread::spawn(move || {
+            let roots = Roots::new(&home, &apps).unwrap();
+            tx.send(install::running_source_revision(&roots, &exe))
+                .unwrap_or_default();
+        });
+        rx.recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the build revision reader blocked")
+    };
+    let roots = tree.roots();
+    let bundle = make(&tree, &Pkg::new("own", desktop::bundle::VERSION));
+    install::install(&bundle, &roots, &ok().seams).unwrap();
+    let version_dir = roots.version_dir(desktop::bundle::VERSION);
+    let exe_in = |dir: &Path| {
+        dir.join(install::PAYLOAD_DIRECTORY)
+            .join("Contents/MacOS/mycelium")
+    };
+    let installed = exe_in(&version_dir);
+    let entry = roots.application_entry().join("Contents/MacOS/mycelium");
+    assert_eq!(named(&installed).as_deref(), revision);
+    assert_eq!(named(&entry).as_deref(), revision, "the Applications link");
+
+    // A foreign executable inside the installed tree is not the installed executable.
+    let planted = version_dir
+        .join(install::PAYLOAD_DIRECTORY)
+        .join("Contents/Resources/mycelium");
+    put(&planted, b"foreign", 0o755);
+    assert_eq!(named(&planted), None, "a foreign file inside the tree");
+    fs::remove_file(&planted).unwrap();
+    assert_eq!(named(&installed).as_deref(), revision);
+
+    // The installed executable's bytes replaced in place: no longer the admitted payload.
+    let original = fs::read(&installed).unwrap();
+    let mode = fs::metadata(&installed).unwrap().permissions();
+    fs::set_permissions(&installed, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::write(&installed, b"a different build").unwrap();
+    assert_eq!(named(&installed), None, "a tampered installed executable");
+    assert_eq!(named(&entry), None, "a tampered executable via the link");
+    fs::write(&installed, &original).unwrap();
+    fs::set_permissions(&installed, mode).unwrap();
+    assert_eq!(named(&installed).as_deref(), revision);
+
+    // VL-02's trigger: the version folder replaced by a link to a copy outside `programs`.
+    let external = tree.path("external");
+    fs::create_dir(&external).unwrap();
+    let moved = external.join(desktop::bundle::VERSION);
+    fs::rename(&version_dir, &moved).unwrap();
+    symlink(&moved, &version_dir).unwrap();
+    for exe in [exe_in(&moved), installed.clone(), entry.clone()] {
+        assert_eq!(named(&exe), None, "{exe:?} through a linked version folder");
+    }
+    fs::remove_file(&version_dir).unwrap();
+    fs::rename(&moved, &version_dir).unwrap();
+    assert_eq!(named(&installed).as_deref(), revision);
+
+    // The installed executable replaced by a link to a foreign executable outside the tree.
+    let foreign = tree.path("foreign/mycelium");
+    put(&foreign, b"foreign", 0o755);
+    let aside = tree.path("aside-mycelium");
+    fs::rename(&installed, &aside).unwrap();
+    symlink(&foreign, &installed).unwrap();
+    for exe in [foreign.clone(), installed.clone(), entry.clone()] {
+        assert_eq!(named(&exe), None, "{exe:?} through a linked executable");
+    }
+    fs::remove_file(&installed).unwrap();
+    fs::rename(&aside, &installed).unwrap();
+    assert_eq!(named(&installed).as_deref(), revision);
+
+    // The record: a FIFO without a writer, or an oversized file, in its place is refused at once.
+    let record = roots.programs().join("versions.json");
+    let kept = fs::read(&record).unwrap();
+    fs::remove_file(&record).unwrap();
+    let made = std::process::Command::new("/usr/bin/mkfifo")
+        .args(["-m", "600"])
+        .arg(&record)
+        .status()
+        .unwrap();
+    assert!(made.success());
+    assert_eq!(named(&installed), None, "a FIFO in place of the record");
+    fs::remove_file(&record).unwrap();
+    let mut oversized: serde_json::Value = serde_json::from_slice(&kept).unwrap();
+    oversized["padding"] = "x".repeat(70 * 1024).into();
+    let write_private = |bytes: &[u8]| {
+        use std::{io::Write, os::unix::fs::OpenOptionsExt};
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&record)
+            .unwrap()
+            .write_all(bytes)
+            .unwrap();
+    };
+    write_private(&serde_json::to_vec(&oversized).unwrap());
+    assert_eq!(named(&installed), None, "an oversized record");
+    fs::remove_file(&record).unwrap();
+    write_private(&kept);
+    assert_eq!(named(&installed).as_deref(), revision);
+    assert_eq!(named(&entry).as_deref(), revision, "the Applications link");
+}
+
 #[test]
 fn every_check_refuses_before_any_write() {
     type Case = (

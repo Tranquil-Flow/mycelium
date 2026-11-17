@@ -78,6 +78,58 @@ pub fn compose(
     let services = Arc::new(DesktopServices::new(node, capacity, private));
     Ok(desktop::services::adapt(services, capacity))
 }
+/// The running build's source revision for `status.app_version` (lane VL; the owner: "it should
+/// show the version being used somewhere"), acquired off every request path (lane VL patch 1,
+/// REVIEW-laneUI-astra VL-01): its reader runs once on its own thread, started when the services
+/// are built, and the status only looks at what it has found so far, never waiting. Until the
+/// reader returns a revision (also when it fails, or never returns: a stalled filesystem), the
+/// status names the version with `source_revision: null`. The thread holds no request slot, lock or
+/// cleanup obligation; Quit neither waits for it nor depends on it.
+#[derive(Clone, Debug, Default)]
+pub struct AppRevision(Arc<std::sync::OnceLock<String>>);
+impl AppRevision {
+    /// Runs `read` once on its own thread and returns at once.
+    pub fn acquire(read: impl FnOnce() -> Option<String> + Send + 'static) -> Self {
+        let revision = Self::default();
+        let found = revision.0.clone();
+        let reader = std::thread::Builder::new()
+            .name("mycelium-app-revision".into())
+            .spawn(move || {
+                if let Some(revision) = read() {
+                    found.set(revision).unwrap_or_default();
+                }
+            });
+        if reader.is_err() {
+            eprintln!("app_revision_reader_not_started");
+        }
+        revision
+    }
+    /// This executable's: [`desktop::install::running_source_revision`] for the current user's
+    /// install record, read once per process (the first services built start it): the record's
+    /// revision when this executable is that version's admitted installed copy, else none.
+    pub fn running() -> Self {
+        static RUNNING: std::sync::OnceLock<AppRevision> = std::sync::OnceLock::new();
+        RUNNING
+            .get_or_init(|| {
+                Self::acquire(|| {
+                    let roots = desktop::install::Roots::for_current_user().ok()?;
+                    let executable = std::env::current_exe().ok()?;
+                    desktop::install::running_source_revision(&roots, &executable)
+                })
+            })
+            .clone()
+    }
+    /// The revision found so far, if any; never waits for the reader.
+    pub fn known(&self) -> Option<String> {
+        self.0.get().cloned()
+    }
+}
+/// `status.app_version`: the running build's version, `desktop::bundle::VERSION` (what the bundle's
+/// Info.plist and finalize carry; the workspace's Cargo version is a `-dev` placeholder and is not
+/// used), and the source revision `revision` has found so far, else `null`.
+fn app_version(revision: &AppRevision) -> Value {
+    json!({"version": desktop::bundle::VERSION, "source_revision": revision.known()})
+}
 #[cfg(feature = "desktop-shell")]
 fn run_host(
     checkpoint: &std::path::Path,
@@ -230,6 +282,8 @@ pub struct DesktopServices {
     chat_run: Option<api::chat_service::ChatService>,
     /// The handle the owner run's ports hold to cancel the route chats (lane S5F), over `chat_run`.
     run_chats: Option<api::chat_service::RunChats>,
+    /// The running build's revision for `status.app_version` (lane VL), read off the request path.
+    app_revision: AppRevision,
     /// The node's state root these services were built with: `private`'s parent (`<state
     /// root>/v02-node` in the packaged composition, packaged.rs:76-89). The chat timing file must
     /// lie under it (lane S5F).
@@ -531,9 +585,15 @@ impl DesktopServices {
             chat_run: None,
             run_chats: None,
             node_root: private.parent().map(Path::to_path_buf),
+            app_revision: AppRevision::running(),
             started: std::time::Instant::now(),
             capacity,
         }
+    }
+    /// These services with the build revision read by `revision` (a test holds its reader).
+    pub fn with_app_revision(mut self, revision: AppRevision) -> Self {
+        self.app_revision = revision;
+        self
     }
     /// What the serving root's router port handed to the driver (observation only).
     pub fn ledger(&self) -> router_port::Ledger {
@@ -634,6 +694,8 @@ impl DesktopServices {
                 if let Some(chat) = self.chat_status(&status) {
                     status["chat"] = chat;
                 }
+                // Lane VL: the running app's version for the page's footer (additive, v0.2 only).
+                status["app_version"] = app_version(&self.app_revision);
                 Self::json(status)
             }
             ("POST", "/chat/api/state") if body == json!({}) => {
