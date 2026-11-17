@@ -154,6 +154,9 @@ impl LanPolicy {
         self.hosts.as_deref()
     }
 }
+/// Lane XB3: the code of a cross-network run whose relay cannot be reached. The run fails
+/// closed: no other relay and no address lookup is configured, so nothing falls back to n0.
+pub const RELAY_UNREACHABLE: &str = "relay_unreachable";
 /// Application close code of a direct-LAN connection that gained a path outside
 /// the allow-list (reason `lan_path_refused`).
 pub const LAN_PATH_REFUSED: u32 = 3;
@@ -239,6 +242,42 @@ pub fn selected_path(connection: &Connection) -> Option<&'static str> {
         .iter()
         .find(|path| path.is_selected())
         .map(|path| if path.is_relay() { "relay" } else { "direct" })
+}
+/// Lane XB3 at a run's start: bind a throwaway endpoint across networks on `interface` under
+/// `policy` (a fresh key, no channel served) and wait at most
+/// `SidecarReadyAddressWindow` (the oracle's wait for a relay address) for its relay.
+/// `Err(RELAY_UNREACHABLE)` when it cannot be reached; `Ok` at once for a same-network policy.
+pub fn relay_reachable(interface: IpAddr, policy: &LanPolicy) -> Result<(), &'static str> {
+    if policy.relay().is_none() {
+        return Ok(());
+    }
+    let unreachable = |_| RELAY_UNREACHABLE;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .map_err(|_| RELAY_UNREACHABLE)?;
+    let clock = crate::iroh_cross::ProbeClock::default();
+    let after = |id: BudgetId| -> Result<MonoInstant, &'static str> {
+        let span = id.span(Entries::ZERO).map_err(|_| RELAY_UNREACHABLE)?;
+        clock.monotonic().checked_add(span).map_err(|_| RELAY_UNREACHABLE)
+    };
+    let mut host = LoopbackHost::bind_lan(
+        &runtime,
+        &clock,
+        after(BudgetId::WorkerStartup)?,
+        iroh::SecretKey::generate(),
+        &[Channel::Router],
+        interface,
+        policy.clone(),
+    )
+    .map_err(unreachable)?;
+    let ready = host.relay_ready(&clock, after(BudgetId::SidecarReadyAddressWindow)?);
+    if let Err(error) = host.close(&clock, after(BudgetId::RouterClose)?) {
+        eprintln!("relay_probe_close_unproven:{error:?}");
+    }
+    drop(host);
+    ready
 }
 /// Whole-address check for a direct-LAN dial: every entry is an allow-listed IP
 /// with a port; a relay or any disallowed entry refuses the entire address.
@@ -826,6 +865,26 @@ impl<'a> LoopbackHost<'a> {
     ) -> Result<std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>, Error> {
         let endpoint = self.endpoint()?.clone();
         Ok(Box::pin(async move { endpoint.online().await }))
+    }
+    /// Lane XB3: across networks, wait (bounded by `deadline`) until the endpoint holds a live
+    /// connection to its relay (`Endpoint::online`): without it a peer on another network has no
+    /// rendezvous and no fallback path. `Err(RELAY_UNREACHABLE)` when the bound passes (or the
+    /// host is closed); the caller fails its run closed with that code. A same-network or
+    /// local-only host needs no relay: `Ok` at once.
+    pub fn relay_ready(
+        &self,
+        clock: &impl Clock,
+        deadline: MonoInstant,
+    ) -> Result<(), &'static str> {
+        if self.cross.is_none() {
+            return Ok(());
+        }
+        outside_runtime().map_err(|_| RELAY_UNREACHABLE)?;
+        let endpoint = self.endpoint().map_err(|_| RELAY_UNREACHABLE)?;
+        let wait = allowance(clock, deadline).map_err(|_| RELAY_UNREACHABLE)?;
+        self.runtime
+            .block_on(async { tokio::time::timeout(wait, endpoint.online()).await })
+            .map_err(|_| RELAY_UNREACHABLE)
     }
     pub(crate) fn endpoint(&self) -> Result<&Endpoint, Error> {
         if !self.admitting {

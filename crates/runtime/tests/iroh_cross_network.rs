@@ -15,7 +15,9 @@
 #![cfg(all(feature = "iroh-adapter", unix))]
 use budgets::{BudgetId as B, ClockDomain, Entries, MonoInstant};
 use iroh::{EndpointAddr, SecretKey};
-use runtime::iroh_host::{LanPolicy, LoopbackHost, NetworkMode, validate_lan_peer};
+use runtime::iroh_host::{
+    LanPolicy, LoopbackHost, NetworkMode, RELAY_UNREACHABLE, relay_reachable, validate_lan_peer,
+};
 use std::{
     net::{IpAddr, Ipv4Addr},
     time::Instant,
@@ -241,4 +243,60 @@ fn an_unadmitted_peer_is_still_refused_across_networks_and_counted() {
     assert_eq!(intruder.lan_refused_datagrams(), Some(3));
     close(&mut intruder, &clock);
     close(&mut server, &clock);
+}
+
+
+/// Lane XB3: across networks the relay is the rendezvous. With it unreachable the run fails
+/// closed with the explicit `relay_unreachable` code, inside its bound, and never falls back to
+/// another relay or to n0 (no other relay and no address lookup is configured at all).
+#[test]
+fn an_unreachable_relay_fails_closed_with_relay_unreachable() {
+    let rt = runtime();
+    let clock = Mono(Instant::now());
+    let mut host = bind(&rt, &clock, &SecretKey::generate(), across()).unwrap();
+    let window = B::SidecarReadyAddressWindow.span(Entries::ZERO).unwrap();
+    let began = Instant::now();
+    assert_eq!(
+        host.relay_ready(&clock, deadline(&clock, B::SidecarReadyAddressWindow)),
+        Err(RELAY_UNREACHABLE)
+    );
+    let waited = began.elapsed().as_millis();
+    assert!(
+        waited + 50 >= u128::from(window.millis()) && waited < u128::from(window.millis()) + 2_000,
+        "bounded by the window: {waited} ms"
+    );
+    // Nothing else to fall back to: the address names exactly the one (dead) relay.
+    assert_eq!(
+        host.address().unwrap().relay_urls().cloned().collect::<Vec<_>>(),
+        vec![dead_relay()]
+    );
+    close(&mut host, &clock);
+    // A same-network run needs no relay: ready at once.
+    let mut lan = LoopbackHost::bind_lan(
+        &rt,
+        &clock,
+        deadline(&clock, B::RouterClose),
+        SecretKey::generate(),
+        &[Channel::Router],
+        LOOPBACK,
+        LanPolicy::with_explicit(vec![LOOPBACK]).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(lan.mode(), NetworkMode::DirectLan);
+    assert_eq!(
+        lan.relay_ready(&clock, deadline(&clock, B::SidecarReadyAddressWindow)),
+        Ok(())
+    );
+    close(&mut lan, &clock);
+}
+
+/// Lane XB3 at a run's start (the packaged owner run asks before anything is dialed): an
+/// unreachable relay refuses the run by name; a same-network run asks nothing.
+#[test]
+fn a_run_start_across_networks_refuses_an_unreachable_relay() {
+    assert_eq!(relay_reachable(LOOPBACK, &across()), Err(RELAY_UNREACHABLE));
+    assert_eq!(
+        relay_reachable(LOOPBACK, &LanPolicy::with_explicit(vec![LOOPBACK]).unwrap()),
+        Ok(())
+    );
 }

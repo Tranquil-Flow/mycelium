@@ -50,6 +50,27 @@ pub(crate) fn cross_builder(
         .map_err(|_| Error::Unavailable)
 }
 
+/// The monotonic clock of a relay probe ([`crate::iroh_host::relay_reachable`]).
+#[derive(Debug)]
+pub(crate) struct ProbeClock(std::time::Instant);
+impl Default for ProbeClock {
+    fn default() -> Self {
+        Self(std::time::Instant::now())
+    }
+}
+impl transport::Clock for ProbeClock {
+    fn monotonic(&self) -> budgets::MonoInstant {
+        budgets::MonoInstant::new(
+            budgets::ClockDomain(1),
+            u64::try_from(self.0.elapsed().as_millis()).unwrap_or(u64::MAX),
+        )
+    }
+    fn wall_seconds(&self) -> f64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0.0, |elapsed| elapsed.as_secs_f64())
+    }
+}
 /// The peer gate of one endpoint across networks.
 #[derive(Debug)]
 pub(crate) struct CrossGate {
