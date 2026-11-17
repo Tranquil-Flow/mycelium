@@ -559,6 +559,11 @@ pub struct PackagedHost {
     /// cannot be read or resumed keeps its code: every authority seam refuses with it and nothing
     /// is written over it.
     authority: Result<Arc<Mutex<Authority>>, &'static str>,
+    /// The code an owner's seed was refused with when it was reopened at bind (lost key, lost or
+    /// unusable TLS identity). v0.1.4's launch raises it and serves nothing (`DemoApp.start` ->
+    /// `authority.start()`, app.py:613-626 @ f4e366e9); here the loaded authority is kept, not
+    /// running, so the page still shows the swarm, and every action answers this code.
+    seed_refused: Option<&'static str>,
     /// `DemoApp.acquisition` over the state root's model sources. `None`: this host was built
     /// without one, and every acquisition seam keeps the trait default.
     model: Option<ModelSource>,
@@ -659,18 +664,22 @@ impl PackagedHost {
     /// [`PackagedHost::new`] with the owner's lease renewal period read from `period` instead
     /// of `RenewLoopSelfClosedWait`: a test runs the same composition on a shorter budget.
     pub fn with_renewal_period(node: NodeService, root: PathBuf, period: BudgetId) -> Self {
+        let mut seed_refused = None;
         let authority = Authority::load(root.clone()).map(|mut authority| {
             // No relay and no public origin in this process: its seed answers on its own
             // loopback address, never on an origin a saved network file names.
             authority.configured_origin = None;
             let authority = Arc::new(Mutex::new(authority));
-            if app_host::resumable(&*authority) {
-                // A seed that cannot be reopened must not cost the app its swarm. Discarding the
-                // loaded authority here is what made a restart report no swarm at all: the persisted
-                // record still answers membership and "Invite a Mac", and the seed is tried again.
-                if let Err(error) = app_host::open_owner_seed(&*authority) {
-                    eprintln!("l11_seed_reopen_refused:{}", error.code);
-                }
+            // A seed that cannot be reopened must not cost the app its swarm. Discarding the
+            // loaded authority here is what made a restart report no swarm at all: the persisted
+            // record still answers the swarm and its retained membership. The authority is not
+            // running, and its code is kept: every action answers it, as v0.1.4's launch does.
+            if app_host::resumable(&*authority)
+                && let Err(error) = app_host::open_owner_seed(&*authority)
+            {
+                eprintln!("l11_seed_reopen_refused:{}", error.code);
+                app_host::stop_authority(&*authority);
+                seed_refused = Some(error.code);
             }
             authority
         });
@@ -689,6 +698,7 @@ impl PackagedHost {
             policy: None,
             _renewal: renewal,
             authority,
+            seed_refused,
             model: None,
             publishing: None,
             network: crate::packaged_network::Network::new(
@@ -1019,9 +1029,13 @@ impl PackagedHost {
     pub fn network(&self) -> Arc<crate::packaged_network::Network> {
         self.network.clone()
     }
-    /// The authority, or the code its state was refused with at bind (the relay's Start answers it).
+    /// The authority, or the code its state or its seed was refused with at bind (the relay's
+    /// Start answers it).
     pub fn authority_result(&self) -> Result<Arc<Mutex<Authority>>, &'static str> {
-        self.authority.clone()
+        match self.seed_refused {
+            Some(code) => Err(code),
+            None => self.authority.clone(),
+        }
     }
     /// The owner's listing custody, for the window's Quit to close.
     pub fn publishing(&self) -> Option<Publishing> {
@@ -1085,9 +1099,9 @@ impl Host for PackagedHost {
         self.loaded()
             .is_none_or(|authority| authority.lock().is_ok_and(|a| !a.target))
     }
-    /// The code the state was refused with at bind (`Authority::load`).
+    /// The code the state was refused with at bind (`Authority::load`), or its seed's reopen.
     fn installation_refused(&self) -> Option<&'static str> {
-        self.authority.as_ref().err().copied()
+        self.authority.as_ref().err().copied().or(self.seed_refused)
     }
     /// `os.environ.get(name)`. A value that is not UTF-8 stays set (Python decodes it with
     /// `surrogateescape`), so it is never mistaken for an unset variable.
