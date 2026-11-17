@@ -451,7 +451,9 @@ fn the_running_build_is_named_only_for_this_versions_installed_copy() {
     );
     // The same build run from a downloaded bundle or a build folder is not the installed copy.
     assert_eq!(install::running_source_revision(&roots, &elsewhere), None);
-    let downloaded = bundle.join(install::PAYLOAD_DIRECTORY).join("Contents/MacOS/mycelium");
+    let downloaded = bundle
+        .join(install::PAYLOAD_DIRECTORY)
+        .join("Contents/MacOS/mycelium");
     assert_eq!(install::running_source_revision(&roots, &downloaded), None);
 
     // Another version installed: its record describes that version's bytes, not this build.
@@ -463,7 +465,10 @@ fn the_running_build_is_named_only_for_this_versions_installed_copy() {
         .version_dir("99.0.0")
         .join(install::PAYLOAD_DIRECTORY)
         .join("Contents/MacOS/mycelium");
-    assert_eq!(install::running_source_revision(&other_roots, &newer_exe), None);
+    assert_eq!(
+        install::running_source_revision(&other_roots, &newer_exe),
+        None
+    );
 }
 
 #[test]

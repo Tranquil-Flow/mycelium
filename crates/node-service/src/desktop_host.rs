@@ -78,6 +78,23 @@ pub fn compose(
     let services = Arc::new(DesktopServices::new(node, capacity, private));
     Ok(desktop::services::adapt(services, capacity))
 }
+/// `status.app_version` (lane VL; the owner: "it should show the version being used somewhere"):
+/// the running build's version, `desktop::bundle::VERSION` (what the bundle's Info.plist and
+/// finalize carry; the workspace's Cargo version is a `-dev` placeholder and is not used), and the
+/// source revision the install record holds when this executable is that version's installed copy
+/// ([`desktop::install::running_source_revision`], read-only), else `null`. Read once per process.
+fn app_version() -> Value {
+    static VERSION: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    VERSION
+        .get_or_init(|| {
+            let revision = desktop::install::Roots::for_current_user()
+                .ok()
+                .zip(std::env::current_exe().ok())
+                .and_then(|(roots, exe)| desktop::install::running_source_revision(&roots, &exe));
+            json!({"version": desktop::bundle::VERSION, "source_revision": revision})
+        })
+        .clone()
+}
 #[cfg(feature = "desktop-shell")]
 fn run_host(
     checkpoint: &std::path::Path,
@@ -634,6 +651,8 @@ impl DesktopServices {
                 if let Some(chat) = self.chat_status(&status) {
                     status["chat"] = chat;
                 }
+                // Lane VL: the running app's version for the page's footer (additive, v0.2 only).
+                status["app_version"] = app_version();
                 Self::json(status)
             }
             ("POST", "/chat/api/state") if body == json!({}) => {

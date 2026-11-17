@@ -481,7 +481,9 @@ fn the_page_footer_shows_the_running_app_version_from_status() {
         "index.html: the footer lacks the empty version line: {footer}"
     );
     let script = script_without_comments(APP_JS);
-    let begin = script.find("function renderAppVersion(").expect("app.js renders the version");
+    let begin = script
+        .find("function renderAppVersion(")
+        .expect("app.js renders the version");
     let body = &script[begin..begin + script[begin..].find("\n}").expect("a closed function")];
     for needed in [
         "value.app_version",
@@ -491,9 +493,15 @@ fn the_page_footer_shows_the_running_app_version_from_status() {
         ".slice(0,8)",
         "/^[0-9a-f]{40}$/",
     ] {
-        assert!(body.contains(needed), "renderAppVersion lacks {needed}: {body}");
+        assert!(
+            body.contains(needed),
+            "renderAppVersion lacks {needed}: {body}"
+        );
     }
-    assert!(!body.contains("innerHTML"), "the version line is plain text");
+    assert!(
+        !body.contains("innerHTML"),
+        "the version line is plain text"
+    );
     let render = &script[script.find("function render(value) {").unwrap()..];
     let render = &render[..render.find("\n}").unwrap()];
     assert!(

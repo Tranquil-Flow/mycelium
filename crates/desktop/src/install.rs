@@ -901,6 +901,30 @@ pub fn uninstall(roots: &Roots, seams: &Seams, delete_state: bool) -> Result<Val
     }))
 }
 
+/// The source revision of the running build, for the page's version line (lane VL): the
+/// `source_revision` the install record holds for its current version, only when that version
+/// is this build's own ([`crate::bundle::VERSION`]) and `executable` resolves into that
+/// version's installed copy (`programs/<version>/`, also when launched through the Applications
+/// link). Read-only, no lock. Any doubt (no or untrusted record, another version, a copy run
+/// from elsewhere, a revision that is not 40 lower-case hex digits) is `None`, never a guess.
+pub fn running_source_revision(roots: &Roots, executable: &Path) -> Option<String> {
+    let record = read_record(roots).ok()??;
+    let current = current_of(&record);
+    if version_of(current) != crate::bundle::VERSION {
+        return None;
+    }
+    let installed = roots
+        .version_dir(crate::bundle::VERSION)
+        .canonicalize()
+        .ok()?;
+    if !executable.canonicalize().ok()?.starts_with(installed) {
+        return None;
+    }
+    field(current, "source_revision")
+        .filter(|r| r.len() == 40 && r.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
+        .map(str::to_string)
+}
+
 pub fn status(roots: &Roots) -> Result<Value> {
     let installed = read_record(roots)?;
     Ok(json!({
