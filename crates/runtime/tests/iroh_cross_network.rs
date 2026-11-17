@@ -520,3 +520,81 @@ fn a_live_same_network_connection_reports_a_direct_path() {
     close(&mut owner, &clock);
     close(&mut member, &clock);
 }
+
+/// Lane XB patch 3 (REVIEW XB2-09): what the inbound gate across networks guarantees, and no more.
+/// An unadmitted key's handshake COMPLETES (TLS authenticates a key, not membership); the host
+/// then closes the connection (`lan_key_refused`) and counts it BEFORE any caller sees it. So the
+/// stranger gets no application stream (whatever it opens and writes is never answered: its read
+/// ends in the host's close), the host's caller is never handed the connection (its accept answers
+/// `Authentication`, and the next accept window ends empty), and every attempt is counted. NOT
+/// shown (and not claimed): what the stranger's handshake itself sent or caused before that
+/// post-handshake check (the transport's pre-admission traffic of a handshake).
+#[test]
+fn an_unadmitted_inbound_peer_gets_no_application_stream_and_is_counted() {
+    let rt = runtime();
+    let clock = Mono(Instant::now());
+    let (server_key, admitted, stranger) = (
+        SecretKey::generate(),
+        SecretKey::generate(),
+        SecretKey::generate(),
+    );
+    let mut server = bind(&rt, &clock, &server_key, across()).unwrap();
+    server.admit_peer_ids(&[admitted.public()]).unwrap();
+    let address = server.address().unwrap();
+    let signed = EndpointAddr::from_parts(
+        address.id,
+        address.ip_addrs().map(|s| iroh::TransportAddr::Ip(*s)),
+    );
+    let mut intruder = bind(&rt, &clock, &stranger, across()).unwrap();
+    for attempt in 1..=2u64 {
+        std::thread::scope(|scope| {
+            let refused = scope.spawn(|| {
+                server
+                    .accept(&clock, deadline(&clock, B::SidecarLocalHandshake))
+                    .err()
+            });
+            if let Ok(c) =
+                intruder.connect(&signed, &clock, deadline(&clock, B::SidecarLocalHandshake))
+            {
+                let answer = rt.block_on(async {
+                    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+                        let (mut send, mut recv) = c.open_bi().await.map_err(|e| e.to_string())?;
+                        send.write_all(b"model bytes, please")
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        send.finish().map_err(|e| e.to_string())?;
+                        recv.read_to_end(64).await.map_err(|e| e.to_string())
+                    })
+                    .await
+                });
+                assert!(
+                    !matches!(answer, Ok(Ok(_))),
+                    "attempt {attempt}: the stranger got an application answer: {answer:?}"
+                );
+                let reason = rt.block_on(c.closed());
+                assert!(
+                    format!("{reason:?}").contains("lan_key_refused"),
+                    "attempt {attempt}: closed by the host's key check: {reason:?}"
+                );
+            }
+            assert_eq!(
+                refused.join().unwrap(),
+                Some(Error::Authentication),
+                "attempt {attempt}: the caller is told of a refusal, never handed it"
+            );
+        });
+        assert_eq!(
+            server.lan_dropped_datagrams(),
+            Some(attempt),
+            "every refused attempt is counted"
+        );
+    }
+    // Nothing was handed on: the next accept window ends empty.
+    let empty = clock
+        .monotonic()
+        .checked_add(budgets::Span::from_millis(500))
+        .unwrap();
+    assert_eq!(server.accept(&clock, empty).err(), Some(Error::Expired));
+    close(&mut intruder, &clock);
+    close(&mut server, &clock);
+}
