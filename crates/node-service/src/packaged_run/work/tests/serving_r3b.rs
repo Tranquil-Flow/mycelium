@@ -92,8 +92,17 @@ fn at_the_shell_deadline_a_serving_quit_stops_the_workflow_before_it_may_exit() 
     let mut shutdown = Shutdown::new(cleanup, allowance).unwrap();
     shutdown.request(QuitSource::Menu, Span::ZERO);
     let before = (shutdown.tick(Span::ZERO), stops.load(Ordering::SeqCst));
-    // The shell's clock reaches the Quit deadline; the run is still in its serving wait.
-    let at_deadline = shutdown.tick(allowance);
+    // The shell's clock reaches the Quit deadline; the run is still in its serving wait. The relay
+    // step starts its close there (v0.1.4 closes the relay after the run's join, app.py:1848-1850)
+    // and the Quit is ticked at the deadline until that close ended (lane CHATPAGE patch 3).
+    let until = Instant::now() + patience();
+    let at_deadline = loop {
+        let state = shutdown.tick(allowance);
+        if state != State::Stopping || Instant::now() >= until {
+            break state;
+        }
+        std::thread::yield_now();
+    };
     let exit = shutdown.exit_status();
     let stops_at_exit = stops.load(Ordering::SeqCst);
     lock(&served.f.host.custody).work_stop = None;
