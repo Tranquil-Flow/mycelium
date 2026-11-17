@@ -3061,7 +3061,8 @@ export function createField({ stage, state, reduce }) {
     x.fillStyle = ramp;
     x.fillRect(0, 0, scene.hero.W, fade);
     x.restore();
-    scene.drawIntroCores?.(x);
+    // The node cores sit in this band: the hero restores the share of its baked cores the ramp removed.
+    scene.drawIntroCores?.(x, fade);
   }
   let heroY = NaN,
     heroShown = true;

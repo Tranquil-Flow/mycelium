@@ -26,8 +26,8 @@
       "reason": "Adopts the site's dark Green token set (ground #010301, ink #e7f2e3, accent #58f56a, art tokens --strand/--glow/--core), Fraunces for h1-h3 via the embedded woff2, and the layout rules the background renderer needs (.page-mycelium, .page-mycelium-field, .mycelium-breath, .hero-art). The header mark is 56px with the wordmark block vertically centred against it, and disclosure buttons are styled as plain text inside the summary."
     },
     "mycelium-field.js": {
-      "sha256": "3b4e895e79b0efa5526854f1e16f00d74395f9f38eb0a4017a62867f96eacaee",
-      "reason": "Was carried verbatim from mycelium_swarm_directory/web. The life layer's 128 px tiles left whole colonies clipped as squares: a tile first painted while its neighbourhood was empty kept `cands = false` for good, so strands that grew into it later were never drawn there and terminated on the tile edge. Candidates are now recomputed until a tile has held a strand and boxes are tested with a 2 px bleed, the hero's page-anchored composite fades in over its own first 200 px (the raster is a rectangle, so it read as a knife-cut under the header), and the life tiles fade their part of that same band."
+      "sha256": "3ba1dc70b38c787c526209be42647a6b428a8b5410e687b2277822a959912cc8",
+      "reason": "Was carried verbatim from mycelium_swarm_directory/web. The life layer's 128 px tiles left whole colonies clipped as squares: a tile first painted while its neighbourhood was empty kept `cands = false` for good, so strands that grew into it later were never drawn there and terminated on the tile edge. Candidates are now recomputed until a tile has held a strand and boxes are tested with a 2 px bleed, the hero's page-anchored composite fades in over its own first 200 px (the raster is a rectangle, so it read as a knife-cut under the header), and the life tiles fade their part of that same band. Lane GR (owner: the green circles on the nodes vanish when the growth phase ends): drawHero() passes the fade band's height to the hero's scene.drawIntroCores(x, fade) so the hero can restore its baked node cores in that band (see mycelium-hero.js); the ramp itself is unchanged."
     },
     "chat.js": {
       "sha256": "57e71956a8ca38f5e51ce226d5a1352b24a320a0c42289b0bceddc0ecdd5dce7",
@@ -40,6 +40,10 @@
     "chat.css": {
       "sha256": "7a4c72ba36d2a81aa1a8258f1a33ff77987e3d1563829fe9f9ecbdb34d2b9b88",
       "reason": "Lane CHATPAGE item 1: v0.1.4's chat.css declared its own palette (--bg #101b19, --panel #192923, ...) and system fonts, so the window's chat page did not look like the app. It is now only the chat's layout (log bubbles, the prompt row, the owner controls) on the app's tokens from style.css, which the window's chat.html loads first; it declares no :root palette of its own. Window only: the relay's chat page keeps the api crate's pinned v0.1.4 chat.css."
+    },
+    "mycelium-hero.js": {
+      "sha256": "06228aece1e071b2c5e7c27edc0af49fc5ae40fb84e3fffae7934dd08f8824a4",
+      "reason": "Was carried verbatim from mycelium_swarm_directory/web (18c88c92850d49093b08f43e949ae4a4348dd5b5844247f6d7a6548c18efa5a6). Lane GR (owner: on first load the nodes have green circles in the growth phase, which disappear after the growth phase finishes): the colony cores (the soft green discs on the nodes) are drawn by scene.drawIntroCores over the composite while they build up, after mycelium-field.js's 200 px top fade ramp, then baked into the hero raster once complete, where that ramp erased up to ~90% of the cores of the nodes near the art's top edge. Once baked, drawIntroCores now adds back the share of the cores the ramp removed (the cores masked by the same ramp, cached in one band canvas), so the nodes keep what the grow-in showed. Visual only: timing, geometry, colours, the ramp and every other layer are unchanged; v0.1.4's page had no hero animation."
     }
   },
   "added": {
@@ -58,10 +62,6 @@
     "mycelium-geometry.js": {
       "sha256": "1eb2aeac5210f59df07e1c39457c00d6fb1dd084f8f266e10a58f4d252000591",
       "source": "mycelium_swarm_directory/web/mycelium-geometry.js (verbatim)"
-    },
-    "mycelium-hero.js": {
-      "sha256": "18c88c92850d49093b08f43e949ae4a4348dd5b5844247f6d7a6548c18efa5a6",
-      "source": "mycelium_swarm_directory/web/mycelium-hero.js (verbatim)"
     },
     "mark.svg": {
       "sha256": "aa4451a9a8cf6092869993115895461fb2e8b55ca83da211922bb1490e65b4c0",

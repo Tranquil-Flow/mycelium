@@ -2902,10 +2902,45 @@ export function createHero(canvas, { stage, state, reduce }) {
     return (v.birth || 0) + (P?.matShift || 0);
   };
   /** The compositor's hero blit adds the colony cores and felt fills while
-   * they still build up (same additive composite as the baked raster). */
-  scene.drawIntroCores = (ctx) => {
+   * they still build up (same additive composite as the baked raster).
+   * laneGR (owner: the green circles on the nodes vanished when the growth
+   * ended): the compositor fades the top `fade` px of the blit (destination-out
+   * ramp, alpha 1 at the top edge to 0 at `fade`) and calls this after the
+   * ramp. The building cores escaped that ramp, but once baked into the
+   * raster they were faded with it, and the nodes near the top lost them. So
+   * once baked, the share of the cores the ramp removed is added back (the
+   * cores masked by the same ramp): the nodes keep what the grow-in showed. */
+  let coreBand = null;
+  scene.drawIntroCores = (ctx, fade = 0) => {
     const g = scene.geometry || buildOut;
-    if (growth.coresDrawn || !g.colonies || !g.protect || !(growth.age > 0)) return;
+    if (!g.colonies || !g.protect || !(growth.age > 0)) return;
+    if (growth.coresDrawn) {
+      if (!(fade > 0)) return;
+      const W = scene.hero.W,
+        key = [growth.epoch, W, fade, d, ...g.colonies.map((c) => (c.fill2 ? c.fill2.r : 0))].join("|");
+      if (coreBand?.key !== key) {
+        const c = coreBand?.c || document.createElement("canvas"),
+          bx = c.getContext("2d");
+        c.width = Math.ceil(W * d);
+        c.height = Math.ceil(fade * d);
+        bx.setTransform(d, 0, 0, d, 0, 0);
+        bx.globalCompositeOperation = light ? "source-over" : "lighter";
+        drawCores(bx, g, growth.age, 1);
+        const ramp = bx.createLinearGradient(0, 0, 0, fade);
+        ramp.addColorStop(0, "rgba(0,0,0,1)");
+        ramp.addColorStop(1, "rgba(0,0,0,0)");
+        bx.globalAlpha = 1;
+        bx.globalCompositeOperation = "destination-in";
+        bx.fillStyle = ramp;
+        bx.fillRect(0, 0, W, fade);
+        coreBand = { c, key };
+      }
+      ctx.save();
+      ctx.globalCompositeOperation = light ? "source-over" : "lighter";
+      ctx.drawImage(coreBand.c, 0, 0, W, fade);
+      ctx.restore();
+      return;
+    }
     ctx.save();
     ctx.globalCompositeOperation = light ? "source-over" : "lighter";
     drawCores(ctx, g, growth.age, 1);
@@ -3416,6 +3451,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     cancelAnimationFrame(introRaf);
     document.removeEventListener("visibilitychange", onHidden);
     breathBox?.remove();
+    if (coreBand) coreBand.c.width = coreBand.c.height = 0;
     for (const r of scene.routes || []) for (const b of r.buckets.values()) for (const t of b.images || []) t.image.width = t.image.height = 0;
     for (const layer of residueCache.keys()) for (const t of layer.images || []) t.image.width = t.image.height = 0;
     for (const layer of residueCache.keys()) layer.images = null;
