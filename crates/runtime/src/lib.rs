@@ -16,6 +16,8 @@ pub mod iroh_cleanup;
 #[cfg(feature = "iroh-adapter")]
 pub mod iroh_control;
 #[cfg(feature = "iroh-adapter")]
+pub(crate) mod iroh_cross;
+#[cfg(feature = "iroh-adapter")]
 pub mod iroh_control_receive;
 #[cfg(feature = "iroh-adapter")]
 pub mod iroh_host;

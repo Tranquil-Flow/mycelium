@@ -26,6 +26,7 @@
 //! (`LAN_PATH_REFUSED`) as soon as any path's remote address is not admitted;
 //! see `confine`.
 pub use crate::iroh_cleanup::{HostCloseReport, close_endpoint_and_native};
+use crate::iroh_cross::{CrossGate, cross_builder};
 use crate::iroh_lan_filter::{Admission, LanTransport, Pin, from_custom, to_custom};
 use budgets::{BudgetId, Entries, MonoInstant};
 use iroh::{
@@ -53,6 +54,12 @@ pub enum NetworkMode {
     /// no address lookup, and peers only at allow-listed addresses
     /// ([`LanPolicy`]). Never a default; see [`LoopbackHost::bind_lan`].
     DirectLan,
+    /// Lane XB2 (ruling 29 B): a direct-LAN choice whose policy crosses networks
+    /// ([`LanPolicy::across_networks`]), a deliberate per-run choice. ONE iroh IP socket on the
+    /// configured interface address, Mycelium's relay only, no address lookup; peers at their
+    /// signed addresses of any unicast class or through the relay (hole punching included), and
+    /// handshakes only under admitted keys. See `iroh_cross`.
+    CrossNetwork,
 }
 /// Peer/bind allow-list of the direct-LAN mode: private IPv4 (RFC 1918),
 /// IPv4 link-local, IPv6 unique-local (fc00::/7) and IPv6 link-local, plus
@@ -82,10 +89,33 @@ pub struct LanPolicy {
     extra: Vec<IpAddr>,
     range: bool,
     hosts: Option<Vec<IpAddr>>,
+    /// Lane XB2: `Some` = the cross-network choice ([`LanPolicy::across_networks`]).
+    relay: Option<iroh::RelayUrl>,
 }
 impl LanPolicy {
     pub fn private_only() -> Self {
         Self::default()
+    }
+    /// Lane XB2 (ruling 29 B), a deliberate per-run choice: work with peers on OTHER networks.
+    /// The endpoint registers at `relay` (Mycelium's, both ends share it) and iroh may use relayed
+    /// and hole-punched direct paths. ONLY the address class is relaxed: a signed peer address may
+    /// be any unicast address (never unspecified, multicast or broadcast); peer keys, exact signed
+    /// dial targets and their refusal counts stay (`iroh_cross`).
+    pub fn across_networks(mut self, relay: iroh::RelayUrl) -> Self {
+        self.relay = Some(relay);
+        self
+    }
+    /// The relay of the cross-network choice; `None` on the same network.
+    pub fn relay(&self) -> Option<&iroh::RelayUrl> {
+        self.relay.as_ref()
+    }
+    /// The run's choice as status names it: `same_network` or `relay`.
+    pub fn reach(&self) -> &'static str {
+        if self.relay.is_some() {
+            "relay"
+        } else {
+            "same_network"
+        }
     }
     /// Add explicitly configured addresses (operator configuration, never discovery).
     pub fn with_explicit(extra: Vec<IpAddr>) -> Result<Self, Error> {
@@ -114,7 +144,7 @@ impl LanPolicy {
     }
     pub fn allows(&self, ip: IpAddr) -> bool {
         let ip = ip.to_canonical();
-        !never(ip) && (private_lan(ip) || self.extra.contains(&ip))
+        !never(ip) && (self.relay.is_some() || private_lan(ip) || self.extra.contains(&ip))
     }
     /// True in the range form; false = exact pins (the default).
     pub fn range_allowed(&self) -> bool {
@@ -201,6 +231,15 @@ pub fn private_lan(ip: IpAddr) -> bool {
         }
     }
 }
+/// Which kind of path `connection` runs on now: `direct` (an IP or direct-LAN path) or `relay`;
+/// `None` before iroh selected one. For status and evidence (lane XB2).
+pub fn selected_path(connection: &Connection) -> Option<&'static str> {
+    connection
+        .paths()
+        .iter()
+        .find(|path| path.is_selected())
+        .map(|path| if path.is_relay() { "relay" } else { "direct" })
+}
 /// Whole-address check for a direct-LAN dial: every entry is an allow-listed IP
 /// with a port; a relay or any disallowed entry refuses the entire address.
 pub fn validate_lan_peer(peer: &EndpointAddr, policy: &LanPolicy) -> Result<(), Error> {
@@ -217,6 +256,11 @@ pub fn validate_lan_peer(peer: &EndpointAddr, policy: &LanPolicy) -> Result<(), 
 impl NetworkMode {
     pub const fn local_only(self) -> bool {
         matches!(self, Self::LocalOnly)
+    }
+    /// Whether the host itself enforces admitted peer keys ([`LoopbackHost::admit_peer_ids`]):
+    /// direct LAN and across networks.
+    pub const fn admits_by_key(self) -> bool {
+        matches!(self, Self::DirectLan | Self::CrossNetwork)
     }
 }
 /// The relay Mycelium operates for its own endpoints (ruling 29 B; deployed by the ops lane,
@@ -291,6 +335,8 @@ pub struct LoopbackHost<'a> {
     path_guards: Mutex<Vec<tokio::task::JoinHandle<()>>>,
     /// Direct LAN: what [`LoopbackHost::recycle_lan`] rebinds with.
     reuse: Option<Box<LanReuse>>,
+    /// Across networks: the peer gate; `Some` exactly in [`NetworkMode::CrossNetwork`].
+    cross: Option<Arc<CrossGate>>,
 }
 /// The bound socket (a CLOEXEC duplicate; the transport owns the original)
 /// and identity a direct-LAN endpoint is recycled with, so the address in the
@@ -588,6 +634,21 @@ impl<'a> LoopbackHost<'a> {
         outside_runtime()?;
         let wait = allowance(clock, deadline)?;
         let alpns: Vec<Vec<u8>> = channels.iter().map(|c| c.alpn().to_vec()).collect();
+        // Lane XB2: a direct-LAN choice whose policy crosses networks binds the cross-network
+        // shape instead (no LAN transport, no pre-send filter: `iroh_cross`).
+        let across = match (&lan, mode) {
+            (Some((interface, policy)), NetworkMode::DirectLan) if policy.relay().is_some() => {
+                Some((*interface, policy.clone()))
+            }
+            _ => None,
+        };
+        let (mode, lan) = match across {
+            Some(_) => (NetworkMode::CrossNetwork, None),
+            None => (mode, lan),
+        };
+        let cross = across
+            .as_ref()
+            .map(|(_, policy)| Arc::new(CrossGate::new(policy.clone())));
         let admission = match &lan {
             Some((_, policy)) => Some(Admission::new(
                 policy.clone(),
@@ -625,6 +686,10 @@ impl<'a> LoopbackHost<'a> {
                 NetworkMode::DirectLan => {
                     lan_builder(lan_transport.clone().ok_or(Error::Unavailable)?)
                 }
+                NetworkMode::CrossNetwork => {
+                    let (interface, policy) = across.as_ref().ok_or(Error::Unavailable)?;
+                    cross_builder(*interface, policy)?
+                }
                 NetworkMode::Production | NetworkMode::ForceRelay => relay_builder(mode, reach)?,
             }
             .alpns(alpns);
@@ -648,6 +713,7 @@ impl<'a> LoopbackHost<'a> {
             address_task: None,
             path_guards: Mutex::new(Vec::new()),
             reuse,
+            cross,
         };
         allowance(clock, deadline)?;
         Ok(host)
@@ -723,6 +789,10 @@ impl<'a> LoopbackHost<'a> {
             (NetworkMode::LocalOnly, _) => validate_local_peer(peer),
             (NetworkMode::DirectLan, Some(lan)) => validate_lan_peer(peer, lan.policy()),
             (NetworkMode::DirectLan, None) => Err(Error::Authentication),
+            (NetworkMode::CrossNetwork, _) => match &self.cross {
+                Some(gate) => validate_lan_peer(peer, gate.policy()),
+                None => Err(Error::Authentication),
+            },
             _ => Ok(()),
         }
     }
@@ -769,6 +839,18 @@ impl<'a> LoopbackHost<'a> {
         let endpoint = self.endpoint()?;
         if let Some(socket) = self.lan_socket {
             return Ok(EndpointAddr::new(endpoint.id()).with_ip_addr(socket));
+        }
+        if let Some(gate) = &self.cross {
+            // Across networks: the one bound socket (a same-LAN peer reaches it directly) and
+            // this host's relay; discovered public addresses travel in-band, never in a signed
+            // document.
+            return Ok(endpoint
+                .bound_sockets()
+                .into_iter()
+                .fold(EndpointAddr::new(endpoint.id()), |addr, socket| {
+                    addr.with_ip_addr(socket)
+                })
+                .with_relay_url(gate.relay()?.clone()));
         }
         if !self.mode.local_only() {
             // A relay mode publishes what the endpoint currently advertises.
@@ -843,6 +925,7 @@ impl<'a> LoopbackHost<'a> {
         }
         let handshake = budget(BudgetId::SidecarLocalHandshake)?;
         let slots = count(BudgetId::RelayConnectionSlots)?;
+        let cross = self.cross.clone();
         let mut pool = self.handshakes.lock().map_err(|_| Error::Unavailable)?;
         self.runtime.block_on(async {
             tokio::time::timeout(wait, async {
@@ -888,6 +971,7 @@ impl<'a> LoopbackHost<'a> {
                             }
                         }
                     };
+                    let cross = cross.clone();
                     pool.spawn(async move {
                         // A stalled handshake must not hold the caller's window.
                         // A failed one frees its receive-filter slot at once
@@ -901,6 +985,16 @@ impl<'a> LoopbackHost<'a> {
                                 return Err(Error::Authentication);
                             }
                         };
+                        // Across networks: an unadmitted key is refused here and counted, never
+                        // handed to the caller; without keys the caller verifies the key.
+                        if let Some(gate) = cross {
+                            if gate.admits_key(&connection.remote_id()) == Some(false) {
+                                connection.close(LAN_KEY_REFUSED.into(), b"lan_key_refused");
+                                gate.refuse_in();
+                                return Err(Error::Authentication);
+                            }
+                            return Ok((connection, None));
+                        }
                         // LocalOnly: the caller verifies the key.
                         let Some((admission, source, mut pin)) = lan else {
                             return Ok((connection, None));
@@ -999,6 +1093,15 @@ impl<'a> LoopbackHost<'a> {
         &self,
         peer: &EndpointAddr,
     ) -> Result<(EndpointAddr, Option<Pin>), Error> {
+        if let Some(gate) = &self.cross {
+            // Across networks: the signed addresses plus this host's own relay; a refused
+            // address is counted (`refused_out`) and nothing is sent.
+            if let Err(error) = self.validate_peer(peer) {
+                gate.refuse_out();
+                return Err(error);
+            }
+            return Ok((gate.target(peer)?, None));
+        }
         self.validate_peer(peer)?;
         match &self.lan {
             None => Ok((peer.clone(), None)),
@@ -1010,8 +1113,13 @@ impl<'a> LoopbackHost<'a> {
     }
     /// Direct LAN: replace the exact peer hosts inbound handshakes are
     /// accepted from (taken from signed pairing/offer data; each must be
-    /// allow-listed). `Unavailable` in every other mode.
+    /// allow-listed). Across networks a peer's source is the relay or a punched path, never a
+    /// LAN host: nothing to pin, `Ok` (its key is what [`Self::admit_peer_ids`] admits).
+    /// `Unavailable` in every other mode.
     pub fn admit_peer_hosts(&self, hosts: &[IpAddr]) -> Result<(), Error> {
+        if self.cross.is_some() {
+            return Ok(());
+        }
         self.lan
             .as_ref()
             .ok_or(Error::Unavailable)?
@@ -1022,8 +1130,11 @@ impl<'a> LoopbackHost<'a> {
     /// handshake under any other key is refused by the host and unpinned at
     /// once; an admitted one moves to the authenticated pins. Without keys the
     /// caller verifies the key and accepted pins stay provisional.
-    /// `Unavailable` in every other mode.
+    /// Across networks the same, without pins. `Unavailable` in every other mode.
     pub fn admit_peer_ids(&self, ids: &[iroh::EndpointId]) -> Result<(), Error> {
+        if let Some(gate) = &self.cross {
+            return gate.set_keys(ids);
+        }
         self.lan.as_ref().ok_or(Error::Unavailable)?.set_keys(ids)
     }
     #[cfg(test)]
@@ -1042,12 +1153,20 @@ impl<'a> LoopbackHost<'a> {
     pub fn lan_learned_hosts(&self) -> Option<Vec<SocketAddr>> {
         self.lan.as_ref().map(|lan| lan.learned_hosts())
     }
-    /// Direct LAN: datagrams the pre-send filter refused (never sent).
+    /// Direct LAN: datagrams the pre-send filter refused (never sent). Across networks: dials
+    /// refused before any packet (a signed address outside the policy).
     pub fn lan_refused_datagrams(&self) -> Option<u64> {
+        if let Some(gate) = &self.cross {
+            return Some(gate.refused_out());
+        }
         self.lan.as_ref().map(|lan| lan.refused())
     }
-    /// Direct LAN: inbound datagrams the receive filter dropped before iroh.
+    /// Direct LAN: inbound datagrams the receive filter dropped before iroh. Across networks:
+    /// handshakes refused under an unadmitted key.
     pub fn lan_dropped_datagrams(&self) -> Option<u64> {
+        if let Some(gate) = &self.cross {
+            return Some(gate.refused_in());
+        }
         self.lan.as_ref().map(|lan| lan.dropped())
     }
     /// Direct LAN: remote addresses the current endpoint let reach iroh's
