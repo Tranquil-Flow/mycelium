@@ -138,6 +138,9 @@ pub(crate) fn resource_refusal(
     ))
 }
 
+/// Step 6's progress once a force-sliced run's owner pushed every Mac its own stage shard (B11 b).
+pub const SHARDS_PUSHED: &str = "stage shards pushed: every Mac holds only its own layers";
+
 pub fn run_slices_step(
     env: &mut dyn StepEnv,
     reports: &mut dyn ReportsPort,
@@ -218,7 +221,16 @@ pub fn run_slices_step(
         &limits,
     )?;
     if plans.as_ref().is_none_or(BTreeMap::is_empty) {
-        env.progress("whole snapshots: no slice to fetch");
+        // B11(b), recorded divergence (owner ruling 16 Nov (4 a)): a host that forces stage
+        // slicing pushed each Mac its own stage shard inside `node_slice_plans` before it answered
+        // "no plan" (`OwnerWork::node_slice_plans`), so the oracle's whole-snapshot text would say
+        // nothing moved while the stage shards did. Any other run keeps the oracle's text.
+        let forced = state.model.as_ref().is_some_and(|m| m.forced_slice);
+        env.progress(if forced {
+            SHARDS_PUSHED
+        } else {
+            "whole snapshots: no slice to fetch"
+        });
         return Ok(());
     }
     wait_with(
