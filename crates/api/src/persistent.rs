@@ -1331,7 +1331,7 @@ mod join_state_tests {
     use super::{JOIN_STATE, PublicError, discard_join_state, settle_submit};
     fn root(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("joinstate-{}-{tag}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::remove_dir_all(&dir).unwrap_or(());
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -1350,8 +1350,8 @@ mod join_state_tests {
             "a failed submit must not leave the previous attempt's window pollable"
         );
         // The failure itself is still what the caller reports, and repeating it is not an error.
-        let _ = discard_join_state(&dir).unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
+        discard_join_state(&dir).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap_or(());
     }
     #[test]
     fn a_successful_join_keeps_its_window() {
@@ -1368,6 +1368,6 @@ mod join_state_tests {
             pending.exists(),
             "a window that was reached must stay pollable"
         );
-        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::remove_dir_all(&dir).unwrap_or(());
     }
 }

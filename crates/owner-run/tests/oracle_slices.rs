@@ -138,9 +138,6 @@ impl ReportsPort for Exchange {
         self.rec.lock().unwrap().calls.push(json!("tick"));
     }
 }
-fn state_of(spec: &Value) -> RunState {
-    state_forced(spec, false)
-}
 fn state_forced(spec: &Value, forced_slice: bool) -> RunState {
     let s = &spec["state"];
     let m = &spec["model"];

@@ -12,7 +12,7 @@ use std::fs;
 
 fn root(tag: &str) -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!("mycelium-standing-{tag}-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&root);
+    fs::remove_dir_all(&root).unwrap_or(());
     fs::create_dir_all(&root).unwrap();
     root
 }
@@ -75,5 +75,5 @@ fn a_grant_bound_to_an_earlier_swarm_does_not_authorize_a_new_join() {
             .is_none(),
         "the earlier swarm's binding no longer authorizes work"
     );
-    let _ = fs::remove_dir_all(&root);
+    fs::remove_dir_all(&root).unwrap_or(());
 }

@@ -96,12 +96,12 @@ impl Chain for Announcing {
     fn teardown(&mut self, failed: bool, env: &mut dyn StepEnv) -> Result<(), String> {
         self.torn.send(()).unwrap_or_default();
         // The deliberately delayed teardown: chats, the route's close, then `stopped`.
-        let _ = self.release.recv_timeout(patience());
+        self.release.recv_timeout(patience()).ok();
         let state = self.state.as_ref().expect("new_run ran");
         let torn = self.ports.teardown_run(failed, state, env);
         // `stopped` is published; the run's close has not ended while this teardown runs.
         self.published.send(()).unwrap_or_default();
-        let _ = self.finish.recv_timeout(patience());
+        self.finish.recv_timeout(patience()).ok();
         torn
     }
 }

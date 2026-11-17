@@ -926,9 +926,8 @@ fn a_model_without_a_codec_is_refused_by_name_and_never_sent_raw() {
             "{model:?}"
         );
         assert!(gateway.0.lock().unwrap().is_empty(), "{model:?}");
-        assert_eq!(
-            chat.busy(),
-            false,
+        assert!(
+            !chat.busy(),
             "{model:?}: a refused send leaves the service free"
         );
     }
