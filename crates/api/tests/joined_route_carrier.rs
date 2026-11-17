@@ -87,6 +87,25 @@ struct Script {
     consent_changed: Option<Arc<AtomicBool>>,
     /// EPF2: signalled once when a graceful close starts (before `close_gate`).
     close_entered: Option<mpsc::Sender<()>>,
+    /// Lane A (B6): the member's remaining command grant (`max_commands`), spent as
+    /// `NativeShard` spends it: one per step and per reset; at 0 a step and the
+    /// liveness check refuse `joined_native_consent_exhausted`.
+    commands: Option<Arc<AtomicU64>>,
+}
+impl Script {
+    /// Spend one command of the grant, as `NativeShard::check` + `remaining -= 1`.
+    fn spend(&self) -> Result<(), Error> {
+        match &self.commands {
+            Some(left) if left.load(Ordering::SeqCst) == 0 => {
+                Err(Error("joined_native_consent_exhausted"))
+            }
+            Some(left) => {
+                left.fetch_sub(1, Ordering::SeqCst);
+                Ok(())
+            }
+            None => Ok(()),
+        }
+    }
 }
 struct Controlled {
     offer: Value,
@@ -116,6 +135,7 @@ impl StageCompute for Controlled {
         if cancel.load(Ordering::SeqCst) {
             return Err(Error("compiler_stopped"));
         }
+        self.script.spend()?;
         let mut log = self.log.lock().unwrap();
         let t = log.steps;
         log.steps += 1;
@@ -172,6 +192,7 @@ impl StageCompute for Controlled {
         if self.script.reset_fails {
             return Err(Error("native_session_reset_invalid"));
         }
+        self.script.spend()?;
         self.position = 0;
         self.log.lock().unwrap().events.push(("reset", 0));
         Ok(json!({"controlled_reset":true}))
@@ -182,6 +203,11 @@ impl StageCompute for Controlled {
             .script
             .consent_wall
             .is_some_and(|w| Instant::now() >= w)
+            || self
+                .script
+                .commands
+                .as_ref()
+                .is_some_and(|left| left.load(Ordering::SeqCst) == 0)
         {
             return Err(Error("joined_native_consent_exhausted"));
         }
@@ -3695,4 +3721,78 @@ fn a_forwarding_exchange_ends_at_the_signed_expiry() {
     assert_eq!(report["native"]["graceful"], true, "{report}");
     assert_eq!(report["deferred_ack"], true, "{report}");
     assert_eq!(events, [("step", 0), ("close", 0)]);
+}
+
+// ---- Lane A, release blocker B6 (ledger row 87, owner ruling R2): a stage's command
+// grant (`max_commands`) runs out mid-answer. Measured on the real model with the owner's
+// 1,000-command grant: the answer hung ~5 min and ended `chat_generation_failed_timeouterror`,
+// the page kept offering chat, Stop took ~110 s and the next run failed on unproven cleanup.
+// The ruling: the answer ends with a NAMED error, the route leaves service, cleanup is provable.
+
+/// The final stage's grant covers this chat's prefill and two more tokens. The answer ends at
+/// once (well inside one hop deadline) with the named code, the epoch retires and refuses the
+/// next chat and qualification by that name, both stages' compute is released and the owner's
+/// teardown is proven by both members' ACKs.
+#[test]
+fn a_stage_whose_command_grant_runs_out_mid_answer_ends_it_by_name_and_leaves_service() {
+    let grant = Arc::new(AtomicU64::new(3));
+    let r = epoch_route([
+        Script::default(),
+        Script {
+            tokens: vec![5, 9, 3, 7],
+            commands: Some(grant.clone()),
+            ..Script::default()
+        },
+    ]);
+    let began = Instant::now();
+    let submitted = r.submit(32);
+    assert!(submitted.is_ok(), "{:?}", submitted.as_ref().err().map(|e| e.code));
+    let (id, _) = submitted.unwrap();
+    r.pump_until(span(B::WorkerStartup), |r| r.terminal(&id).is_some());
+    let elapsed = began.elapsed();
+    assert_eq!(r.terminal(&id).as_deref(), Some("failed"), "{}", r.state());
+    assert_eq!(r.tokens(), vec![5, 9, 3], "{}", r.state());
+    assert_eq!(grant.load(Ordering::SeqCst), 0);
+    assert!(
+        elapsed < hop_deadline(),
+        "the answer ended by name, not after a hop deadline ({:?}): {elapsed:?}; {}",
+        hop_deadline(),
+        r.state()
+    );
+    let shown = r.state();
+    {
+        let o = r.handle.state.lock().unwrap();
+        assert_eq!(
+            o.failure,
+            Some("joined_route_member_consent_exhausted"),
+            "{shown}"
+        );
+        assert!(o.retired(), "the epoch leaves service: {shown}");
+    }
+    assert_eq!(
+        r.service.qualification().err().map(|e| e.code),
+        Some("joined_route_member_consent_exhausted"),
+        "{}",
+        r.state()
+    );
+    assert_eq!(
+        r.submit(4).err().map(|e| e.code),
+        Some("joined_route_member_consent_exhausted"),
+        "the next chat is refused by the same name"
+    );
+    assert!(r.until_closed(), "the epoch's carrier closed: {}", r.state());
+    let logs: Vec<_> = r.members.iter().map(|m| m.log.clone()).collect();
+    let reports = r.finish();
+    assert_eq!(
+        reports[1]["failure"], "joined_native_consent_exhausted",
+        "{:?}",
+        reports[1]
+    );
+    for (stage, log) in logs.iter().enumerate() {
+        assert!(
+            log.lock().unwrap().released.is_some(),
+            "stage {stage}: compute released: {:?}",
+            reports[stage]
+        );
+    }
 }
