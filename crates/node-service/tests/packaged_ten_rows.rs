@@ -979,6 +979,16 @@ fn chat_link_row(owner: &Mac, member: &Mac, ev: &Evidence, run: &str) -> Result<
         ))
     }
 }
+/// Whether a Stop row needs the run's workers alive when Stop is pressed.
+#[derive(Clone, Copy, PartialEq)]
+enum AtPress {
+    /// The ten-row gate's own Stop rows: Stop must close live workers.
+    LiveWorkers,
+    /// After an exhausted command grant (lane A, A2-03: accepted fail-closed) the workers are
+    /// already closed when Stop is pressed; the row still needs the run `stopped` without an
+    /// error code, no worker of the binary and no LAN socket left, and a send after Stop refused.
+    WorkersMayBeClosed,
+}
 fn stop_row(
     owner: &Owner,
     member: &Mac,
@@ -986,6 +996,7 @@ fn stop_row(
     run: &str,
     binary: &Path,
     lan: &str,
+    at_press: AtPress,
 ) -> Result<(), String> {
     let pids = workers(binary);
     let began = Instant::now();
@@ -1028,15 +1039,23 @@ fn stop_row(
         }
         std::thread::sleep(millis(B::OwnerPoll) / 5);
     };
+    // No worker of the binary at all once stopped (not only none of those seen at the press).
+    let remaining: Vec<u32> = workers(binary)
+        .iter()
+        .map(|p| p.0)
+        .filter(|p| alive(*p))
+        .collect();
     let row = json!({"row": format!("{run} Stop"), "wall_ms": stopped_ms, "status_line": {"run": state["state"],
         "error_code": state["error_code"], "chat_state": page, "send_after_stop": [send_code, send]},
-        "workers_left": left, "lan_sockets_left": lan_sockets, "workers_gone_ms": ms(began),
+        "workers_left": left, "workers_remaining": remaining, "lan_sockets_left": lan_sockets,
+        "live_workers_required": at_press == AtPress::LiveWorkers, "workers_gone_ms": ms(began),
         "member_card": member.status()["member_work"]});
     let ok = state["state"] == "stopped"
         && state["error_code"].is_null()
         && left.is_empty()
         && lan_sockets.is_empty()
-        && !pids.is_empty()
+        && (at_press == AtPress::WorkersMayBeClosed || !pids.is_empty())
+        && (at_press == AtPress::LiveWorkers || remaining.is_empty())
         && send_code != 200;
     ev.row(with(
         row,
@@ -1154,7 +1173,15 @@ fn ten_rows_with_the_real_model_on_the_lan() {
                 if let Err(e) = chatted {
                     failures.push(e);
                 }
-                if let Err(e) = stop_row(&owner, &member, &ev, run, &binary, &lan) {
+                if let Err(e) = stop_row(
+                    &owner,
+                    &member,
+                    &ev,
+                    run,
+                    &binary,
+                    &lan,
+                    AtPress::LiveWorkers,
+                ) {
                     failures.push(e);
                 }
             }
@@ -1361,7 +1388,15 @@ fn probe_route_chat_against_a_single_process_reference() {
                 }
                 report.push(line);
             }
-            if let Err(e) = stop_row(&owner, &member, &ev, "probe", &binary, &lan) {
+            if let Err(e) = stop_row(
+                &owner,
+                &member,
+                &ev,
+                "probe",
+                &binary,
+                &lan,
+                AtPress::LiveWorkers,
+            ) {
                 failures.push(e);
             }
         }
@@ -1507,7 +1542,15 @@ fn a_small_command_grant_ends_the_answer_by_name_on_the_lan() {
                     next_pieces.len()
                 ));
             }
-            if let Err(e) = stop_row(&owner, &member, &ev, "grant", &binary, &lan) {
+            if let Err(e) = stop_row(
+                &owner,
+                &member,
+                &ev,
+                "grant",
+                &binary,
+                &lan,
+                AtPress::WorkersMayBeClosed,
+            ) {
                 failures.push(e);
             }
         }
