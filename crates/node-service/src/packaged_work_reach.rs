@@ -136,6 +136,33 @@ pub fn follow(
         }),
     }
 }
+/// Lane XB patch 3 (REVIEW XB2-02): what a joined Mac does with its work service when an
+/// announcement arrives.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Next {
+    /// The service stays: it is bound in exactly the reach this announcement signs.
+    Reuse,
+    /// No service fits (none yet, or one bound in another reach): close it, bind anew.
+    Rebind,
+}
+/// The decision for one announcement: `bound` the reach of this Mac's current service, `signed`
+/// what the announcement signs (`RunReach::from_announcement`), `relay` this Mac's relay.
+pub fn next_service(
+    bound: Option<&RunReach>,
+    signed: Result<RunReach, &'static str>,
+    relay: &Reach,
+) -> Result<Next, &'static str> {
+    let signed = signed?;
+    if let RunReach::Relay(url) = &signed
+        && relay.relay_url().ok().as_ref() != Some(url)
+    {
+        return Err(RELAY_MISMATCH);
+    }
+    match bound {
+        Some(bound) if *bound == signed => Ok(Next::Reuse),
+        _ => Ok(Next::Rebind),
+    }
+}
 /// Lane XB patch 3 (REVIEW XB2-01): after resolution, a run signed across networks must have
 /// resolved to exactly that mode at the signed relay; anything else (no usable interface, an
 /// ambiguous or VPN selection, an unreadable one: a loopback-only result) is the named refusal
@@ -492,6 +519,72 @@ mod tests {
         });
         assert_eq!(none.choice.0, None);
         assert_eq!(none.reach, "local_only");
+    }
+
+    /// Lane XB patch 3 (REVIEW XB2-02): EVERY announcement's signed reach is validated in full
+    /// before a work service is reused, in both directions: a LAN service meeting a malformed or
+    /// unsupported field, and a relay service meeting a foreign relay, are named refusals, never
+    /// a silent reuse; a valid change of mode rebinds; only an identical binding is reused.
+    #[test]
+    fn every_announcement_is_validated_before_a_work_service_is_reused() {
+        let same = RunReach::SameNetwork;
+        let ours = RunReach::Relay(mycelium());
+        let foreign = RunReach::Relay("https://relay.example.org".parse().unwrap());
+        let shipped = Reach::Shipped;
+        let key = api::run_exchange::work_network::FIELD;
+        let field = |value: Value| RunReach::from_value(&json!({ key: value }));
+        let malformed = field(json!({"protocol": api::run_exchange::work_network::PROTOCOL,
+            "reach": "relay"}));
+        let unsupported = field(json!({"protocol": "mycelium.a13_work_network.v2",
+            "reach": "relay", "relay_url": "https://relay.mycelium.now/"}));
+        assert_eq!(malformed, Err(api::run_exchange::work_network::INVALID));
+        assert_eq!(
+            unsupported,
+            Err(api::run_exchange::work_network::VERSION_UNSUPPORTED)
+        );
+        // Only an identical binding is reused.
+        assert_eq!(
+            next_service(Some(&same), Ok(same.clone()), &shipped),
+            Ok(Next::Reuse)
+        );
+        assert_eq!(
+            next_service(Some(&ours), Ok(ours.clone()), &shipped),
+            Ok(Next::Reuse)
+        );
+        // A valid change of mode (or no service yet) binds anew.
+        for (bound, signed) in [
+            (Some(&same), ours.clone()),
+            (Some(&ours), same.clone()),
+            (None, ours.clone()),
+            (None, same.clone()),
+        ] {
+            assert_eq!(
+                next_service(bound, Ok(signed.clone()), &shipped),
+                Ok(Next::Rebind),
+                "{bound:?} -> {signed:?}"
+            );
+        }
+        // LAN service -> malformed / unsupported field: named, never an update.
+        for bound in [Some(&same), Some(&ours), None] {
+            assert_eq!(
+                next_service(bound, malformed.clone(), &shipped),
+                Err(api::run_exchange::work_network::INVALID),
+                "{bound:?}"
+            );
+            assert_eq!(
+                next_service(bound, unsupported.clone(), &shipped),
+                Err(api::run_exchange::work_network::VERSION_UNSUPPORTED),
+                "{bound:?}"
+            );
+        }
+        // Relay service -> a foreign relay: named (D4), never reused on the old relay.
+        for bound in [Some(&ours), Some(&same), None] {
+            assert_eq!(
+                next_service(bound, Ok(foreign.clone()), &shipped),
+                Err(RELAY_MISMATCH),
+                "{bound:?}"
+            );
+        }
     }
 
     /// The owner's stored choice, its signed form, the window's action and status; an invalid

@@ -146,17 +146,32 @@ impl PackagedMember {
             self.network.close_work();
             return Err(code);
         }
-        // Lane XB patch 2 (D1): a service bound in another mode than the run now signs is
-        // closed, never reused; the new one binds in the signed mode.
-        let across = matches!(
-            api::run_exchange::work_network::RunReach::from_announcement(&announcement),
-            Ok(api::run_exchange::work_network::RunReach::Relay(_))
-        );
-        if lock(&self.network.work)
+        // Lane XB patch 3 (REVIEW XB2-02): EVERY announcement's signed reach is validated in
+        // full (closed shape, version, this Mac's relay) before a service may be reused; a
+        // malformed or foreign field is a named refusal and closes the service (no stale
+        // publication), a valid change of mode closes it and binds anew in the signed mode.
+        let signed = announcement.announcement().clone();
+        let bound = lock(&self.network.work)
             .as_ref()
-            .is_some_and(|work| work.across_networks() != across)
-        {
-            self.network.close_work();
+            .map(|work| work.run_reach().clone());
+        match crate::packaged_work::reach::next_service(
+            bound.as_ref(),
+            api::run_exchange::work_network::RunReach::from_announcement(&announcement),
+            self.network.reach.relay(),
+        ) {
+            Err(code) => {
+                self.network.close_work();
+                self.network.reach.refuse(&signed, code);
+                return Err(code.to_owned());
+            }
+            Ok(crate::packaged_work::reach::Next::Rebind) if bound.is_some() => {
+                self.network.close_work();
+                if lock(&self.network.work).is_some() {
+                    // The old service still owes its cleanup: no new one beside it.
+                    return Err("packaged_work_cleanup_unproven".into());
+                }
+            }
+            Ok(_) => {}
         }
         let mut slot = lock(&self.network.work);
         if let Some(work) = slot.as_mut() {
@@ -174,7 +189,6 @@ impl PackagedMember {
             let (identity, _, _) = app_host::identity(&root).map_err(|e| e.code.to_owned())?;
             // D1 / D3: the signed mode, or a named refusal on this Mac's card and in its report
             // to the owner (never a silent fallback, never the owner's timeout).
-            let signed = announcement.announcement().clone();
             let refuse = |code: &str| {
                 self.network.reach.refuse(&signed, code);
                 code.to_owned()

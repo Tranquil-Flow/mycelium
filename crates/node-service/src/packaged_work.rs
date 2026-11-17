@@ -363,8 +363,9 @@ pub struct Service {
     /// The loop unwound before its custody handoff, so the exact `work::Work` is gone and no
     /// later close can prove its stage released. Sticky: every close stays an error.
     unprovable: bool,
-    /// Lane XB patch 2: bound across networks (the run's signed mode).
-    across: bool,
+    /// Lane XB patch 3 (REVIEW XB2-02): the network reach its endpoints were bound in (the
+    /// run's signed mode, with the relay they registered at).
+    reach: api::run_exchange::work_network::RunReach,
 }
 impl Service {
     #[cfg(all(test, feature = "desktop-shell"))]
@@ -462,10 +463,10 @@ impl Service {
         shared.live()?; // refusal precedes sockets, threads, custody and native work
         let (send, ready) = mpsc::sync_channel(1);
         let worker = shared.clone();
-        let across = network
-            .0
-            .as_ref()
-            .is_some_and(|(_, policy)| policy.relay().is_some());
+        let reach = match network.0.as_ref().and_then(|(_, policy)| policy.relay()) {
+            Some(relay) => api::run_exchange::work_network::RunReach::Relay(relay.clone()),
+            None => api::run_exchange::work_network::RunReach::SameNetwork,
+        };
         let cleanup = Arc::new(Mutex::new(None));
         let handed = cleanup.clone();
         let thread = std::thread::Builder::new()
@@ -479,11 +480,11 @@ impl Service {
             thread: Some(thread),
             cleanup,
             unprovable: false,
-            across,
+            reach,
         };
         // Across networks the start also waits for the relay (one ready-address window).
         let start = duration(B::RouterClose)?
-            + if service.across {
+            + if service.across_networks() {
                 duration(B::SidecarReadyAddressWindow)?
             } else {
                 Duration::ZERO
@@ -532,7 +533,11 @@ impl Service {
     }
     /// Lane XB patch 2 (D1): whether this service's endpoints were bound across networks.
     pub fn across_networks(&self) -> bool {
-        self.across
+        self.reach != api::run_exchange::work_network::RunReach::SameNetwork
+    }
+    /// Lane XB patch 3 (REVIEW XB2-02): the reach this service's endpoints were bound in.
+    pub fn run_reach(&self) -> &api::run_exchange::work_network::RunReach {
+        &self.reach
     }
     pub fn registration(&self) -> Result<Value> {
         self.shared.live()?;
