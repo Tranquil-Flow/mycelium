@@ -1255,9 +1255,9 @@ fn start<H: MemberHost>(
 /// close/retry: the first close joins its thread (returning that thread's terminal error once),
 /// the second retries the failure the join retained (`PumpWorker::close`).
 ///
-/// Genuine debt still blocks: a RUNNING worker, a worker of this same scope and a start-failure
-/// latch are left to [`start`]'s own refusals, and a worker whose cleanup still fails stays in
-/// the slot and its error is returned.
+/// Genuine debt still blocks: a RUNNING worker, a worker of this same run (any deployment or
+/// incarnation, see [`earlier_run`]) and a start-failure latch are left to [`start`]'s own
+/// refusals, and a worker whose cleanup still fails stays in the slot and its error is returned.
 fn settle_finished<H: MemberHost>(host: &H, scope: &Value) -> OResult<()> {
     let lifecycle = host.lifecycle()?;
     let _lifecycle = locked(&lifecycle)?;
@@ -1265,7 +1265,7 @@ fn settle_finished<H: MemberHost>(host: &H, scope: &Value) -> OResult<()> {
         let obsolete = s.failure.is_none()
             && s.worker
                 .as_ref()
-                .is_some_and(|w| !w.running() && w.scope() != scope);
+                .is_some_and(|w| !w.running() && earlier_run(w.scope(), scope));
         if obsolete {
             *s.incarnation = Arc::new(());
             s.worker.take()
@@ -1289,6 +1289,16 @@ fn settle_finished<H: MemberHost>(host: &H, scope: &Value) -> OResult<()> {
             host.slot(|s| *s.worker = Some(worker))?;
             Err(error)
         }
+    }
+}
+
+/// PR-ASTRA-05: `old` belongs to another run only when both scopes carry a non-empty string
+/// `run_id` and the two differ. The same run under another deployment or member incarnation, or a
+/// missing or invalid run identity on either side, is never an earlier run.
+fn earlier_run(old: &Value, new: &Value) -> bool {
+    match (old["run_id"].as_str(), new["run_id"].as_str()) {
+        (Some(old), Some(new)) => !old.is_empty() && !new.is_empty() && old != new,
+        _ => false,
     }
 }
 
