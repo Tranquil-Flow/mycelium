@@ -61,10 +61,9 @@ fn probe_two_endpoints_exchange_a_shard_chunk_through_the_mycelium_relay_only() 
     let mut client = bind(client_key.clone());
     let online = Instant::now();
     for host in [&server, &client] {
-        rt.block_on(tokio::time::timeout(
-            Duration::from_secs(15),
-            host.online().unwrap(),
-        ))
+        rt.block_on(async {
+            tokio::time::timeout(Duration::from_secs(15), host.online().unwrap()).await
+        })
         .expect("registered at relay.mycelium.now within 15 s");
     }
     let online_ms = online.elapsed().as_millis();
