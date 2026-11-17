@@ -1062,6 +1062,151 @@ fn status_and_stop_answer_while_the_chat_state_waits_for_the_run() {
     assert_eq!(verdict, Ok(Poll::Verified));
 }
 
+/// The packaged core over `services` with its own submit/answer pair (as the window submits).
+type Submit = Box<dyn Fn(&str, &str) -> std::sync::mpsc::Receiver<desktop::core::Reply>>;
+fn assembled(
+    services: DesktopServices,
+    private: &std::path::Path,
+) -> (Submit, node_service::packaged::AppCleanup) {
+    use desktop::{channel::Request, lifecycle::Cleanup};
+    let source = node_service::app_host::ModelSource::new(
+        private.to_path_buf(),
+        Arc::new(api::acquisition::HttpTransport::hugging_face(true)),
+    );
+    let (core, mut cleanup) = node_service::packaged::assemble(services, source);
+    cleanup.bind_clock(Instant::now()).unwrap();
+    let submit = move |method: &str, path: &str| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        core.submit(
+            Request {
+                window: "main".into(),
+                method: method.into(),
+                uri: format!("{}{path}", desktop::channel::ORIGIN),
+                headers: vec![
+                    ("x-mycelium-action".into(), "1".into()),
+                    ("content-type".into(), "application/json".into()),
+                ],
+                body: if method == "GET" {
+                    Vec::new()
+                } else {
+                    b"{}".to_vec()
+                },
+            },
+            Box::new(move |reply| tx.send(reply).unwrap_or_default()),
+        );
+        rx
+    };
+    (Box::new(submit), cleanup)
+}
+fn answered(rx: std::sync::mpsc::Receiver<desktop::core::Reply>, what: &str) -> (u16, Value) {
+    let reply = rx
+        .recv_timeout(millis(B::ModelSelection))
+        .unwrap_or_else(|_| panic!("{what} got no answer"));
+    let body: Value = serde_json::from_slice(&reply.body).unwrap_or(Value::Null);
+    (reply.status, body)
+}
+fn quit_verified(
+    cleanup: &mut node_service::packaged::AppCleanup,
+) -> Result<Poll, desktop::lifecycle::CleanupError> {
+    use desktop::lifecycle::Cleanup;
+    cleanup
+        .begin(desktop::lifecycle::quit_allowance().unwrap())
+        .unwrap();
+    let deadline = Instant::now() + millis(B::StageCleanup);
+    loop {
+        match cleanup.poll() {
+            Ok(Poll::Pending) if Instant::now() < deadline => std::thread::yield_now(),
+            other => break other,
+        }
+    }
+}
+const REVISION: &str = "0123456789abcdef0123456789abcdef01234567";
+
+/// Lane VL patch round 1 (REVIEW-laneUI-astra VL-01): the status never waits for the running
+/// build's revision. While its reader has not returned (a stalled filesystem, a FIFO), more status
+/// requests than the window's callback slots, sent at once, each answer with the app's version and
+/// `source_revision: null`; Stop answers, and Quit verifies with the reader still blocked.
+#[test]
+fn the_status_names_the_version_at_once_while_the_build_revision_is_still_read() {
+    use node_service::desktop_host::AppRevision;
+    let node = NodeService::new(
+        Arc::new(FailsAtOnce),
+        "private-local-token".into(),
+        node_service::native::development_qualification().unwrap(),
+    );
+    let private = private();
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let (inside_tx, inside) = std::sync::mpsc::channel::<()>();
+    let revision = AppRevision::acquire(move || {
+        inside_tx.send(()).unwrap_or_default();
+        held.recv().unwrap_or_default();
+        Some(REVISION.into())
+    });
+    inside
+        .recv_timeout(millis(B::ModelSelection))
+        .expect("the revision reader started");
+    let services = DesktopServices::new(node, node_service::packaged::CALLBACK_CAPACITY, &private)
+        .with_app_revision(revision.clone());
+    let (submit, mut cleanup) = assembled(services, &private);
+    let pending: Vec<_> = (0..2 * node_service::packaged::CALLBACK_CAPACITY.get())
+        .map(|_| submit("GET", "/api/status"))
+        .collect();
+    for status in pending {
+        let (code, body) = answered(status, "a status while the revision is read");
+        assert_eq!(code, 200, "{body}");
+        assert_eq!(
+            body["app_version"],
+            json!({"version": desktop::bundle::VERSION, "source_revision": null}),
+            "{body}"
+        );
+    }
+    let stop = answered(submit("POST", "/api/serving/stop"), "Stop");
+    assert!(
+        !(stop.0 == 503
+            && matches!(
+                stop.1["error"].as_str(),
+                Some("desktop_callback_capacity" | "native_service_capacity")
+            )),
+        "Stop refused for capacity while the revision is read: {stop:?}"
+    );
+    assert_eq!(quit_verified(&mut cleanup), Ok(Poll::Verified));
+    assert_eq!(revision.known(), None, "the reader is still blocked");
+    drop(release);
+}
+
+/// Once the revision reader has returned, the status names that build (read without waiting).
+#[test]
+fn the_status_names_the_build_once_its_revision_is_known() {
+    use node_service::desktop_host::AppRevision;
+    let node = NodeService::new(
+        Arc::new(FailsAtOnce),
+        "private-local-token".into(),
+        node_service::native::development_qualification().unwrap(),
+    );
+    let private = private();
+    let services = DesktopServices::new(node, node_service::packaged::CALLBACK_CAPACITY, &private)
+        .with_app_revision(AppRevision::acquire(|| Some(REVISION.into())));
+    let (submit, mut cleanup) = assembled(services, &private);
+    let deadline = Instant::now() + millis(B::ModelSelection);
+    loop {
+        let (code, body) = answered(submit("GET", "/api/status"), "status");
+        assert_eq!(code, 200, "{body}");
+        if body["app_version"]
+            == json!({"version": desktop::bundle::VERSION, "source_revision": REVISION})
+        {
+            break;
+        }
+        assert_eq!(
+            body["app_version"]["source_revision"],
+            Value::Null,
+            "{body}"
+        );
+        assert!(Instant::now() < deadline, "the known revision never shown");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(quit_verified(&mut cleanup), Ok(Poll::Verified));
+}
+
 /// The roots `private()` makes are removed with their contents when the test ends, also when it
 /// fails (REVIEW-lanePH1 finding 8: they used to accumulate in the user's TMPDIR).
 #[test]

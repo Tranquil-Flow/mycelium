@@ -934,3 +934,72 @@ pub fn status(roots: &Roots) -> Result<Value> {
         "publisher_key_digest": installed.as_ref().and_then(|r| field(r, "publisher_key_digest")),
     }))
 }
+
+#[cfg(test)]
+mod record_tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// Lane VL patch round 1 (REVIEW-laneUI-astra VL-01): the record checked as an owner-only
+    /// regular file by its path, then swapped for a FIFO with no writer before it is opened, is
+    /// refused at once: the open neither follows a link nor waits on a FIFO, and the opened object
+    /// itself is checked against what was admitted. An unchanged record still reads.
+    #[test]
+    fn a_record_swapped_for_a_fifo_after_its_check_is_refused_without_waiting() {
+        let dir = std::env::temp_dir().canonicalize().unwrap().join(format!(
+            "v02-vl-record-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(RECORD);
+        let write = |bytes: &[u8]| {
+            OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)
+                .unwrap()
+                .write_all(bytes)
+                .unwrap();
+        };
+        let read_within = |checked: fs::Metadata| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let path = path.clone();
+            std::thread::spawn(move || {
+                tx.send(read_checked(&path, &checked)).unwrap_or_default();
+            });
+            rx.recv_timeout(Duration::from_secs(10))
+                .expect("the record read waited on what was opened")
+        };
+        write(b"{}");
+        let checked = fs::symlink_metadata(&path).unwrap();
+        assert_eq!(read_within(checked.clone()).as_deref(), Some(&b"{}"[..]));
+
+        fs::remove_file(&path).unwrap();
+        let made = Command::new("/usr/bin/mkfifo")
+            .args(["-m", "600"])
+            .arg(&path)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        assert_eq!(read_within(checked.clone()), None, "a FIFO swapped in");
+
+        // Another regular file of the same size and mode swapped in is not the one checked.
+        fs::remove_file(&path).unwrap();
+        write(b"[]");
+        assert_eq!(
+            read_within(checked.clone()),
+            None,
+            "another file swapped in"
+        );
+
+        // A link swapped in for the checked file is not followed.
+        let target = dir.join("target.json");
+        fs::rename(&path, &target).unwrap();
+        symlink(&target, &path).unwrap();
+        let target_checked = fs::symlink_metadata(&target).unwrap();
+        assert_eq!(read_within(target_checked), None, "a link swapped in");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+}
