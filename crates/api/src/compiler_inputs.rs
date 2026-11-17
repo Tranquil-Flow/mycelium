@@ -27,6 +27,32 @@ type Result<T> = std::result::Result<T, Error>;
 fn state(error: private_state::StateError) -> Error {
     Error(error.0)
 }
+/// Lane A, B12 (ledger row 96): take this module's exclusive `flock` on `file`, retrying a busy
+/// lock for the router's close allowance (every tenth of the owner's poll) before answering
+/// busy. The locks are `flock`s on open descriptions, and a child this process forks holds a
+/// copy of every descriptor from fork to exec (macOS has no close-on-fork; a confined spawn runs
+/// its pre-exec loop over the whole descriptor table in that window): a holder that let go in
+/// that window leaves its lock held by the child until it execs. `Ok(false)`: still busy after
+/// the allowance (a holder that really holds it); `Err`: the lock call itself failed.
+pub(crate) fn settle_lock(file: &fs::File) -> std::result::Result<bool, Error> {
+    let close = budgets::BudgetId::RouterClose
+        .span(budgets::Entries::ZERO)
+        .map_err(|_| Error("budget_unavailable"))?;
+    let poll = budgets::BudgetId::OwnerPoll
+        .span(budgets::Entries::ZERO)
+        .map_err(|_| Error("budget_unavailable"))?;
+    let end = std::time::Instant::now() + std::time::Duration::from_millis(close.millis());
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(true),
+            Err(fs::TryLockError::WouldBlock) if std::time::Instant::now() < end => {
+                std::thread::sleep(std::time::Duration::from_millis(poll.millis()) / 10);
+            }
+            Err(fs::TryLockError::WouldBlock) => return Ok(false),
+            Err(fs::TryLockError::Error(_)) => return Err(Error("compiler_lock_failed")),
+        }
+    }
+}
 /// Diagnostic lines this module wrote to the log, kept for the tests that check the log names
 /// what it should (lane A, B11 (a)).
 #[cfg(test)]
@@ -800,8 +826,9 @@ fn storage_ledger(runs: &Path) -> Result<(fs::File, Value)> {
     {
         return Err(Error("compiler_storage_lock_failed"));
     }
-    lock.try_lock()
-        .map_err(|_| Error("compiler_storage_busy"))?;
+    if !settle_lock(&lock).map_err(|_| Error("compiler_storage_busy"))? {
+        return Err(Error("compiler_storage_busy"));
+    }
     let path = runs.join(STORAGE_LEDGER);
     let ledger = private_state::load(&path, private_state::private_json_limit().map_err(state)?)
         .map_err(|e| named_state(&path, e))?

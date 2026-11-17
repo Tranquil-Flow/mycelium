@@ -108,29 +108,13 @@ fn lock(root: &Path) -> Result<fs::File> {
         .open(root.join("member-shard.lock"))
         .map_err(|_| fail("member_shard_lock_failed"))?;
     file_identity(&f)?;
-    // Lane A, B12 (ledger row 96): the lock is a `flock` on this open description, and a child
-    // this process forks holds a copy of every descriptor from fork to exec (macOS has no
-    // close-on-fork; a confined spawn runs its pre-exec loop over the whole descriptor table in
-    // that window). A holder dropped meanwhile leaves its lock held by that child until it
-    // execs, which refused the next holder `member_shard_busy` now and then. A busy lock is
-    // retried (every tenth of the owner's poll) for the router's close allowance before it is
-    // refused; a holder that really holds it is still refused, by the same name.
-    let close = budgets::BudgetId::RouterClose
-        .span(budgets::Entries::ZERO)
-        .map_err(|_| fail("budget_unavailable"))?;
-    let poll = budgets::BudgetId::OwnerPoll
-        .span(budgets::Entries::ZERO)
-        .map_err(|_| fail("budget_unavailable"))?;
-    let end = std::time::Instant::now() + std::time::Duration::from_millis(close.millis());
-    loop {
-        match f.try_lock() {
-            Ok(()) => return Ok(f),
-            Err(fs::TryLockError::WouldBlock) if std::time::Instant::now() < end => {
-                std::thread::sleep(std::time::Duration::from_millis(poll.millis()) / 10);
-            }
-            Err(_) => return Err(fail("member_shard_busy")),
-        }
+    // Lane A, B12 (ledger row 96): a busy lock is retried for the close allowance before it is
+    // refused (`settle_lock`: a forked child's copy of a dropped holder's lock lets go at its
+    // exec); a holder that really holds it is still refused, by the same name.
+    if !settle_lock(&f).map_err(|_| fail("member_shard_busy"))? {
+        return Err(fail("member_shard_busy"));
     }
+    Ok(f)
 }
 fn file_identity(file: &fs::File) -> Result<(u64, u64)> {
     let m = file

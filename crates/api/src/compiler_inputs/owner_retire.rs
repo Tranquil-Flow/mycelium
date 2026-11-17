@@ -176,10 +176,12 @@ fn retire_one(runs: &Path, run: &str, row: &Value) -> Result<Outcome> {
         Ok(None) => return Ok(Outcome::NotOwner),
         _ => return Err(changed()),
     }
-    match directory.try_lock() {
-        Ok(()) => {}
-        Err(fs::TryLockError::WouldBlock) => return Ok(Outcome::Live),
-        Err(fs::TryLockError::Error(_)) => return Err(changed()),
+    // A busy lock is a live run once it stays busy past the close allowance (lane A, B12: a
+    // forked child's copy of a dead run's lock lets go at its exec).
+    match super::settle_lock(&directory) {
+        Ok(true) => {}
+        Ok(false) => return Ok(Outcome::Live),
+        Err(_) => return Err(changed()),
     }
     // Recheck the path still names the locked directory before anything below it is removed.
     let named = fs::symlink_metadata(&root).map_err(|_| changed())?;
