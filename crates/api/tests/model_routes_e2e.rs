@@ -92,6 +92,12 @@ impl Instance {
     ) -> Self {
         fs::create_dir_all(root).expect("root");
         fs::set_permissions(root, fs::Permissions::from_mode(0o700)).expect("mode");
+        // The executed oracle recorded these downloads with v0.1.4's starter `a9-route`, and the
+        // loopback repository serves that model's tiny Qwen2 snapshot (`tiny_repository`). v0.2's
+        // starter is Qwen3-0.6B (B13, `contracts/divergences.json` `run_model_default`), so the
+        // installation takes `a9-route` explicitly, as a saved picker choice: these tests are
+        // about the download, not the default.
+        api::preferences::run_model::save_choice(root, "a9-route").expect("saved run model");
         let mut command = Command::new(exe_dir().join("examples/headless"));
         command.env_remove("MYCELIUM_L10_TEST_SIDECAR");
         if let Some(sidecar) = sidecar {

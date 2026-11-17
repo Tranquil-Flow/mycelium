@@ -45,6 +45,36 @@
         "the member's worker guard limit (prepare memory)",
         "the slices step's stage_memory_consent_below_context check"
       ]
+    },
+    "run_model_default": {
+      "oracle_value": "a9-route",
+      "oracle_source": "mycelium_a13_macos/run_model.py:69-75 demo_default_choice (starter 'a9-route', Qwen/Qwen2.5-0.5B-Instruct @ 7ae557604adf67be50417f59c2c2f167def9a775) and :34-42 CHOICES labels",
+      "product_value": "qwen3-0.6b",
+      "product_source": "crates/api/src/preferences.rs run_model::DEMO_DEFAULT (Qwen/Qwen3-0.6B @ c1899de289a04d12100db370d81485cdf75e47ca) and run_model::CHOICE_ROWS labels",
+      "ruling": "ORCHESTRATOR DECISION 17 Nov 2026 (owner asleep; reversible), on owner ruling 28: Qwen3-0.6B is the only model proven across two Macs in v0.2 (ledger row 73, blocker B13)",
+      "reason": "v0.1.4's starter Qwen2.5-0.5B-Instruct was its tested two-Mac model; v0.2 has served across two Macs only with Qwen3-0.6B (the hermetic ten-row gate and the rv40 physical run). A fresh install therefore runs Qwen3-0.6B, its picker text says it was tested on two Macs (~1.5 GB download), and Qwen2.5-0.5B's no longer claims so. A saved choice and MYCELIUM_A13_RUN_MODEL still win over the starter, as in v0.1.4; nothing is migrated.",
+      "oracle_labels": {
+        "a9-route": "Qwen2.5-0.5B-Instruct — tested starter (tested on two Macs; ~1 GB download if not cached)",
+        "qwen3-0.6b": "Qwen3-0.6B (not yet tested on two Macs)"
+      },
+      "product_labels": {
+        "a9-route": "Qwen2.5-0.5B-Instruct (not yet tested on two Macs; ~1 GB download if not cached)",
+        "qwen3-0.6b": "Qwen3-0.6B — tested starter (tested on two Macs; ~1.5 GB download if not cached)"
+      },
+      "follows_it": [
+        "the run-model document's selected, model_id, resolved_commit and resources.selected on a fresh install (source demo_default) and its demo_default field on every document",
+        "/api/status run_model.selected on a fresh install, hence the model a fresh owner's acquisition opens and downloads",
+        "the picker labels of a9-route and qwen3-0.6b"
+      ],
+      "parity_tests": [
+        "api/tests/support/oracle_context.rs at_product_picker / at_product_picker_bytes (oracle side checked against this record, then moved), used by run_model_document.rs, persistent_backend.rs, wire_routes.rs and node-service packaged_action_root.rs",
+        "test-support/journeys Target::starter_run_model / golden_observations (the L3 golden's first_run)",
+        "api/tests/model_routes_e2e.rs and support/headless_observation.rs take a9-route explicitly (they download the recorded Qwen2 snapshot)"
+      ],
+      "product_tests": [
+        "api/tests/run_model_v02.rs (fresh install, saved choice and environment, picker texts)",
+        "api/tests/run_model_document.rs the_run_model_default_divergence_from_the_oracle_is_recorded"
+      ]
     }
   }
 }

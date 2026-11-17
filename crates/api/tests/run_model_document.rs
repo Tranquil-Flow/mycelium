@@ -3,13 +3,15 @@
 //! expected value in `fixtures/oracle_run_model.json` was produced by importing the read-only
 //! package at f4e366e9 and calling `run_model.document`, `model_resources.consent_document`
 //! and `DemoApp._choose_run_model` on Python 3.14.7 (`L10-evidence/r7-probe-run-model.py`).
+//! Two recorded divergences are applied to the oracle side after it is checked
+//! (`contracts/divergences.json`): the serving context and v0.2's starter and picker texts (B13).
 #[path = "support/oracle_context.rs"]
 mod oracle_context;
 use api::{
     model_catalog,
     preferences::run_model::{self, Facts},
 };
-use oracle_context::{ORACLE_CONTEXT_TOKENS, at_product_context};
+use oracle_context::{ORACLE_CONTEXT_TOKENS, at_product_context, at_product_picker, picker_record};
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -39,6 +41,7 @@ fn expected(case: &Value) -> Value {
         Some(v) => json!({"ok": v}),
         None => json!({"err": case["err"]}),
     };
+    at_product_picker(&mut expected);
     at_product_context(&mut expected);
     expected
 }
@@ -262,4 +265,58 @@ fn the_serving_context_divergence_from_the_oracle_is_recorded() {
         );
     }
     assert_ne!(context["product_value"], context["oracle_value"]);
+}
+
+/// B13 (ORCHESTRATOR DECISION 17 Nov 2026, reversible, on ruling 28): v0.2's starter is Qwen3-0.6B
+/// where v0.1.4's is Qwen2.5-0.5B-Instruct, and the picker texts say so. The record's oracle side
+/// is what the executed fixture shows on a fresh install; its product side is what the product
+/// shows; every oracle document moved by `at_product_picker` was checked against the oracle side.
+#[test]
+fn the_run_model_default_divergence_from_the_oracle_is_recorded() {
+    let record = picker_record();
+    for key in ["oracle_source", "product_source", "ruling", "reason"] {
+        assert!(record[key].as_str().is_some_and(|s| !s.is_empty()), "{key}");
+    }
+    assert_ne!(record["product_value"], record["oracle_value"]);
+    // Oracle side: the executed fresh-install document (no state, no environment).
+    let cases = oracle()["document_cases"].as_array().unwrap().clone();
+    let fresh = cases
+        .iter()
+        .find(|c| c["state"].is_null() && c["env"].is_null())
+        .expect("a recorded fresh-install document");
+    let recorded = &fresh["ok"];
+    assert_eq!(recorded["source"], "demo_default");
+    assert_eq!(recorded["selected"], record["oracle_value"]);
+    assert_eq!(recorded["demo_default"], record["oracle_value"]);
+    let label = |doc: &Value, name: &str| {
+        doc["choices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == name)
+            .unwrap()["label"]
+            .clone()
+    };
+    for (name, text) in record["oracle_labels"].as_object().unwrap() {
+        assert_eq!(label(recorded, name), *text, "oracle {name}");
+    }
+    // Product side: a fresh root's document.
+    let dir = root("b13-record");
+    let product = run_model::document(&dir, None, memory(fresh)).unwrap();
+    assert_eq!(product["source"], "demo_default");
+    assert_eq!(product["selected"], record["product_value"]);
+    assert_eq!(product["demo_default"], record["product_value"]);
+    for (name, text) in record["product_labels"].as_object().unwrap() {
+        assert_eq!(label(&product, name), *text, "product {name}");
+    }
+    // Every other picker text is the oracle's.
+    for choice in product["choices"].as_array().unwrap() {
+        let name = choice["name"].as_str().unwrap();
+        if record["product_labels"].get(name).is_none() {
+            assert_eq!(choice["label"], label(recorded, name), "{name}");
+        }
+    }
+    // The moved oracle document is the product's, byte for byte of the parsed value.
+    assert_eq!(json!({"ok": product}), expected(fresh));
+    fs::remove_dir_all(dir).unwrap();
 }

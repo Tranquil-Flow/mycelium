@@ -140,7 +140,8 @@ fn run() -> Result<()> {
             write_new(Path::new(&args[5]), &fixture)?;
         } else {
             let golden = read_json(Path::new(&args[5]))?;
-            if let Err(error) = compare(&golden["observations"], &record["observations"]) {
+            let expected = target.golden_observations(&golden["observations"])?;
+            if let Err(error) = compare(&expected, &record["observations"]) {
                 record["result"] = json!("FAIL");
                 record["error"] = json!(error);
             }

@@ -172,7 +172,7 @@ pub fn execute(target: &Target, real_home: &Path, run: &mut Run) -> Result<()> {
     let mut member = App::launch(target, real_home, None)?;
     let mut signed_request = Value::Null;
     let action = (|| {
-        run.status(&mut member,"first_run",APP,json!({"/installation_role":"owner","/resource_policy":null,"/authority/swarm_created":false,"/authority/membership_state":"absent","/fast_mode/enabled":false,"/fast_mode/source":"default","/fast_mode/locked":false,"/run_model/selected":"a9-route","/run_model/source":"demo_default","/run_model/locked":false,"/network/state":"private","/swarm/enabled":false,"/serving/route_ready":false}))?;
+        run.status(&mut member,"first_run",APP,json!({"/installation_role":"owner","/resource_policy":null,"/authority/swarm_created":false,"/authority/membership_state":"absent","/fast_mode/enabled":false,"/fast_mode/source":"default","/fast_mode/locked":false,"/run_model/selected":target.starter_run_model(),"/run_model/source":"demo_default","/run_model/locked":false,"/network/state":"private","/swarm/enabled":false,"/serving/route_ready":false}))?;
         let page = member.api()?.get("/")?;
         require(page.status == 200, "ui:status")?;
         let html = page.text()?;

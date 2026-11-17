@@ -25,6 +25,8 @@ use std::{
 
 pub const ORACLE_SOURCE: &str = "f4e366e98a1f705dfaf182897044500d290dbd7f";
 pub const ORACLE_EXE: &str = "8fff41823d357949ffa55c00b3fb8dfb0b4cc541f66343a72f21e3d8dd89186f";
+/// v0.1.4's built-in run model (run_model.py:69-75 @ f4e366e9 `demo_default_choice`).
+pub const ORACLE_STARTER: &str = "a9-route";
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Target {
@@ -49,6 +51,39 @@ impl Target {
         } else {
             "Library/Application Support/org.mycelium.app/state"
         }
+    }
+    /// The run model a fresh installation shows (`/run_model/selected` while `/run_model/source`
+    /// is `demo_default`): v0.1.4's starter `a9-route` (run_model.py:69-75) for the certified
+    /// oracle, v0.2's `qwen3-0.6b` for the Rust launcher (B13, ORCHESTRATOR DECISION 17 Nov 2026 on
+    /// ruling 28; `crates/api/contracts/divergences.json` `diverged.run_model_default`).
+    pub fn starter_run_model(&self) -> &'static str {
+        if self.implementation == "python-v0.1.4" {
+            ORACLE_STARTER
+        } else {
+            "qwen3-0.6b"
+        }
+    }
+    /// A golden's observations as this target reproduces them. Goldens are captured from the
+    /// oracle: every observation of the starter (`/run_model/source` `demo_default`) must show the
+    /// oracle's starter, which moves to this target's ([`Target::starter_run_model`]); every other
+    /// field is compared as recorded.
+    pub fn golden_observations(&self, golden: &Value) -> Result<Value> {
+        let mut observations = golden.clone();
+        for observation in observations
+            .as_array_mut()
+            .ok_or("golden:observations_not_array")?
+        {
+            let fields = &mut observation["fields"];
+            if fields["/run_model/source"] != "demo_default" {
+                continue;
+            }
+            require(
+                fields["/run_model/selected"] == ORACLE_STARTER,
+                "golden:starter_not_the_oracle_starter",
+            )?;
+            fields["/run_model/selected"] = json!(self.starter_run_model());
+        }
+        Ok(observations)
     }
     pub fn verify(&self) -> Result<()> {
         require(lower_hex(&self.source_sha, 40), "target:invalid_source_sha")?;

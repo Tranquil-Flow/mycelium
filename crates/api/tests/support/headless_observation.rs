@@ -293,6 +293,13 @@ fn seed_member_cache(owner: &Instance, member_root: &Path) {
 
 /// `/api/model/download` from the test repository until this process's model is prepared.
 fn prepare_model(instance: &Instance) {
+    // The test repository serves the tiny Qwen2 snapshot of `a9-route` (`tiny_repository`): this
+    // Mac takes that run model explicitly, through the picker, since v0.2's starter is Qwen3-0.6B
+    // (B13, `contracts/divergences.json` `run_model_default`). This test is about the download and
+    // the observation, not the default.
+    let (code, chosen) = instance.post("/api/run-model", &json!({"choice": "a9-route"}));
+    assert_eq!(code, 200, "{chosen}");
+    assert_eq!(chosen["selected"], "a9-route", "{chosen}");
     let grant = json!({"consent":{"download_acknowledged":true,"max_download_bytes":STORAGE,"storage_limit_bytes":STORAGE}});
     let mut retries = 0;
     let (code, answer) = loop {

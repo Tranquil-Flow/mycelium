@@ -3,7 +3,7 @@
 //! model is `Qwen/Qwen3-0.6B`, the only model proven across two Macs (the hermetic ten-row gate and
 //! the rv40 physical run), and the picker stops claiming that Qwen2.5-0.5B is "tested on two Macs".
 //! v0.1.4's default (`run_model.py`, `demo_default` = `a9-route`, Qwen2.5-0.5B-Instruct, "tested
-//! starter") is a recorded v0.2 divergence (`api::preferences::run_model::v02_divergence`).
+//! starter") is a recorded v0.2 divergence (`contracts/divergences.json` `run_model_default`).
 use api::preferences::run_model;
 use std::{fs, path::PathBuf};
 
