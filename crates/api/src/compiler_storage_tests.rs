@@ -489,7 +489,7 @@ fn compiled_run(f: &Fixture, run: &str, bytes: u64) -> InputArtifact {
         .unwrap()
         .set_len(bytes)
         .unwrap();
-    reservation.complete().unwrap();
+    reservation.complete(&|| Ok(())).unwrap();
     assert_eq!(ledger_of(&f.root)["entries"][run]["phase"], "retained");
     artifact
 }
@@ -741,4 +741,153 @@ fn a_crash_before_the_retirements_ledger_rename_recovers_without_refusing() {
         ["dead"]
     );
     assert_eq!(ledger_runs(&f.root), ["next"]);
+}
+
+/// Lane A, release blocker B11 (a) (owner ruling 4 a, ledger rows 77 and 93): a storage ledger the
+/// compile cannot read (here the hand-indented copy row 77 found on Mac A: 63 bytes where the
+/// canonical document is 56) still answers the closed `authority_state_invalid`, and the log
+/// names the file beside that code, so the next reader of an app log knows which file it was.
+#[test]
+fn an_unreadable_storage_ledger_is_named_in_the_log() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = Fixture::new();
+    let runs = f.root.join("chain-runs");
+    directory(&runs).unwrap();
+    let ledger = runs.join(STORAGE_LEDGER);
+    fs::write(
+        &ledger,
+        "{\n  \"entries\": {},\n  \"protocol\": \"mycelium.compiler_storage.v1\"\n}",
+    )
+    .unwrap();
+    fs::set_permissions(&ledger, fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(
+        storage_ledger(&runs).err().map(|e| e.0),
+        Some("authority_state_invalid")
+    );
+    let named = format!("authority_state_invalid:{}", ledger.display());
+    let lines = DIAGNOSTICS.lock().unwrap().clone();
+    assert!(lines.contains(&named), "{named} not in {lines:?}");
+}
+
+/// Lane A, B12 (ledger row 96), the same mechanism at this module's other `flock`s: a holder's
+/// lock description still held by a child this process forked (from fork to exec), after the
+/// holder itself let go. Modelled without a close-on-exec window in the parent: the holder's
+/// description is handed to `/bin/sleep 1` as its stdin, then the holder drops it.
+fn held_by_a_child(path: &Path) -> std::process::Child {
+    let holder = fs::File::open(path).unwrap();
+    holder.try_lock().unwrap();
+    let child = std::process::Command::new("/bin/sleep")
+        .arg("1")
+        .stdin(std::process::Stdio::from(holder.try_clone().unwrap()))
+        .spawn()
+        .unwrap();
+    drop(holder);
+    child
+}
+
+/// The storage ledger's lock (`compiler_storage_busy`, 2 of the first 30 full `api --lib` repeats
+/// after the member shard fix, under load ~17).
+#[test]
+fn a_ledger_lock_copy_still_held_by_a_forked_child_does_not_refuse_the_next_compile() {
+    let f = Fixture::new();
+    let runs = f.root.join("chain-runs");
+    directory(&runs).unwrap();
+    drop(storage_ledger(&runs).unwrap());
+    let mut child = held_by_a_child(&runs.join(STORAGE_LOCK));
+    let got = storage_ledger(&runs).map(drop).map_err(|e| e.0);
+    child.wait().unwrap();
+    assert_eq!(
+        got,
+        Ok(()),
+        "a lock only a forked child's copy held refused the ledger"
+    );
+}
+
+/// A dead run's directory lock (the retirement pass read it as a live run: 1 of the same 30).
+#[test]
+fn a_dead_runs_lock_copy_still_held_by_a_forked_child_does_not_keep_it_live() {
+    let mut f = Fixture::new();
+    f.request.stage_sharded = true;
+    let mut dead = f.emit_run("dead");
+    dead.produce_stage_shards(&f.members, 0.0).unwrap();
+    drop(dead);
+    let mut child = held_by_a_child(&f.root.join("chain-runs").join("dead"));
+    let retirement = compiler_inputs::retire_dead_runs(&f.root).map(|r| r.retired);
+    child.wait().unwrap();
+    assert_eq!(retirement.map_err(|e| e.0), Ok(vec!["dead".to_owned()]));
+}
+
+/// Lane A patch 2, A-01 (REVIEW-laneA-release-astra.md): a retirement pass has ONE bound for all
+/// its lock waiting, not the close allowance per live run while it holds the ledger. Eight live
+/// runs (the ledger's limit, `MAX_RETAINED_SHARD_RUNS`) are all kept live, and the pass answers
+/// within one allowance (plus slack for I/O), not about eight allowances (32 s).
+#[test]
+fn a_retirement_pass_over_eight_live_runs_waits_one_allowance_in_total() {
+    let f = Fixture::new();
+    let live: Vec<_> = (0..MAX_RETAINED_SHARD_RUNS)
+        .map(|n| compiled_run(&f, &format!("live-{n}"), 1_000_000))
+        .collect();
+    let allowance = budgets::BudgetId::RouterClose
+        .span(budgets::Entries::ZERO)
+        .unwrap()
+        .millis();
+    let started = std::time::Instant::now();
+    let retirement = compiler_inputs::retire_dead_runs(&f.root).unwrap();
+    let waited = started.elapsed();
+    assert!(retirement.retired.is_empty(), "{retirement:?}");
+    assert!(retirement.refused.is_empty(), "{retirement:?}");
+    assert_eq!(ledger_runs(&f.root).len(), MAX_RETAINED_SHARD_RUNS);
+    assert!(
+        waited < std::time::Duration::from_millis(allowance + 2_000),
+        "a pass over {} live runs waited {waited:?} (allowance {allowance} ms)",
+        live.len()
+    );
+    drop(live);
+}
+
+/// Lane A patch 3, A2-01 (REVIEW-laneA-p2-astra.md), the producer's side: a compile stopped while
+/// its stage-output reservation waits for a busy storage ledger ends by its own name
+/// (`compiler_stopped`) at the first poll past the Stop, and writes no reservation, even when the
+/// ledger frees inside a fresh close allowance.
+#[test]
+fn a_compile_stopped_while_its_reservation_waits_for_the_ledger_reserves_nothing() {
+    use std::sync::{Arc, atomic::AtomicBool};
+    let poll = std::time::Duration::from_millis(
+        budgets::BudgetId::OwnerPoll
+            .span(budgets::Entries::ZERO)
+            .unwrap()
+            .millis(),
+    );
+    let f = Fixture::new();
+    let runs = f.root.join("chain-runs");
+    let mut artifact = f.emit_run("stopped");
+    let stop = Arc::new(AtomicBool::new(false));
+    artifact.bind_cancellation(stop.clone()).unwrap();
+    drop(storage_ledger(&runs).unwrap());
+    let ledger = fs::File::open(runs.join(STORAGE_LOCK)).unwrap();
+    ledger.try_lock().unwrap();
+    let holder = std::thread::spawn(move || {
+        std::thread::sleep(poll / 2);
+        stop.store(true, Ordering::SeqCst);
+        std::thread::sleep(poll * 5 / 2);
+        drop(ledger);
+    });
+    let started = std::time::Instant::now();
+    let got = artifact
+        .reserve_stage_output(300)
+        .map(drop)
+        .map_err(|e| e.0);
+    let waited = started.elapsed();
+    holder.join().unwrap();
+    assert_eq!(got, Err("compiler_stopped"));
+    assert!(
+        waited < poll * 2,
+        "the reservation's ledger wait outlived the compile's Stop: {waited:?}"
+    );
+    let (_lock, ledger) = storage_ledger(&runs).unwrap();
+    assert_eq!(
+        ledger["entries"]["stopped"],
+        Value::Null,
+        "no reservation written"
+    );
 }

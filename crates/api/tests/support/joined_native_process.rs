@@ -451,7 +451,9 @@ fn qualify_received(
         // Source emission/transport can take minutes; refresh admission here,
         // immediately before EACH native load, not only at harness launch.
         admit_native_load(&resource_gate, &format!("node={i}"));
-        let nonce = challenges.issue(&ids[i], assigned(i)).unwrap();
+        let nonce = challenges
+            .issue(&ids[i], assigned(i), (prompt.len() + 64) as u64)
+            .unwrap();
         nonces.push(nonce.clone());
         node.send(json!({"command":"prepare_native","range":ranges[i],"tokens":prompt.len()+64,"nonce":nonce,"forbidden_source":source}));
         let signed = node.result_with(allowance());

@@ -556,6 +556,28 @@ struct Serving {
     /// Lane Q: the step with this global index fails (the member's stage server ends, as a
     /// member that dies mid-request).
     fail_at: Option<u64>,
+    /// Lane A patch 2 (A-02): the member's remaining command grant (`max_commands`), spent as
+    /// `NativeShard` spends it (`step_until` / `reset`): refused at 0 before the command, one
+    /// spent, the command runs, then checked AGAIN, so the command that spends the last one
+    /// itself answers `joined_native_consent_exhausted` (its output discarded).
+    commands: Option<Arc<AtomicU64>>,
+}
+impl Serving {
+    /// `NativeShard::check` before a command: a spent grant refuses it.
+    fn check(&self) -> Result<(), Error> {
+        match &self.commands {
+            Some(left) if left.load(Ordering::SeqCst) == 0 => {
+                Err(Error("joined_native_consent_exhausted"))
+            }
+            _ => Ok(()),
+        }
+    }
+    /// `remaining -= 1` for the command about to run.
+    fn spend(&self) {
+        if let Some(left) = &self.commands {
+            left.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
 }
 const VOCAB: usize = 64;
 /// Controlled final-stage logits: argmax at `token` (MYAC header of the native link); the
@@ -595,7 +617,9 @@ impl StageCompute for Controlled<'_> {
     }
     /// EPF's per-pass liveness (test double): the member's membership is current.
     fn live(&self, current: serve::Current<'_>) -> Result<(), Error> {
-        current().map(|_| ())
+        current()?;
+        // `NativeShard::check` without spending: a spent grant ends the member's consent.
+        self.script.check()
     }
     fn worker_pid(&self) -> Option<u32> {
         self.owned.then_some(CONTROLLED_PID)
@@ -612,6 +636,8 @@ impl StageCompute for Controlled<'_> {
         if cancel.load(Ordering::SeqCst) {
             return Err(Error("compiler_stopped"));
         }
+        self.script.check()?;
+        self.script.spend();
         let (t, position) = (self.steps, self.position);
         self.steps += 1;
         self.position += 1;
@@ -626,6 +652,9 @@ impl StageCompute for Controlled<'_> {
                 eprintln!("held step gate: {e}");
             }
         }
+        // `step_until` checks again after the worker's step: the last command's output is
+        // discarded and the step answers the exhaustion.
+        self.script.check()?;
         if self.script.tokens.is_empty() {
             return Ok(vec![t as u8; 16]);
         }
@@ -653,6 +682,9 @@ impl StageCompute for Controlled<'_> {
         if self.script.reset_fails {
             return Err(Error("native_session_reset_invalid"));
         }
+        self.script.check()?;
+        self.script.spend();
+        self.script.check()?;
         self.position = 0;
         self.log(("reset", 0));
         Ok(json!({"controlled_reset":true}))
@@ -2525,4 +2557,61 @@ fn an_old_member_paired_with_a_v2_route_fails_the_activation_with_a_named_owner_
         "old member: teardown after the failure took {:?}",
         torn.elapsed()
     );
+}
+
+// ---- Lane A patch 2, A-02 (REVIEW-laneA-release-astra.md): a named exhaustion is published ----
+//
+// B6 sets the epoch's failure to `joined_route_member_consent_exhausted` from the carrier itself.
+// The owner's watcher skipped every epoch whose failure was already set, so the workflow's
+// `epoch_retired` stayed null while the route refused chats by the right name; the base's
+// unnamed retirement took the watcher path and was published once the request settled.
+
+/// A-02, through OwnerWork: the final stage's command grant runs out mid-answer (as
+/// `NativeShard` spends it). The answer ends `failed` by name, and once the request has settled
+/// the workflow publishes `epoch_retired = joined_route_member_consent_exhausted` within a few
+/// owner polls; readiness and the next chat refuse by the same name; the run stays
+/// `api_running` until Stop, which still cleans up every member.
+#[test]
+fn a_spent_command_grant_is_published_as_the_epochs_retirement() {
+    const EXHAUSTED: &str = "joined_route_member_consent_exhausted";
+    let mut s = swarm(2);
+    let plan = s.serving_plan();
+    let mut scripts = stage_scripts();
+    let grant = Arc::new(AtomicU64::new(u64::MAX));
+    scripts[1].commands = Some(grant.clone());
+    let (mut work, members) = s.serving(plan, scripts);
+    let _release: Vec<Release> = members.iter().map(|m| Release(m.2.clone())).collect();
+    activate(&mut work);
+    let gateway = work.gateway().unwrap();
+    // Three commands left on the final stage: prefill and one token step answer, the third
+    // step spends the last command and answers the exhaustion.
+    grant.store(3, Ordering::SeqCst);
+    let all = chat(&gateway);
+    assert_eq!(
+        all.last().map(|e| e["type"].clone()),
+        Some(json!("failed")),
+        "{all:?}"
+    );
+    assert!(
+        all.last().unwrap().to_string().contains(EXHAUSTED),
+        "the answer ends by name: {all:?}"
+    );
+    assert_eq!(token_ids(&all), [11, 12], "{all:?}");
+    assert_eq!(grant.load(Ordering::SeqCst), 0);
+    let state = work.wait_state(|s| !s["epoch_retired"].is_null(), span(B::OwnerPoll) * 6);
+    assert_eq!(state["epoch_retired"], EXHAUSTED, "{state}");
+    assert_eq!(state["state"], "api_running", "{state}");
+    let (status, ready) = readiness_within(&gateway, span(B::OwnerPoll) * 2);
+    assert_ne!(status, 200, "{ready}");
+    assert!(ready.to_string().contains(EXHAUSTED), "{ready}");
+    let (status, refused) = post(&gateway);
+    assert_ne!(status, 202, "{refused}");
+    assert!(refused.to_string().contains(EXHAUSTED), "{refused}");
+    // Published once: a later pass keeps the same name.
+    std::thread::sleep(span(B::OwnerPoll) * 2);
+    assert_eq!(work.state()["epoch_retired"], EXHAUSTED);
+    work.teardown().unwrap();
+    let state = work.state();
+    assert_eq!(state["state"], "stopped", "{state}");
+    assert_eq!(state["cleanup_error"], Value::Null, "{state}");
 }

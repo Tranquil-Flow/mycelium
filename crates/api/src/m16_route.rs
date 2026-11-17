@@ -1696,6 +1696,11 @@ fn carrier_epoch(
                                             o.failure = Some(code);
                                             o.failed_at_ms = Some(elapsed_ms(began));
                                         }
+                                        // B6: a stage that can no longer serve (its consent
+                                        // spent) takes the epoch out of service by that name.
+                                        if code == route::MEMBER_CONSENT_EXHAUSTED {
+                                            o.epoch_failure.get_or_insert(code);
+                                        }
                                     }
                                 }
                                 o.worker_done = true;
@@ -1958,7 +1963,12 @@ fn generate(
             let expected = route::hop(message, path, t, i + 1).map_err(|e| e.0)?;
             let frame = links[i].receive(clock, budget, &|f| {
                 route::body_matches(f, "HopHeader", &expected)
+                    || route::reported_failure(f, path).is_some()
             })?;
+            // B6: a stage that ended this request (its consent spent, a failed step) said so.
+            if let Some(code) = route::reported_failure(&frame, path) {
+                return Err(code);
+            }
             if cancel.load(Ordering::SeqCst) {
                 return Ok(());
             }
@@ -1971,7 +1981,7 @@ fn generate(
             )?;
         }
         let token = std::cell::Cell::new(None);
-        links[last].receive(clock, budget, &|f| {
+        let frame = links[last].receive(clock, budget, &|f| {
             let id = f.body()["token_id"]
                 .as_u64()
                 .and_then(|v| u32::try_from(v).ok());
@@ -1981,8 +1991,11 @@ fn generate(
             if ok {
                 token.set(id);
             }
-            ok
+            ok || route::reported_failure(f, path).is_some()
         })?;
+        if let Some(code) = route::reported_failure(&frame, path) {
+            return Err(code);
+        }
         let token = token.get().ok_or("joined_route_frame_binding")?;
         // A stop id ends the request and is never emitted (v0.1.4 route.py:5094-5098: `stopped`
         // is set before `sink.emit`), so no page shows `<|im_end|>` (lane CHATFIX item 2).

@@ -58,7 +58,11 @@ pub fn prepare(
         let node = stage.offer["message"]["member"]["node_id"]
             .as_str()
             .ok_or_else(|| Refusal("joined_shard_invalid".into()))?;
-        let nonce = challenges.issue(node, stage.range)?;
+        let nonce = challenges.issue(
+            node,
+            stage.range,
+            u64::try_from(tokens).map_err(|_| Refusal("joined_native_prepare_invalid".into()))?,
+        )?;
         stage
             .member
             .begin(json!({"command":"prepare_native","range":stage.range,

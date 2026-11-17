@@ -88,9 +88,11 @@ pub fn verify_resident(
 /// Owner-side resident-proof challenges: ONE fresh nonce per member and
 /// assignment, consumed by the first proof that verifies. A replayed, foreign,
 /// or other-member nonce is refused; nonces are never shared between stages.
+/// Each challenge also holds the capacity (tokens) the owner asked that stage to
+/// prepare for (lane A, CAP-2).
 #[derive(Default)]
 pub struct Challenges {
-    outstanding: std::sync::Mutex<std::collections::BTreeMap<String, (String, [u64; 2])>>,
+    outstanding: std::sync::Mutex<std::collections::BTreeMap<String, (String, [u64; 2], u64)>>,
 }
 /// A stage admitted from a consumed challenge; only `Challenges::admit` builds it.
 #[derive(Clone, Debug)]
@@ -118,10 +120,11 @@ impl Challenges {
     pub fn new() -> Self {
         Self::default()
     }
-    /// Issue a fresh nonce for this member's assigned range; it replaces any
-    /// earlier unconsumed nonce for the same member.
-    pub fn issue(&self, node_id: &str, range: [u64; 2]) -> Result<String> {
-        if node_id.is_empty() || range[0] >= range[1] || range[1] > 28 {
+    /// Issue a fresh nonce for this member's assigned range and the capacity
+    /// (`tokens`) its prepare is requested for; it replaces any earlier unconsumed
+    /// nonce for the same member.
+    pub fn issue(&self, node_id: &str, range: [u64; 2], tokens: u64) -> Result<String> {
+        if node_id.is_empty() || range[0] >= range[1] || range[1] > 28 || tokens == 0 {
             return Err(fail("joined_native_challenge_invalid"));
         }
         let nonce = crate::app_host::hex(
@@ -131,8 +134,8 @@ impl Challenges {
             .outstanding
             .lock()
             .map_err(|_| fail("joined_native_challenge_poisoned"))?;
-        held.retain(|_, (node, _)| node != node_id);
-        held.insert(nonce.clone(), (node_id.to_owned(), range));
+        held.retain(|_, (node, _, _)| node != node_id);
+        held.insert(nonce.clone(), (node_id.to_owned(), range, tokens));
         Ok(nonce)
     }
     /// Verify the proof against its member's outstanding challenge, then consume it.
@@ -151,11 +154,16 @@ impl Challenges {
             .outstanding
             .lock()
             .map_err(|_| fail("joined_native_challenge_poisoned"))?;
-        let range = match held.get(&nonce) {
-            Some((owner, range)) if owner == node => *range,
+        let (range, tokens) = match held.get(&nonce) {
+            Some((owner, range, tokens)) if owner == node => (*range, *tokens),
             _ => return Err(fail("joined_native_nonce_unknown")),
         };
         verify_resident(coordinator, offer, &nonce, range, envelope)?;
+        // CAP-2: the member's signed prepare must name the capacity the owner asked for; a
+        // stage prepared for another context is never admitted into a route.
+        if envelope["message"]["prepare"]["tokens"].as_u64() != Some(tokens) {
+            return Err(fail("joined_native_capacity_mismatch"));
+        }
         held.remove(&nonce);
         Ok(Admitted {
             offer: offer.clone(),

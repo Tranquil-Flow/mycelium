@@ -31,6 +31,20 @@
         "api/tests/persistent_backend.rs (run-model action)"
       ],
       "unchanged": "budgets M16LiveKvContextTokens (4,096) is the M16 ledger's KV capacity floor, not a context limit: it reserves at least 4,096 tokens of KV, more than 2,356 needs"
+    },
+    "stage_share_max_rss_bytes": {
+      "oracle_value": "the modelled max_rss_bytes: ceil((2 x resident + 1 GiB + kv) x 1.15) per stage",
+      "oracle_source": "mycelium_a13_macos/model_resources.py member_resources (load_peak_bytes x GUARD_HEADROOM); the v0.1.4 member enforces it through standing_limits(grant, required=share), standing_consent.py:252-259",
+      "product_value": "max(modelled max_rss_bytes, the stage worker's own native reservation for its layer range at the serving context)",
+      "product_source": "crates/planner/src/chain_compile.rs plan_reservation, fed by crates/node-service/src/native_selection.rs planned_reservation (backend-mlx admission::requirements); enforced by crates/api/src/joined_member/work.rs prepare_native (NativeShard::limit_memory_to)",
+      "ruling": "owner, 16 Nov 2026 (ledger row 93, 1 a): the compile plans the worker's own reservation AND the member applies the admitted share, together",
+      "reason": "At 2,356 tokens the v0.2 native stage worker reserves a single prefill of the whole context (quadratic scratch) that the oracle's model omits: 3,063,554,560 B for layers [0,19] and 2,548,746,752 B for [19,28] of Qwen3-0.6B, above the modelled 2,703,888,274 / 2,477,956,596 B (REVIEW-laneCAP-astra.md CAP-1). Enforcing the modelled share would refuse every prepare; the share is raised to the reservation and never lowered. A host with no native figure (oracle replays) keeps the modelled plan byte for byte.",
+      "follows_it": [
+        "each stage's announced work_limits.max_rss_bytes and public resource_plan row",
+        "the proposal's max_combined_rss_bytes (2 x the largest share)",
+        "the member's worker guard limit (prepare memory)",
+        "the slices step's stage_memory_consent_below_context check"
+      ]
     }
   }
 }

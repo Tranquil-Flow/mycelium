@@ -361,11 +361,6 @@ fn a_share_above_the_members_caps_is_refused_by_name_before_custody() {
 /// A seed-signed shard offer for this member, transfer `run` (`<owner run>-transfer-<stage>`), and
 /// the member's custody of it (no bytes fetched: nothing reaches a native worker).
 fn custody(member: &Joined, run: &str) -> (Value, api::joined_shard::JoinedShard) {
-    let fixture: Value = serde_json::from_str(include_str!(
-        "../../planner/tests/fixtures/source-slices.json"
-    ))
-    .unwrap();
-    let case = &fixture["cases"][0];
     let session = member.session.lock().unwrap().clone().unwrap();
     let carrier_key = iroh::SecretKey::generate();
     let carrier = Identity::from_secret(
@@ -373,23 +368,7 @@ fn custody(member: &Joined, run: &str) -> (Value, api::joined_shard::JoinedShard
         &member.signer.secret_bytes(),
     )
     .unwrap();
-    let registration =
-        api::joined_shard::register(&session, &member.signer, &carrier, app_host::now()).unwrap();
-    let mut recipe = case["node_plans"]["node-0"].clone();
-    recipe["node_id"] = json!(session.node_id());
-    recipe.as_object_mut().unwrap().remove("node_plan_digest");
-    recipe["node_plan_digest"] = json!(protocol::canonical::digest(&recipe).unwrap());
-    let source_key = iroh::SecretKey::generate();
-    let source = Identity::from_secret(&source_key.public().to_string(), &[9; 32]).unwrap();
-    let offer = api::joined_shard::issue(
-        &member.seed.coordinator,
-        &registration,
-        run,
-        &case["node_files"]["node-0"][0],
-        &recipe,
-        &source,
-    )
-    .unwrap();
+    let offer = offer_for(member, run, &carrier);
     let shard = api::joined_shard::JoinedShard::begin(
         &member.member_root,
         &session,
@@ -401,10 +380,36 @@ fn custody(member: &Joined, run: &str) -> (Value, api::joined_shard::JoinedShard
     .unwrap();
     (offer, shard)
 }
+/// A seed-signed shard offer for this member's carrier `carrier`, transfer `run`.
+fn offer_for(member: &Joined, run: &str, carrier: &Identity) -> Value {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../planner/tests/fixtures/source-slices.json"
+    ))
+    .unwrap();
+    let case = &fixture["cases"][0];
+    let session = member.session.lock().unwrap().clone().unwrap();
+    let registration =
+        api::joined_shard::register(&session, &member.signer, carrier, app_host::now()).unwrap();
+    let mut recipe = case["node_plans"]["node-0"].clone();
+    recipe["node_id"] = json!(session.node_id());
+    recipe.as_object_mut().unwrap().remove("node_plan_digest");
+    recipe["node_plan_digest"] = json!(protocol::canonical::digest(&recipe).unwrap());
+    let source_key = iroh::SecretKey::generate();
+    let source = Identity::from_secret(&source_key.public().to_string(), &[9; 32]).unwrap();
+    api::joined_shard::issue(
+        &member.seed.coordinator,
+        &registration,
+        run,
+        &case["node_files"]["node-0"][0],
+        &recipe,
+        &source,
+    )
+    .unwrap()
+}
 /// The owner's `prepare_native` for stage [0, 14) with a fresh challenge.
 fn prepare(work: &mut Work, member: &Joined) -> Result<Value, String> {
     let challenges = api::joined_shard::native::Challenges::new();
-    let nonce = challenges.issue("node", [0, 14]).unwrap();
+    let nonce = challenges.issue("node", [0, 14], 32).unwrap();
     let wall = B::MemberChosenWall.span(Entries::ZERO).unwrap().millis();
     let operation = Operation {
         request: json!({"command":"prepare_native","operation_id":2,"range":[0,14],"tokens":32,
@@ -507,6 +512,119 @@ fn an_operator_driven_member_prepares_without_an_announcement() {
         assert!(native.worker_pid().is_none());
     }
     assert!(work.discard().is_ok());
+}
+
+// ---- Lane A, release blocker B7 (CAP-1 member half, CAP-2; REVIEW-laneCAP-astra.md) ----
+
+/// CAP-1: the member ENFORCES the share it admitted for this run. `admit_share_for` returns the
+/// share's worker limits; the worker's guard (`NativeShard::memory_limit`, the prepare's `memory`)
+/// must be that share, not the member's whole consent (4 GB here). The prepare itself ends at the
+/// missing worker binary; the limit is set before the worker would start.
+#[test]
+fn the_member_holds_its_worker_to_the_share_announced_for_this_run() {
+    const SHARE: u64 = 3_063_554_560;
+    let member = Joined::new();
+    member.grant();
+    member.bind();
+    let mut work = Work::new(member.member_root.clone());
+    let (_, shard) = custody(&member, "run-ep2-transfer-0");
+    work.shard = Some(shard);
+    work.announced(&member.announced_for("run-ep2", Some(share(SHARE, 1_000_000_000, 300))));
+    let prepared = prepare(&mut work, &member);
+    assert!(
+        prepared.as_ref().is_err_and(
+            |code| !code.ends_with("_below_share") && code != "member_share_unannounced"
+        ),
+        "the share is admitted; the prepare ends at the missing worker: {prepared:?}"
+    );
+    assert_eq!(
+        work.native.as_ref().map(|n| n.memory_limit()),
+        Some(Ok(SHARE)),
+        "the worker is held to the admitted share, not the 4 GB consent"
+    );
+    assert!(work.discard().is_ok());
+}
+
+/// A member-signed resident proof for `offer`'s stage `range`, prepared for `tokens` (what a
+/// member's `NativeShard::prepare` returns: prepare document, worker proof bound to the owner's
+/// nonce and the recorded reference's resident weights, signed with the member's own key).
+fn resident(member: &Joined, offer: &Value, nonce: &str, range: [u64; 2], tokens: u64) -> Value {
+    use stage_contract::{joined_native, native_proof, native_shard};
+    let reference: Value = serde_json::from_str(native_proof::QWEN3_PACKED_ORACLE).unwrap();
+    let id = &reference["recorded"]["identity"];
+    let m = &offer["message"];
+    let request_id = protocol::canonical::digest(offer)
+        .unwrap()
+        .trim_start_matches("sha256:")
+        .to_owned();
+    let prepare = json!({"command":native_shard::COMMAND,"checkpoint":"/custody/stage.safetensors",
+        "start":range[0],"end":range[1],"total":28,"memory":4_000_000_000u64,"tokens":tokens,
+        "id":request_id,"generation":m["member"]["generation"],
+        "stage_image":{"model_id":"Qwen/Qwen3-0.6B","revision":id["revision"],
+            "image_digest":id["checkpoint_sha256"],"tensor_manifest":id["manifest_sha256"],
+            "profile":"packed_int8","layers":{"start":range[0],"end":range[1]},"total_layers":28,
+            "source_metadata":{"header_sha256":id["header_sha256"]}},
+        "shard":{"protocol":native_shard::PROTOCOL,"node_id":m["member"]["node_id"],"range":range,
+            "transfer":m["transfer"],"recipe":m["recipe"],"recipe_digest":m["recipe"]["node_plan_digest"]}});
+    let weights: serde_json::Map<String, Value> = reference["recorded"]["weights"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(name, _)| match name.as_str() {
+            "model.embed_tokens.weight" => range[0] == 0 || range[1] == 28,
+            "model.norm.weight" => range[1] == 28,
+            other => other
+                .strip_prefix("model.layers.")
+                .and_then(|s| s.split('.').next())
+                .and_then(|s| s.parse::<u64>().ok())
+                .is_some_and(|n| (range[0]..range[1]).contains(&n)),
+        })
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    let weights = Value::Object(weights);
+    let proof = json!({"protocol":native_proof::PROOF_PROTOCOL,"nonce":nonce,"request_id":request_id,
+        "load_generation":m["member"]["generation"],"start":range[0],"end":range[1],
+        "checkpoint_sha256":id["checkpoint_sha256"],"tensor_manifest_sha256":id["manifest_sha256"],
+        "revision":id["revision"],"profile":"mlx_packed_int8","worker_pid":4242,
+        "host_id":"host-cap2","boot_id":"boot-cap2","weights_digest":protocol::canonical::digest(&weights).unwrap(),
+        "weights":weights});
+    let message = json!({"protocol":joined_native::RESIDENT_PROTOCOL,"member":m["member"],
+        "offer_digest":protocol::canonical::digest(offer).unwrap(),"prepare":prepare,"proof":proof,
+        "member_pid":4242,"route_ready":false});
+    json!({"protocol":"mycelium.joined_shard.signed.v1","signature":member.signer.sign(&message).unwrap(),
+        "verification_key":member.signer.public_key_record(),"message":message})
+}
+
+/// CAP-2: the owner binds the capacity it ASKED a stage to prepare for to that stage's challenge,
+/// and a validly signed resident proof prepared for another capacity is refused by name, before
+/// the stage is admitted into a route; the same proof at the requested capacity is admitted.
+#[test]
+fn a_resident_proof_prepared_for_another_capacity_is_refused_by_name() {
+    let member = Joined::new();
+    member.grant();
+    member.bind();
+    let (offer, _shard) = custody(&member, "run-cap2-transfer-0");
+    let node = offer["message"]["member"]["node_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let challenges = api::joined_shard::native::Challenges::new();
+    let nonce = challenges.issue(&node, [0, 14], 2356).unwrap();
+    let smaller = resident(&member, &offer, &nonce, [0, 14], 39);
+    assert_eq!(
+        challenges
+            .admit(&member.seed.coordinator, &offer, &smaller)
+            .map(|_| ())
+            .map_err(|e| e.0),
+        Err("joined_native_capacity_mismatch"),
+        "a proof for 39 tokens does not admit a stage asked for 2,356"
+    );
+    let nonce = challenges.issue(&node, [0, 14], 2356).unwrap();
+    let asked = resident(&member, &offer, &nonce, [0, 14], 2356);
+    let admitted = challenges
+        .admit(&member.seed.coordinator, &offer, &asked)
+        .expect("the requested capacity is admitted");
+    assert_eq!(admitted.range(), [0, 14]);
 }
 
 // ---- Lane EP2 item 2: the member serves ONE epoch for the run, until the route's signed expiry ----
@@ -909,4 +1027,125 @@ fn r2_invalid_route_expiries_refuse_without_panicking() {
         failures.is_empty(),
         "invalid owner routes must refuse route_invalid without process death: {failures:#?}"
     );
+}
+
+// ---- Lane A patch 3, A2-01 (REVIEW-laneA-p2-astra.md): custody's storage reservation is bounded
+// by the `receive` operation ----
+//
+// `receive` takes custody (`JoinedShard::begin` -> `MemberShard::begin` -> the storage
+// reservation) under the storage ledger's lock. Another holder keeping the ledger busy must not
+// carry the reservation past the operation's own deadline or cancellation: the operation ends by
+// its own name and no `cleanup_required` reservation is written.
+
+/// How a [`receive_on_a_busy_ledger`] operation ends while the ledger is held.
+enum Ends {
+    /// Its deadline passes half an owner poll after it starts.
+    Deadline,
+    /// It is cancelled half an owner poll after it starts.
+    Cancelled,
+}
+/// One real `receive` of a seed-signed offer for transfer `run`, while another holder keeps the
+/// member's storage ledger for three owner polls (inside one close allowance). Returns the
+/// receive's answer, how long it took, and the run's ledger row afterwards.
+fn receive_on_a_busy_ledger(
+    member: &Joined,
+    run: &str,
+    ends: Ends,
+) -> (Result<Value, String>, Duration, Value) {
+    let poll = test_span(B::OwnerPoll);
+    // An earlier transfer's custody creates the ledger (its charge stays: custody kept).
+    let (_, earlier) = custody(member, &format!("{run}-earlier"));
+    drop(earlier);
+    let ledger_path = member
+        .member_root
+        .join("chain-runs/compiler-storage.private.json");
+    let lock = fs::File::open(member.member_root.join("chain-runs/compiler-storage.lock")).unwrap();
+    lock.try_lock().unwrap();
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let clock = api::managed_carrier::HostClock::default();
+    let bind_end = clock
+        .monotonic()
+        .checked_add(B::RouterClose.span(Entries::ZERO).unwrap())
+        .unwrap();
+    let host = LoopbackHost::bind(&rt, &clock, bind_end).unwrap();
+    let endpoint = host.address().unwrap().id;
+    let carrier =
+        Identity::from_secret(&endpoint.to_string(), &member.signer.secret_bytes()).unwrap();
+    let offer = offer_for(member, run, &carrier);
+    let source = iroh::SecretKey::generate().public();
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let started = Instant::now();
+    let deadline = match ends {
+        Ends::Deadline => started + poll / 2,
+        Ends::Cancelled => started + test_span(B::MemberChosenWall),
+    };
+    let operation = Operation {
+        request: json!({"command":"receive","operation_id":1,"offer":offer,
+            "source_id":source.to_string(),"source_socket":"127.0.0.1:9"}),
+        cancelled: cancelled.clone(),
+        deadline,
+        origin: Origin::Remote,
+        id: Some(1),
+    };
+    let cancel = matches!(ends, Ends::Cancelled).then_some(cancelled);
+    let holder = std::thread::spawn(move || {
+        std::thread::sleep(poll / 2);
+        if let Some(cancel) = cancel {
+            cancel.store(true, Ordering::SeqCst);
+        }
+        std::thread::sleep(poll * 5 / 2);
+        drop(lock);
+    });
+    let mut work = Work::new(member.member_root.clone());
+    let got = work.receive(
+        Some(member),
+        &Carrier {
+            host: &host,
+            runtime: &rt,
+            clock: &clock,
+            endpoint,
+            lan: None,
+        },
+        &member.signer,
+        &carrier,
+        &operation,
+    );
+    let waited = started.elapsed();
+    holder.join().unwrap();
+    drop(work.shard.take());
+    let row = serde_json::from_slice::<Value>(&fs::read(ledger_path).unwrap()).unwrap()["entries"]
+        [run]
+        .clone();
+    (got, waited, row)
+}
+#[test]
+fn a_receive_whose_deadline_passes_on_a_busy_ledger_reserves_nothing() {
+    let member = Joined::new();
+    member.grant();
+    member.bind();
+    let (got, waited, row) = receive_on_a_busy_ledger(&member, "run-a2-transfer-0", Ends::Deadline);
+    assert_eq!(got, Err("member_operation_deadline".into()));
+    assert!(
+        waited < test_span(B::OwnerPoll) * 2,
+        "the reservation's ledger wait outlived the receive's deadline: {waited:?}"
+    );
+    assert_eq!(row, Value::Null, "no reservation written");
+}
+#[test]
+fn a_receive_cancelled_on_a_busy_ledger_reserves_nothing() {
+    let member = Joined::new();
+    member.grant();
+    member.bind();
+    let (got, waited, row) =
+        receive_on_a_busy_ledger(&member, "run-a2-transfer-1", Ends::Cancelled);
+    assert_eq!(got, Err("member_operation_cancelled".into()));
+    assert!(
+        waited < test_span(B::OwnerPoll) * 2,
+        "the reservation's ledger wait outlived the receive's cancellation: {waited:?}"
+    );
+    assert_eq!(row, Value::Null, "no reservation written");
 }

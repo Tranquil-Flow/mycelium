@@ -269,10 +269,10 @@ fn grant_self_consent(dir: &std::path::Path, node: &str, policy: &Value) -> Resu
         .unwrap_or(4_000_000_000);
     // The bounds the app's own grant uses: the user's storage limit, the standing consent's own
     // maximum wall, and the same memory/command ceilings the join path records. The wall is the
-    // maximum because the compile gives the local node the proposal's wall (no caps for it:
-    // `planner::chain_compile::admit`, v0.1.4's owner worker holds no grant), up to that same
-    // maximum; a lower grant (it was `MemberChosenWall`, a member's choice in a v0.1.4 test fixture)
-    // made the contributor refuse its own share, `member_wall_cap_below_share`.
+    // maximum because the compile gives the local node the proposal's wall up to this grant (lane
+    // A, B8: `owner_compiler::local_grant` reads this contributor's stored grant); a lower grant
+    // (it was `MemberChosenWall`, a member's choice in a v0.1.4 test fixture) made the contributor
+    // refuse its own share, `member_wall_cap_below_share`.
     // Caps are integers (`_int_in`): a float wall is refused as `standing_consent_caps_invalid`.
     // Commands: owner ruling 16 Nov 2026, 5,000 (it was 1,000, which ended one run's serving after
     // about 995 answer tokens: REPORT-laneCAP measurement run). The figure a joined Mac's own page

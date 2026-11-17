@@ -108,7 +108,12 @@ fn lock(root: &Path) -> Result<fs::File> {
         .open(root.join("member-shard.lock"))
         .map_err(|_| fail("member_shard_lock_failed"))?;
     file_identity(&f)?;
-    f.try_lock().map_err(|_| fail("member_shard_busy"))?;
+    // Lane A, B12 (ledger row 96): a busy lock is retried for the close allowance before it is
+    // refused (`settle_lock`: a forked child's copy of a dropped holder's lock lets go at its
+    // exec); a holder that really holds it is still refused, by the same name.
+    if settle_lock(&f, None, &|| Ok(()))? != Settled::Held {
+        return Err(fail("member_shard_busy"));
+    }
     Ok(f)
 }
 fn file_identity(file: &fs::File) -> Result<(u64, u64)> {
@@ -132,6 +137,8 @@ fn sync_dir(path: &Path) -> Result<()> {
 impl MemberShard {
     /// Reserve before writing. Pins are supplied by the admission owner, NOT
     /// inferred from arriving bytes. No source checkpoint or InputArtifact needed.
+    /// Unbudgeted: a production operation with a deadline or cancellation uses
+    /// [`MemberShard::begin_checked`].
     pub fn begin(
         host: &Path,
         run: &str,
@@ -139,6 +146,20 @@ impl MemberShard {
         transfer: &Value,
         recipe: &Value,
         digest: &str,
+    ) -> Result<Self> {
+        Self::begin_checked(host, run, node, transfer, recipe, digest, &|| Ok(()))
+    }
+    /// [`MemberShard::begin`] under the receiving operation's own `checkpoint` (cancellation,
+    /// deadline). Lane A patch 3, A2-01 (REVIEW-laneA-p2-astra.md): the storage reservation's wait
+    /// for a busy ledger is the operation's, not a fresh close allowance.
+    pub fn begin_checked(
+        host: &Path,
+        run: &str,
+        node: &str,
+        transfer: &Value,
+        recipe: &Value,
+        digest: &str,
+        checkpoint: &dyn Fn() -> Result<()>,
     ) -> Result<Self> {
         let mut record = pins(node, transfer, recipe, digest)?;
         if !segment(run) {
@@ -159,6 +180,7 @@ impl MemberShard {
             run,
             identity,
             transfer["size_bytes"].as_u64().unwrap(),
+            checkpoint,
         )?;
         private_state::store(
             &root.join(RECORD),
@@ -241,7 +263,7 @@ impl MemberShard {
                 &root.join(REFUND),
                 private_state::private_json_limit().map_err(state)?,
             )
-            .map_err(state)?
+            .map_err(|e| named_state(&root.join(REFUND), e))?
             .ok_or(fail("compiler_storage_reservation_changed"))?;
             row = saved
                 .get("reservation")
@@ -261,7 +283,7 @@ impl MemberShard {
             &root.join(RECORD),
             private_state::private_json_limit().map_err(state)?,
         )
-        .map_err(state)?;
+        .map_err(|e| named_state(&root.join(RECORD), e))?;
         let saved = Value::Object(saved.ok_or(fail("member_shard_pins_changed"))?);
         record["file_identity"] = saved["file_identity"].clone();
         record["stage_identity"] = saved["stage_identity"].clone();
@@ -551,7 +573,7 @@ impl MemberShard {
                 run: self.root.file_name().unwrap().to_str().unwrap().into(),
                 row: self.row.clone(),
             }
-            .complete()?;
+            .complete(checkpoint)?;
             self.row["phase"] = json!("retained");
             self.retained = true;
         }
@@ -573,7 +595,7 @@ impl MemberShard {
         }
         let runs = self.root.parent().unwrap();
         let run = self.root.file_name().unwrap().to_str().unwrap();
-        let (_lock, mut ledger) = storage_ledger(runs)?;
+        let (_lock, mut ledger) = storage_ledger_within(runs, None, checkpoint)?;
         if ledger["entries"][run].is_null() && refund_matches(runs, run, &self.row) {
             sync_dir(runs)?;
             self.refunded = true;

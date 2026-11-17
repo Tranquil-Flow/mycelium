@@ -13,6 +13,7 @@ mod serving_q;
 mod serving_r2;
 mod serving_r3;
 mod serving_r3b;
+mod stage_memory;
 mod stage_program;
 mod stopped;
 use crate::{

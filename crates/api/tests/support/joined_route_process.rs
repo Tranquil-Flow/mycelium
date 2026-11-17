@@ -637,7 +637,7 @@ fn two_member_route_streams_chat_stops_settles_and_leaves() {
         json!({"state":"proven","code":null})
     );
     let nonce2 = challenges
-        .issue(&fx.ids[survivor], assigned(&fx, survivor))
+        .issue(&fx.ids[survivor], assigned(&fx, survivor), 1)
         .unwrap();
     fx.nodes[survivor].send(json!({"command":"prepare_native","range":fx.ranges[survivor],"tokens":1,"nonce":nonce2,"forbidden_source":fx.source}));
     assert_eq!(fx.nodes[survivor].refusal(), "member_left");

@@ -58,6 +58,22 @@ fn view<H: ChainHost, R>(
         .ok_or_else(|| failed("compiler_state_unavailable"))
 }
 
+/// The standing grant the compile plans the owner's OWN node with (its `LocalRecord` caps: the
+/// share's memory/storage caps and its worker wall). Lane A, B8 (GRT; ledger rows 61 F1 and 63,
+/// owner ruling "1 a"): that node's stage runs under its local contributor's grant
+/// (`owner_ports::contributor_dir`, the grant `NativeShard` holds the worker to), so the compile
+/// reads THAT grant, as it reads a joined Mac's from its report; it read the owner's parent root,
+/// found none and planned the proposal's figures. Read only: a stored grant is honoured as it
+/// is, never rewritten.
+fn local_grant(root: &Path) -> Result<Option<GrantCaps>, PortError> {
+    let grant = standing_consent::load(&crate::owner_ports::contributor_dir(root))
+        .map_err(|_| failed("compiler_resource_policy_denied"))?;
+    Ok(grant.map(|g| GrantCaps {
+        storage_bytes: g["caps"]["storage_bytes"].as_u64(),
+        max_memory_bytes: g["caps"]["max_memory_bytes"].as_u64(),
+        max_wall_seconds: g["caps"]["max_wall_seconds"].as_u64(),
+    }))
+}
 fn local_device<M: ManagedSlot>(
     root: &Path,
     seed: Option<&SeedRuntime<M>>,
@@ -72,8 +88,7 @@ fn local_device<M: ManagedSlot>(
         .member(node)
         .map_err(|_| failed("compiler_member_changed"))?;
     let device = observe_device(root);
-    let grant =
-        standing_consent::load(root).map_err(|_| failed("compiler_resource_policy_denied"))?;
+    let grant = local_grant(root)?;
     let policy =
         resource_policy::read(root).map_err(|_| failed("compiler_resource_policy_denied"))?;
     Ok(Some(LocalDevice {
@@ -82,11 +97,7 @@ fn local_device<M: ManagedSlot>(
             .ok_or_else(|| failed("member_capability_report_required"))?,
         available_storage_bytes: device.get("available_storage_bytes").cloned(),
         generation: member["generation"].clone(),
-        grant: grant.map(|g| GrantCaps {
-            storage_bytes: g["caps"]["storage_bytes"].as_u64(),
-            max_memory_bytes: g["caps"]["max_memory_bytes"].as_u64(),
-            max_wall_seconds: g["caps"]["max_wall_seconds"].as_u64(),
-        }),
+        grant,
         policy_storage_bytes: policy.and_then(|p| p["storage_bytes"].as_u64()),
     }))
 }
@@ -190,6 +201,9 @@ pub struct Compiler<H: ChainHost> {
     cancel: Arc<std::sync::atomic::AtomicBool>,
     identity: Option<(String, String)>,
     native_program: crate::native_compiler::ProgramSelection,
+    /// The stage worker's own reservation the compile plans each member's share with (lane A,
+    /// B7 / CAP-1); the packaged composition supplies it, `None` keeps the modelled plan.
+    stage_reservation: Option<planner::chain_compile::StageReservation>,
 }
 impl<H: ChainHost> Compiler<H> {
     pub fn new(core: H::Weak, observation: Observation<H>) -> Self {
@@ -210,7 +224,21 @@ impl<H: ChainHost> Compiler<H> {
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             identity: None,
             native_program: crate::native_compiler::ProgramSelection::Environment,
+            stage_reservation: None,
         }
+    }
+    /// Lane A (B7 / CAP-1): plan every member's memory share with the stage worker's own
+    /// reservation (the packaged composition passes `native_selection`'s), so the share the member
+    /// then enforces on its worker can hold that worker.
+    pub fn set_stage_reservation(
+        &mut self,
+        reservation: Option<planner::chain_compile::StageReservation>,
+    ) {
+        self.stage_reservation = reservation;
+    }
+    /// The reservation [`Compiler::set_stage_reservation`] installed.
+    pub fn stage_reservation(&self) -> Option<planner::chain_compile::StageReservation> {
+        self.stage_reservation
     }
     /// Packaged composition supplies the identity captured by startup admission.
     /// None disables the producer explicitly. It never enables environment lookup.
@@ -459,6 +487,7 @@ impl<H: ChainHost> Compiler<H> {
             current_members,
             keys: json!({"gossip":[seed.coordinator.signer().public_key_record()], "load_proof":keys}),
             epoch: 0,
+            stage_reservation: self.stage_reservation,
         };
         self.retain_prepared_source(source, &inputs, &observations)?;
         Ok(inputs)
@@ -824,9 +853,68 @@ pub fn public_compile<H: ChainHost>(
         epoch: input.epoch,
         now: input.now,
         policy: &policy,
+        stage_reservation: input.stage_reservation,
     })
     .map_err(|_| refusal())?;
     compiler.retire_bootstrap().map_err(|_| refusal())?;
     compiler.start_build(&plan.request);
     Ok(jobj! {"state" => "compiling", "route_ready" => false})
+}
+
+#[cfg(test)]
+mod contributor_grant_tests {
+    //! Lane A, release blocker B8 (GRT; ledger rows 61 F1 and 63, owner ruling 15 Nov "1 a"):
+    //! the owner's own stage runs under its local contributor's standing grant
+    //! (`owner_ports::contributor_dir`), so the compile plans the owner's node with THAT grant,
+    //! as it plans a joined Mac with its own; it never reads (or writes) the owner's parent root
+    //! for it, and it never rewrites the stored grant.
+    use super::*;
+    use crate::preferences::resource_policy;
+    #[test]
+    fn the_compile_plans_the_owners_node_with_its_contributors_stored_grant() {
+        let root = std::env::temp_dir().join(format!(
+            "laneA-grt-{}-{}",
+            std::process::id(),
+            crate::app_host::hex(&crate::app_host::random(4).unwrap())
+        ));
+        std::fs::create_dir(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let policy = json!({"peer_visibility":true,"power":"ac_only","storage_bytes":4_000_000_000u64,
+            "network":"unmetered_only","background":false,"diagnostics":false,"thermal":"stop_on_serious"});
+        resource_policy::write(&root, &policy).unwrap();
+        let dir = crate::owner_ports::contributor_dir(&root);
+        std::fs::create_dir(&dir).unwrap();
+        resource_policy::write(&dir, &policy).unwrap();
+        // Mac A's stored grant as read on the Mac (row 63): 1,800 s, 12 GiB, 5,000 commands; not
+        // the code's fresh-grant figures, and not what the proposal plans without a grant.
+        standing_consent::grant(
+            &dir,
+            &json!({"acknowledged":true,"disclosure_digest":standing_consent::DISCLOSURE_DIGEST,
+                "caps":{"storage_bytes":4_000_000_000u64,"max_memory_bytes":12_884_901_888u64,
+                    "max_wall_seconds":1800,"max_commands":5000}}),
+            &policy,
+            crate::app_host::now(),
+            None,
+        )
+        .unwrap();
+        let stored = std::fs::read(dir.join(standing_consent::FILE)).unwrap();
+        let planned = local_grant(&root).unwrap();
+        assert_eq!(
+            planned
+                .as_ref()
+                .map(|g| (g.max_wall_seconds, g.max_memory_bytes, g.storage_bytes)),
+            Some((Some(1800), Some(12_884_901_888), Some(4_000_000_000))),
+            "the owner's node is planned with its contributor's stored grant"
+        );
+        assert_eq!(
+            std::fs::read(dir.join(standing_consent::FILE)).unwrap(),
+            stored,
+            "the stored grant is never rewritten"
+        );
+        assert!(
+            !root.join(standing_consent::FILE).exists(),
+            "nothing is written at the owner's parent root"
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 }

@@ -55,6 +55,9 @@ pub struct CompileInputs {
     /// `{'gossip': [...], 'load_proof': [...]}`.
     pub keys: Value,
     pub epoch: u64,
+    /// The stage worker's own reservation the compile plans each share with (lane A, B7 / CAP-1);
+    /// `None` keeps the oracle's modelled plan.
+    pub stage_reservation: Option<planner::chain_compile::StageReservation>,
 }
 
 /// What the route builder thread has produced.
@@ -188,6 +191,7 @@ pub fn run_compile_step(
         epoch: inputs.epoch,
         now: inputs.now,
         policy: &policy,
+        stage_reservation: inputs.stage_reservation,
     })
     .map_err(refused)?;
     // The commit point. Each side effect is preceded directly by a Stop check, with no work

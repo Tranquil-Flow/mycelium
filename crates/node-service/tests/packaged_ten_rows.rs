@@ -397,13 +397,18 @@ fn admit_hello_program(mac: &Mac) {
     )
     .unwrap();
 }
-fn join_body(member: &Mac, link: &str) -> Value {
+/// The joined Mac's command grant (`max_commands`) in the ten-row gate.
+const COMMANDS: u64 = 5000;
+/// Lane A, B6: the joined Mac's small command grant in the exhaustion row: the startup check
+/// (5 commands, REPORT-laneCAP) and the run's serving, then a 256-token answer runs it out.
+const SMALL_COMMANDS: u64 = 100;
+fn join_body(member: &Mac, link: &str, commands: u64) -> Value {
     let digest = member.status()["join_flow"]["standing_disclosure"]["digest"].clone();
     json!({
         "consent": consent(STORAGE),
         "standing_consent": {"acknowledged": true, "disclosure_digest": digest,
             "caps": {"storage_bytes": STORAGE, "max_memory_bytes": MEMORY,
-                     "max_wall_seconds": wall_seconds(), "max_commands": 5000}},
+                     "max_wall_seconds": wall_seconds(), "max_commands": commands}},
         "join": link,
     })
 }
@@ -415,6 +420,7 @@ fn pair(
     run: RunConfig,
     program: &api::native_compiler::NativeProgram,
     ev: &Evidence,
+    commands: u64,
 ) -> (Owner, Mac) {
     let sidecar = repository::sidecar_file(base);
     let state = private_dir(base, "owner");
@@ -474,7 +480,10 @@ fn pair(
         },
     );
     choose_qwen3(&member);
-    let waiting = member.post("/api/join/window", join_body(&member, &owner.link));
+    let waiting = member.post(
+        "/api/join/window",
+        join_body(&member, &owner.link, commands),
+    );
     assert_eq!(waiting.0, 200, "join: {}", waiting.1);
     approve_and_join(&owner, &member);
     // No download is asked of the joined Mac: its own agent starts the announced model's
@@ -702,6 +711,10 @@ fn chat(
         }
         after = page["next"].clone();
         if page["done"] == true {
+            // Lane A patch 2 (A-03): when the page saw the terminal, from the send (the pieces'
+            // times are token arrivals only).
+            let mut page = page;
+            page["gate_terminal_ms"] = json!(ms(posted));
             return (page, pieces);
         }
         if Instant::now() > end {
@@ -1110,6 +1123,7 @@ fn ten_rows_with_the_real_model_on_the_lan() {
         },
         &program,
         &ev,
+        COMMANDS,
     );
     ev.note(
         "paired",
@@ -1293,6 +1307,7 @@ fn probe_route_chat_against_a_single_process_reference() {
         },
         &program,
         &ev,
+        COMMANDS,
     );
     let mut report = Vec::new();
     let mut failures = Vec::new();
@@ -1369,6 +1384,149 @@ fn probe_route_chat_against_a_single_process_reference() {
     let member_quit = quit(member);
     if owner_quit != Ok(Poll::Verified) || member_quit != Ok(Poll::Verified) {
         failures.push(format!("Quit: owner={owner_quit:?} member={member_quit:?}"));
+    }
+    drop(repository);
+    if failures.is_empty() {
+        std::fs::remove_dir_all(&base).unwrap_or_default();
+    }
+    ev.note("end", json!({"failures": failures}));
+    assert!(failures.is_empty(), "{failures:#?}");
+}
+
+/// Lane A, release blocker B6 (ledger row 87, owner ruling R2), the gate row: the joined Mac's
+/// command grant is small ([`SMALL_COMMANDS`]); once the run serves, a 256-token answer runs it
+/// out mid-answer. The answer must end FAILED with the named code (not
+/// `chat_generation_failed_timeouterror` after ~5 min, as measured with a 1,000 grant), its
+/// terminal (as the page saw it) within one hop deadline of its last piece; the ROUTE leaves
+/// service (the page's next chat ends `chat_route_not_qualified`, no token; the owner run itself
+/// serves on until Stop by design, recorded only); Stop settles inside its allowance and Quit
+/// leaves no child. Model run: not part of lane A (the
+/// orchestrator runs it); lane A only proves it compiles (`--no-run`).
+#[test]
+#[ignore = "real Metal + cached Qwen3-0.6B + this Mac's private LAN address; MYCELIUM_TEN_PACKAGED_EXECUTABLE, MYCELIUM_PINNED_PAYLOAD_APP, MYCELIUM_TEN_RUN_DIR, MYCELIUM_BOOTSTRAP_TEST_CONFIG"]
+fn a_small_command_grant_ends_the_answer_by_name_on_the_lan() {
+    let ev = Evidence::open();
+    let _reaper = Reaper(ev.clone());
+    for name in [
+        "MYCELIUM_COMPILER_NATIVE_BINARY",
+        "MYCELIUM_COMPILER_NATIVE_SHA256",
+    ] {
+        assert!(
+            std::env::var_os(name).is_none(),
+            "{name} is set: the gate runs the admitted program only"
+        );
+    }
+    let lan = lan_ip();
+    let base = std::env::temp_dir().canonicalize().unwrap().join(format!(
+        "ten-grant-{}",
+        node_service::service::random_id().unwrap()
+    ));
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&base)
+        .unwrap();
+    ev.note("state_root", json!(base));
+    let packaged = PathBuf::from(std::env::var_os("MYCELIUM_TEN_PACKAGED_EXECUTABLE").expect(
+        "MYCELIUM_TEN_PACKAGED_EXECUTABLE = the packaged `mycelium` (--features packaged --bin mycelium)",
+    ));
+    let binary = staged::stage(&packaged, &staged::payload_app(), &base);
+    let program = staged::admitted_program(&binary);
+    let repository = cached::CachedRepository::start();
+    let (owner, member) = pair(
+        &base,
+        &repository,
+        RunConfig {
+            sidecar: Some(repository::sidecar_file(&base)),
+            native_program: Some(program.clone()),
+            observe_test_double: Some(Arc::new(observe_test_double::HostIdentityTestDouble::over)),
+            ..RunConfig::default()
+        },
+        &program,
+        &ev,
+        SMALL_COMMANDS,
+    );
+    let mut failures = Vec::new();
+    match ten_rows(&owner.mac, &member, &ev, "grant") {
+        Ok(_) => {
+            let (last, pieces) = chat(
+                &owner.mac,
+                &ev,
+                "grant_exhaustion",
+                api::prompt_codec::ORACLE_USER_PROMPT,
+                256,
+            );
+            let error = last["error"].as_str().unwrap_or_default().to_owned();
+            // Lane A patch 2 (A-03): the terminal's own arrival, against the hop deadline the
+            // owner applies to the step after the last piece (the first token's wait when no
+            // piece came), plus one page poll. A named end must not be a hop deadline late.
+            let last_piece_ms = pieces.last().map_or(0, |p| p.1);
+            let terminal_ms = last["gate_terminal_ms"].as_u64();
+            let hop = if pieces.is_empty() {
+                millis(B::WorkerStartup)
+            } else {
+                millis(B::PyFinalScriptsRunA11RouteBenchmarkTargetTpotMsL398C12)
+            };
+            let bound_ms = (hop + millis(B::OwnerPoll) / 5).as_millis() as u64;
+            let gap_ms = terminal_ms.map(|t| t.saturating_sub(last_piece_ms));
+            // The route out of service, by its real signal: the run serves on (Stop, rollover,
+            // the ceiling or the monitor end it, joined_owner/work.rs), but the route's
+            // qualification is refused, so the page's next chat ends at once
+            // `chat_route_not_qualified` (chat.py:114-121) with no token. The owner run's
+            // lifecycle state is recorded, not asserted.
+            let (next, next_pieces) = chat(
+                &owner.mac,
+                &ev,
+                "grant_after_exhaustion",
+                api::prompt_codec::ORACLE_USER_PROMPT,
+                4,
+            );
+            let route_out = next["terminal"] == "failed"
+                && next["error"] == "chat_route_not_qualified"
+                && next_pieces.is_empty();
+            let run_state = owner.mac.status()["owner_run"]["state"].clone();
+            let ok = last["terminal"] == "failed"
+                && error.ends_with("consent_exhausted")
+                && (pieces.len() as u64) < 256
+                && gap_ms.is_some_and(|gap| gap <= bound_ms)
+                && route_out;
+            ev.row(json!({"row": "grant exhaustion (256 tokens, small grant)",
+                "result": if ok { "passed" } else { "failed" }, "grant": SMALL_COMMANDS,
+                "pieces": pieces.len(), "wall_ms": terminal_ms, "last_piece_ms": last_piece_ms,
+                "terminal_gap_ms": gap_ms, "terminal_bound_ms": bound_ms,
+                "status_line": {"terminal": last["terminal"], "error": last["error"]},
+                "next_chat": {"terminal": next["terminal"], "error": next["error"],
+                    "pieces": next_pieces.len()},
+                "run_state": run_state, "workers": workers(&binary)}));
+            if !ok {
+                failures.push(format!(
+                    "exhaustion: terminal={} error={error} pieces={} gap={gap_ms:?}/{bound_ms} ms next_chat={}/{}/{} run={run_state}",
+                    last["terminal"],
+                    pieces.len(),
+                    next["terminal"],
+                    next["error"],
+                    next_pieces.len()
+                ));
+            }
+            if let Err(e) = stop_row(&owner, &member, &ev, "grant", &binary, &lan) {
+                failures.push(e);
+            }
+        }
+        Err(e) => failures.push(format!("the run did not serve: {e}")),
+    }
+    let before = descendants();
+    let owner_quit = quit(owner.mac);
+    let member_quit = quit(member);
+    let after = descendants();
+    let ok =
+        owner_quit == Ok(Poll::Verified) && member_quit == Ok(Poll::Verified) && after.is_empty();
+    ev.row(
+        json!({"row": "Quit", "result": if ok {"passed"} else {"failed"},
+        "children_before": before.len(), "descendants_after": after.len()}),
+    );
+    if !ok {
+        failures.push(format!(
+            "Quit: owner={owner_quit:?} member={member_quit:?} left={after:?}"
+        ));
     }
     drop(repository);
     if failures.is_empty() {

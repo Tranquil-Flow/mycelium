@@ -148,6 +148,7 @@ fn replay(name: &str, rec: &Value) -> Result<(), String> {
         epoch: i["epoch"].as_u64().unwrap(),
         now,
         policy: &policy,
+        stage_reservation: None,
     };
     let prepared = match prepare(&input) {
         Err(r) => {
@@ -551,6 +552,14 @@ fn compile_state_for_two_three_and_more_member_fleets_equals_the_oracle() {
 /// `prepare` over a recorded case's inputs with the model contract's serving context set to
 /// `context`: the compile's memory plan and its builder request, without the oracle comparison.
 fn prepare_case(rec: &Value, context: u64) -> Result<PreparedCompile, Refusal> {
+    prepare_case_with(rec, context, None)
+}
+/// [`prepare_case`] with the host's stage-worker reservation (lane A, B7 / CAP-1).
+fn prepare_case_with(
+    rec: &Value,
+    context: u64,
+    stage_reservation: Option<StageReservation>,
+) -> Result<PreparedCompile, Refusal> {
     let i = &rec["inputs"];
     let nodes = strings(&i["nodes"]);
     let local = i["local_node"].as_str();
@@ -612,6 +621,7 @@ fn prepare_case(rec: &Value, context: u64) -> Result<PreparedCompile, Refusal> {
         epoch: i["epoch"].as_u64().unwrap(),
         now,
         policy: &policy,
+        stage_reservation,
     })
 }
 
@@ -683,4 +693,109 @@ fn the_compile_plans_and_requests_the_model_contracts_serving_context() {
         checked += 1;
     }
     assert!(checked >= 20, "only {checked} cases reached the builder");
+}
+
+/// The reservation [`reserving`] reports for every stage (a test-owned figure).
+static RESERVED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+fn reserving(_: &str, _: [u64; 2], _: u64, _: u64) -> Option<u64> {
+    Some(RESERVED.load(std::sync::atomic::Ordering::SeqCst))
+}
+fn no_native_figure(_: &str, _: [u64; 2], _: u64, _: u64) -> Option<u64> {
+    None
+}
+
+/// Lane A, release blocker B7 (CAP-1, REVIEW-laneCAP-astra.md): the compile plans each member's
+/// memory share with the stage worker's OWN reservation when the host supplies it. A share is
+/// never below what the worker reserves (so the member can enforce it), never lowered by it, the
+/// proposal's aggregate follows, and a reservation no Mac can hold is refused by name before the
+/// builder. Without a native figure the plan is the oracle's modelled one, byte for byte.
+#[test]
+fn the_compile_plans_each_share_with_the_stage_workers_own_reservation() {
+    let doc = fixture();
+    let out = |a: &Value| BuildOutput {
+        operator_plan_digest: a["operator_plan_digest"].as_str().unwrap().into(),
+        physical_host_ids: strings(&a["physical_host_ids"]),
+        cache_hit: a["cache_hit"].as_bool().unwrap(),
+        build_seconds: a["build_seconds"].as_f64().unwrap(),
+        slice_plan_digest: Some(String::new()),
+        node_slice_plan_digests: Some(BTreeMap::new()),
+    };
+    let (mut raised, mut refused) = (0, 0);
+    for (name, rec) in doc["cases"].as_object().unwrap() {
+        let a = &rec["inputs"]["adapter"];
+        if rec["build_calls"].as_array().unwrap().len() != 1
+            || a["block_build"] == true
+            || a["build_raises"] == true
+        {
+            continue;
+        }
+        let Ok(modelled) = prepare_case(rec, 2356) else {
+            continue;
+        };
+        let modelled = modelled.finish(&out(a));
+        let rows = |s: &Value| s["resource_plan"]["members"].as_array().unwrap().clone();
+        let highest = rows(&modelled)
+            .iter()
+            .map(|r| r["max_rss_bytes"].as_u64().unwrap())
+            .max()
+            .unwrap();
+        // No native figure: exactly the modelled plan.
+        let unchanged = prepare_case_with(rec, 2356, Some(no_native_figure))
+            .unwrap_or_else(|r| panic!("{name}: {r:?}"))
+            .finish(&out(a));
+        assert_eq!(unchanged, modelled, "{name}");
+        // A reservation 1 MB above every modelled share: every share is that reservation.
+        RESERVED.store(highest + 1_000_000, std::sync::atomic::Ordering::SeqCst);
+        match prepare_case_with(rec, 2356, Some(reserving)) {
+            Ok(planned) => {
+                let planned = planned.finish(&out(a));
+                for row in rows(&planned) {
+                    assert_eq!(
+                        row["max_rss_bytes"],
+                        json!(highest + 1_000_000),
+                        "{name}: {row}"
+                    );
+                }
+                assert_eq!(
+                    planned["execution_proposal"]["max_combined_rss_bytes"],
+                    json!(2 * (highest + 1_000_000)),
+                    "{name}"
+                );
+                raised += 1;
+            }
+            Err(r) => assert!(
+                matches!(
+                    r.code.as_str(),
+                    "member_memory_cap_below_share" | "member_memory_insufficient_for_share"
+                ),
+                "{name}: {r:?}"
+            ),
+        }
+        // A reservation below every share never lowers one.
+        RESERVED.store(1, std::sync::atomic::Ordering::SeqCst);
+        let lower = prepare_case_with(rec, 2356, Some(reserving))
+            .unwrap_or_else(|r| panic!("{name}: {r:?}"))
+            .finish(&out(a));
+        assert_eq!(lower, modelled, "{name}");
+        // A reservation no Mac can hold: refused by name before the builder.
+        RESERVED.store(1 << 50, std::sync::atomic::Ordering::SeqCst);
+        match prepare_case_with(rec, 2356, Some(reserving)) {
+            Err(r) => {
+                assert!(
+                    matches!(
+                        r.code.as_str(),
+                        "member_memory_cap_below_share" | "member_memory_insufficient_for_share"
+                    ),
+                    "{name}: {r:?}"
+                );
+                assert!(r.message.is_some_and(|m| m.contains("Mac")), "{name}");
+                refused += 1;
+            }
+            Ok(_) => panic!("{name}: a 1 PiB stage reservation was planned"),
+        }
+    }
+    assert!(
+        raised >= 10 && refused >= 10,
+        "raised {raised}, refused {refused}"
+    );
 }

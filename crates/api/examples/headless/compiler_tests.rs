@@ -906,6 +906,7 @@ fn worker_fixture(f: Fixture, require_native: bool, stop_at_handoff: bool) {
         current_members: members.clone(),
         keys: json!({"gossip":[seed.coordinator.signer().public_key_record()],"load_proof":keys}),
         epoch: 0,
+        stage_reservation: None,
     };
     let observation = Observation(Arc::new(Mutex::new(observation::adapter(Arc::downgrade(
         &core,

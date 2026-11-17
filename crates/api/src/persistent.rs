@@ -904,7 +904,18 @@ impl<H: Host, B: Backend> PersistentBackend<H, B> {
             self.host.stop_control();
         }
         let now = self.host.now_seconds();
-        match standing_consent::withdraw(&self.root, now).map_err(|e| PublicError::new(409, e.0))? {
+        let withdrawn =
+            standing_consent::withdraw(&self.root, now).map_err(|e| PublicError::new(409, e.0))?;
+        // Lane A, B8 (GRT; ledger row 61 F1): an owner's own stage runs under its local
+        // contributor's grant (`owner_ports::contributor_dir`); withdrawing the owner's consent
+        // withdraws that grant too (v0.1.4's owner had one grant, the one its node ran under).
+        let contributor = if self.host.owner() {
+            standing_consent::withdraw(&crate::owner_ports::contributor_dir(&self.root), now)
+                .map_err(|e| PublicError::new(409, e.0))?
+        } else {
+            None
+        };
+        match withdrawn.or(contributor) {
             None => Err(PublicError::new(400, "standing_consent_missing")),
             Some(doc) => Ok(crate::jobj! {
                 "state" => &doc["state"], "withdrawn_at" => &doc["withdrawn_at"], "route_ready" => false,

@@ -133,5 +133,6 @@ pub fn inputs_of(i: &Value) -> CompileInputs {
             .collect(),
         keys: i["keys"].clone(),
         epoch: i["epoch"].as_u64().unwrap(),
+        stage_reservation: None,
     }
 }

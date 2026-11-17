@@ -27,6 +27,80 @@ type Result<T> = std::result::Result<T, Error>;
 fn state(error: private_state::StateError) -> Error {
     Error(error.0)
 }
+/// What [`settle_lock`] found.
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum Settled {
+    /// The lock is ours.
+    Held,
+    /// Still busy when the wait's bound ended (a holder that really holds it).
+    Busy,
+    /// The lock call itself failed.
+    Failed,
+}
+/// The longest one lock acquisition of this module waits: the router's close allowance.
+pub(crate) fn lock_allowance() -> std::result::Result<std::time::Duration, Error> {
+    budgets::BudgetId::RouterClose
+        .span(budgets::Entries::ZERO)
+        .map(|close| std::time::Duration::from_millis(close.millis()))
+        .map_err(|_| Error("budget_unavailable"))
+}
+/// Lane A, B12 (ledger row 96): take this module's exclusive `flock` on `file`, retrying a busy
+/// lock (every tenth of the owner's poll) before answering busy. The locks are `flock`s on open
+/// descriptions, and a child this process forks holds a copy of every descriptor from fork to
+/// exec (macOS has no close-on-fork; a confined spawn runs its pre-exec loop over the whole
+/// descriptor table in that window): a holder that let go in that window leaves its lock held by
+/// the child until it execs.
+///
+/// Lane A patch 2, A-01: the wait is bounded by the CALLER as well as by the allowance. It ends
+/// at the earlier of `until` (a pass-wide end, e.g. one retirement pass over every run) and the
+/// close allowance from now, and while the lock is busy it calls the caller's `check` before
+/// every sleep: an operation's own deadline or cancellation ends the wait with the operation's
+/// own code (`Err`), at the first poll past it. A caller that commits after the wait re-checks
+/// its operation itself (`ShardReservation::complete`).
+pub(crate) fn settle_lock(
+    file: &fs::File,
+    until: Option<std::time::Instant>,
+    check: &dyn Fn() -> Result<()>,
+) -> Result<Settled> {
+    let poll = budgets::BudgetId::OwnerPoll
+        .span(budgets::Entries::ZERO)
+        .map_err(|_| Error("budget_unavailable"))?;
+    let slice = std::time::Duration::from_millis(poll.millis()) / 10;
+    let allowance = std::time::Instant::now() + lock_allowance()?;
+    let end = until.map_or(allowance, |until| until.min(allowance));
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(Settled::Held),
+            Err(fs::TryLockError::WouldBlock) => {
+                check()?;
+                let now = std::time::Instant::now();
+                if now >= end {
+                    return Ok(Settled::Busy);
+                }
+                std::thread::sleep(slice.min(end - now));
+            }
+            Err(fs::TryLockError::Error(_)) => return Ok(Settled::Failed),
+        }
+    }
+}
+/// Diagnostic lines this module wrote to the log, kept for the tests that check the log names
+/// what it should (lane A, B11 (a)).
+#[cfg(test)]
+pub(crate) static DIAGNOSTICS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+/// Lane A, B11 (a) (owner ruling 4 a, ledger row 77): a private state file this module cannot
+/// read is NAMED in the log beside its closed code (`authority_state_invalid:<path>`); the code
+/// the run reports stays the closed one. Row 77's indented ledger said only "authority state
+/// invalid", and finding which file took a whole session.
+fn named_state(path: &Path, error: private_state::StateError) -> Error {
+    let line = format!("{}:{}", error.0, path.display());
+    eprintln!("{line}");
+    #[cfg(test)]
+    DIAGNOSTICS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(line);
+    state(error)
+}
 
 pub fn validate_hosts(document: &Value, facts: usize) -> Result<()> {
     let rows = document["observations"]
@@ -345,7 +419,10 @@ impl InputArtifact {
             .file_name()
             .and_then(|s| s.to_str())
             .ok_or(Error("compiler_storage_ledger_invalid"))?;
-        reserve_output(runs, run, self.directory_identity, bytes)
+        // Lane A patch 3, A2-01: the compile's Stop bounds the wait for a busy ledger.
+        reserve_output(runs, run, self.directory_identity, bytes, &|| {
+            self.checkpoint()
+        })
     }
 
     /// Real source-byte sharding only; no stage load, quantization or native proof.
@@ -389,7 +466,7 @@ impl InputArtifact {
         .map_err(|e| Error(e.code))?;
         reservation
             .ok_or(Error("compiler_storage_reservation_missing"))?
-            .complete()?;
+            .complete(&|| self.checkpoint())?;
         let document = json!({"protocol":"mycelium.source_stage_shards.v1",
             "state":"bytes_only","route_ready":false,
             "run_id":self.documents["compile-start.private.json"]["run_id"],
@@ -511,8 +588,9 @@ impl InputArtifact {
         }
         let max = private_state::private_json_limit().map_err(state)?;
         for (name, expected) in &self.documents {
-            let actual = private_state::load(&self.root.join(name), max)
-                .map_err(state)?
+            let path = self.root.join(name);
+            let actual = private_state::load(&path, max)
+                .map_err(|e| named_state(&path, e))?
                 .map(Value::Object)
                 .ok_or(Error("compiler_inputs_changed"))?;
             // The private writer canonicalizes numeric spellings (e.g. a real
@@ -535,16 +613,22 @@ pub mod member_shard;
 pub mod owner_retire;
 pub use owner_retire::{Retirement, retire_dead_runs};
 
+/// Reserve `bytes` of retained output for `run` under the storage ledger's lock. `checkpoint` is
+/// the asking operation's own (receive deadline/cancellation, compile Stop). Lane A patch 3, A2-01
+/// (REVIEW-laneA-p2-astra.md): it bounds the wait for a busy ledger ([`settle_lock`]), and it is
+/// checked again immediately before the reservation is written, so an operation that ended while
+/// it waited never leaves a new `cleanup_required` charge.
 fn reserve_output(
     runs: &Path,
     run: &str,
     directory_identity: (u64, u64),
     bytes: u64,
+    checkpoint: &dyn Fn() -> Result<()>,
 ) -> Result<ShardReservation> {
     let host = runs
         .parent()
         .ok_or(Error("compiler_storage_ledger_invalid"))?;
-    let (_lock, mut ledger) = storage_ledger(runs)?;
+    let (_lock, mut ledger) = storage_ledger_within(runs, None, checkpoint)?;
     let cap = crate::preferences::resource_policy::read(host)
         .map_err(|_| Error("compiler_storage_consent_required"))?
         .and_then(|p| p["storage_bytes"].as_u64())
@@ -595,6 +679,7 @@ fn reserve_output(
     }
     let row = json!({"bytes":bytes,"run_dev":directory_identity.0,
             "run_ino":directory_identity.1,"phase":"cleanup_required"});
+    checkpoint()?;
     entries.insert(run.into(), row.clone());
     store_storage_ledger(runs, &ledger)?;
     Ok(ShardReservation {
@@ -629,8 +714,12 @@ pub struct ShardReservation {
     row: Value,
 }
 impl ShardReservation {
-    pub fn complete(self) -> Result<()> {
-        let (_lock, mut ledger) = storage_ledger(&self.runs)?;
+    /// Commit the reservation as `retained`. `checkpoint` is the operation's own (cancellation,
+    /// deadline, admission): it bounds the wait for a busy ledger, and it is checked again after
+    /// the wait, immediately before the commit (lane A patch 2, A-01: an operation whose deadline
+    /// passed while it waited never commits).
+    pub fn complete(self, checkpoint: &dyn Fn() -> Result<()>) -> Result<()> {
+        let (_lock, mut ledger) = storage_ledger_within(&self.runs, None, checkpoint)?;
         let entries = ledger["entries"]
             .as_object_mut()
             .ok_or(Error("compiler_storage_ledger_invalid"))?;
@@ -645,6 +734,7 @@ impl ShardReservation {
         entries
             .get_mut(&self.run)
             .ok_or(Error("compiler_storage_reservation_changed"))?["phase"] = json!("retained");
+        checkpoint()?;
         store_storage_ledger(&self.runs, &ledger)
     }
 }
@@ -760,6 +850,14 @@ fn storage_inventory(runs: &Path, entries: &Map<String, Value>) -> Result<(u64, 
     Ok((total, materialized))
 }
 fn storage_ledger(runs: &Path) -> Result<(fs::File, Value)> {
+    storage_ledger_within(runs, None, &|| Ok(()))
+}
+/// [`storage_ledger`] with the caller's bound on the wait for a busy lock ([`settle_lock`]).
+fn storage_ledger_within(
+    runs: &Path,
+    until: Option<std::time::Instant>,
+    check: &dyn Fn() -> Result<()>,
+) -> Result<(fs::File, Value)> {
     use std::os::unix::fs::OpenOptionsExt;
     directory(runs)?;
     let lock = fs::OpenOptions::new()
@@ -781,15 +879,14 @@ fn storage_ledger(runs: &Path) -> Result<(fs::File, Value)> {
     {
         return Err(Error("compiler_storage_lock_failed"));
     }
-    lock.try_lock()
-        .map_err(|_| Error("compiler_storage_busy"))?;
-    let ledger = private_state::load(
-        &runs.join(STORAGE_LEDGER),
-        private_state::private_json_limit().map_err(state)?,
-    )
-    .map_err(state)?
-    .map(Value::Object)
-    .unwrap_or_else(|| json!({"protocol":"mycelium.compiler_storage.v1","entries":{}}));
+    if settle_lock(&lock, until, check)? != Settled::Held {
+        return Err(Error("compiler_storage_busy"));
+    }
+    let path = runs.join(STORAGE_LEDGER);
+    let ledger = private_state::load(&path, private_state::private_json_limit().map_err(state)?)
+        .map_err(|e| named_state(&path, e))?
+        .map(Value::Object)
+        .unwrap_or_else(|| json!({"protocol":"mycelium.compiler_storage.v1","entries":{}}));
     if ledger["protocol"] != "mycelium.compiler_storage.v1" || !ledger["entries"].is_object() {
         return Err(Error("compiler_storage_ledger_invalid"));
     }

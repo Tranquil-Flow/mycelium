@@ -122,8 +122,9 @@ fn check_stage_memory(
         })?;
         if needed > consent {
             let message = format!(
-                "Mac {node} consents to {consent} bytes of memory, but its stage (layers {start}-{}) \
-                 needs {needed} bytes for the model's {context}-token serving context",
+                "Mac {node} holds its stage worker to {consent} bytes of memory (its consent and the \
+                 share the compile announced), but its stage (layers {start}-{}) needs {needed} \
+                 bytes for the model's {context}-token serving context",
                 end - 1
             );
             return Err(owner_run::OwnerRunError::with(
@@ -135,6 +136,86 @@ fn check_stage_memory(
         }
     }
     Ok(())
+}
+/// The memory a stage's prepare will hold its worker to (`NativeShard::memory_limit`), as the
+/// slices step can know it: the owner's own stage, its contributor's standing grant (the
+/// compile's records carry none for the owner: v0.1.4's owner holds no grant); a joined Mac's,
+/// its signed report's caps (`joined_member::planning_caps` = its standing consent).
+///
+/// Lane A, B7 / CAP-1: the member then holds its worker to the SHARE it admitted (its consent
+/// tightened by the compile's announced `max_rss_bytes` for that node), so the check reads the
+/// same effective limit: the smaller of the consent and the share, whichever is known.
+fn stage_memory_limit(state: &RunState, contributor: &Path, node: &str) -> Option<u64> {
+    let consent = if state.local_node.as_deref() == Some(node) {
+        api::preferences::standing_consent::load(contributor)
+            .ok()
+            .flatten()
+            .and_then(|g| g["caps"]["max_memory_bytes"].as_u64())
+    } else {
+        state
+            .member_records
+            .as_ref()
+            .and_then(|r| r[node]["caps"]["max_memory_bytes"].as_u64())
+    };
+    let share = state
+        .compile_state
+        .as_ref()
+        .and_then(|c| c["resource_plan"]["members"].as_array())
+        .and_then(|rows| rows.iter().find(|r| r["node_id"].as_str() == Some(node)))
+        .and_then(|r| r["max_rss_bytes"].as_u64());
+    match (consent, share) {
+        (Some(consent), Some(share)) => Some(consent.min(share)),
+        (consent, share) => consent.or(share),
+    }
+}
+/// The compile's completed run as the slices step's preparation reads it: in a product build
+/// always the compile's own completed input.
+enum Completed<'a> {
+    Artifact(&'a api::compiler_inputs::InputArtifact),
+    /// TEST ONLY: [`COMPLETED_REQUEST`].
+    #[cfg(test)]
+    Request(planner::chain_compile::BuildRequest),
+}
+impl Completed<'_> {
+    fn request(&self) -> &planner::chain_compile::BuildRequest {
+        match self {
+            Self::Artifact(artifact) => artifact.request(),
+            #[cfg(test)]
+            Self::Request(request) => request,
+        }
+    }
+    fn artifact(&self) -> Result<&api::compiler_inputs::InputArtifact, StepError> {
+        match self {
+            Self::Artifact(artifact) => Ok(artifact),
+            #[cfg(test)]
+            Self::Request(_) => Err(refused("test_completed_request_only")),
+        }
+    }
+}
+#[cfg(test)]
+thread_local! {
+    /// TEST ONLY (lane A patch 2, A-04): the completed compile's request for this thread's next
+    /// [`Work::prepare`], in place of a compile only the real model can complete (its native
+    /// challenge). It replaces the compile's completion and nothing else: every check `prepare`
+    /// makes on the request (run identity, the serving context, the stage memory) is the product's,
+    /// and a request that passes them is refused `test_completed_request_only` right after the
+    /// memory check, before any shard document, push or prepare.
+    pub(super) static COMPLETED_REQUEST: std::cell::RefCell<Option<planner::chain_compile::BuildRequest>> =
+        const { std::cell::RefCell::new(None) };
+}
+/// The slices step's memory check over the run's own consent sources (lane A, CAP-4: the
+/// production wiring a test can reach, not a closure each test writes for itself).
+fn check_run_stage_memory(
+    request: &planner::chain_compile::BuildRequest,
+    state: &RunState,
+    contributor: &Path,
+    tokens: usize,
+) -> Result<(), StepError> {
+    check_stage_memory(
+        request,
+        &|node| stage_memory_limit(state, contributor, node),
+        tokens,
+    )
 }
 /// Retry the owners a failed close retained: first the member Work (its repeated teardown
 /// retries the exact unproven member links), and only once every member stage is proven,
@@ -653,10 +734,22 @@ impl Work {
     ) -> Result<(), StepError> {
         let (plan, tokenizer) = {
             let compiler = lock(&compiler.0);
-            let artifact = compiler
-                .completed_input(&state.run_id, &state.deployment_id)
-                .map_err(|e| refused(&e.code_or("compiler_not_completed")))?;
-            let request = artifact.request();
+            #[cfg(test)]
+            let completed = match COMPLETED_REQUEST.with(|c| c.borrow_mut().take()) {
+                Some(request) => Completed::Request(request),
+                None => Completed::Artifact(
+                    compiler
+                        .completed_input(&state.run_id, &state.deployment_id)
+                        .map_err(|e| refused(&e.code_or("compiler_not_completed")))?,
+                ),
+            };
+            #[cfg(not(test))]
+            let completed = Completed::Artifact(
+                compiler
+                    .completed_input(&state.run_id, &state.deployment_id)
+                    .map_err(|e| refused(&e.code_or("compiler_not_completed")))?,
+            );
+            let request = completed.request();
             if request.node_ids != state.participants
                 || request.deployment_id != state.deployment_id
             {
@@ -670,27 +763,11 @@ impl Work {
                 serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE)
                     .map_err(|_| refused("native_reference_invalid"))?;
             let tokens = stage_tokens(request, &oracle)?;
-            // The memory each stage's prepare holds its worker to (`NativeShard::memory_limit`):
-            // the owner's own stage, its contributor's standing grant (the compile's records
-            // carry none for the owner: v0.1.4's owner holds no grant); a joined Mac's, its signed
-            // report's caps (`joined_member::planning_caps` = its standing consent).
             let contributor = self
                 .host
                 .with(|c| owner_ports::contributor_dir(&c.authority.root));
-            let consent = |node: &str| {
-                if state.local_node.as_deref() == Some(node) {
-                    api::preferences::standing_consent::load(&contributor)
-                        .ok()
-                        .flatten()
-                        .and_then(|g| g["caps"]["max_memory_bytes"].as_u64())
-                } else {
-                    state
-                        .member_records
-                        .as_ref()
-                        .and_then(|r| r[node]["caps"]["max_memory_bytes"].as_u64())
-                }
-            };
-            check_stage_memory(request, &consent, tokens)?;
+            check_run_stage_memory(request, state, &contributor, tokens)?;
+            let artifact = completed.artifact()?;
             // `_step_slices` (`demo_chain.py:838-839`): a whole-snapshot run has no slice to
             // fetch. v0.1.4 binds the snapshot each member already holds
             // (`bind_hf_prepositions`) and passes the step; only a stage-sharded compile has a
@@ -1270,6 +1347,9 @@ impl Composed {
         let ports = PackagedChainPorts::new(host, double, program.clone());
         let work = ports.work.clone();
         let compiler = SharedCompiler(ports.compiler.0.clone());
+        // Lane A, B7 / CAP-1: the compile plans each member's memory share with the stage
+        // worker's own reservation, the figure the member's worker guard then enforces.
+        lock(&compiler.0).set_stage_reservation(Some(crate::native_selection::planned_reservation));
         Self {
             inner: SharedHostChain::new(ports),
             work,

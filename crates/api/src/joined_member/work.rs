@@ -85,10 +85,15 @@ pub struct Operation {
 }
 impl Operation {
     pub fn check(&self) -> Result<()> {
+        self.checkpoint().map_err(|e| e.0.into())
+    }
+    /// [`Operation::check`] as a storage checkpoint (lane A patch 3, A2-01): the operation's own
+    /// code ends a wait on the storage ledger.
+    pub fn checkpoint(&self) -> std::result::Result<(), Error> {
         if self.cancelled.load(Ordering::SeqCst) {
-            Err("member_operation_cancelled".into())
+            Err(Error("member_operation_cancelled"))
         } else if Instant::now() >= self.deadline {
-            Err("member_operation_deadline".into())
+            Err(Error("member_operation_deadline"))
         } else {
             Ok(())
         }
@@ -937,9 +942,10 @@ impl Work {
         if policy.is_none() && socket.is_none_or(|s| !s.ip().is_loopback()) {
             return Err("source_not_loopback".into());
         }
-        // Retain custody BEFORE any fallible carrier work; failures keep debt.
+        // Retain custody BEFORE any fallible carrier work; failures keep debt. The storage
+        // reservation's wait for a busy ledger is this operation's (lane A patch 3, A2-01).
         self.shard = Some(
-            JoinedShard::begin(
+            JoinedShard::begin_checked(
                 &self.root,
                 session
                     .session()
@@ -951,6 +957,7 @@ impl Work {
                 carrier,
                 offer,
                 app_host::now(),
+                &|| operation.checkpoint(),
             )
             .map_err(|e| e.0.to_owned())?,
         );
@@ -1099,7 +1106,22 @@ impl Work {
             .ok_or("native_required")?
             .offer()
             .clone();
-        self.admit_share_for(session, &offer, self.require_share)?;
+        let admitted = self.admit_share_for(session, &offer, self.require_share)?;
+        // Lane A, B7 / CAP-1: the admitted share is ENFORCED, not only checked: the worker's guard
+        // (the prepare's `memory`) is the share's `max_rss_bytes`, never the member's whole
+        // consent (v0.1.4 `standing_limits(grant, required=share)` is what the worker runs under,
+        // standing_consent.py:252-259). The compile plans that share with the worker's own
+        // reservation, so an enforced share can hold the worker it announces.
+        if let Some(limits) = admitted {
+            let rss = limits["max_rss_bytes"]
+                .as_u64()
+                .ok_or("member_resources_invalid")?;
+            self.native
+                .as_mut()
+                .ok_or("native_required")?
+                .limit_memory_to(rss)
+                .map_err(|e| e.0.to_owned())?;
+        }
         let member = session.ok_or("not_joined")?;
         let range =
             serde_json::from_value(request["range"].clone()).map_err(|_| "range_invalid")?;

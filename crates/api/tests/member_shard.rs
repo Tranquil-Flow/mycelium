@@ -62,6 +62,21 @@ impl Fixture {
         )
         .unwrap()
     }
+    fn begin_checked(
+        &self,
+        run: &str,
+        checkpoint: &dyn Fn() -> Result<(), api::compiler_inputs::Error>,
+    ) -> Result<MemberShard, api::compiler_inputs::Error> {
+        MemberShard::begin_checked(
+            &self.root,
+            run,
+            "node-0",
+            &self.transfer,
+            &self.recipe,
+            self.recipe["node_plan_digest"].as_str().unwrap(),
+            checkpoint,
+        )
+    }
     fn resume(&self, run: &str) -> Result<MemberShard, api::compiler_inputs::Error> {
         MemberShard::resume(
             &self.root,
@@ -425,4 +440,244 @@ fn drop_keeps_debt_and_exclusive_custody_can_resume() {
     receive.verify(&|| Ok(())).unwrap();
     receive.discard().unwrap();
     assert_eq!(f.charge(), 0);
+}
+
+/// Lane A, release blocker B12 (ledger row 96): the api lib test
+/// `member_refund_interrupted_before_ledger_rename_retains_charge_and_recovers` failed now and then
+/// with `member_shard_busy` at a resume after the previous holder was dropped. Mechanism: the
+/// custody lock is a `flock` on the lock file's open description; a child this process forks
+/// (every confined worker spawn runs a pre-exec loop over the whole descriptor table) holds a
+/// copy of EVERY descriptor from fork to exec, so a holder dropped in that window leaves its
+/// lock held by the child until the child execs. Deterministic model of that window: a child
+/// holding a copy of the dropped holder's lock description for a short while (`/bin/sleep 1`
+/// inherits it). The next holder must not be refused for a lock nobody in this process holds.
+#[test]
+fn a_lock_copy_still_held_by_a_forked_child_does_not_refuse_the_next_holder() {
+    use std::os::unix::fs::MetadataExt;
+    let f = Fixture::new();
+    let receive = f.begin("forked");
+    let lock = fs::canonicalize(f.root.join("chain-runs/forked/member-shard.lock")).unwrap();
+    let inode = fs::metadata(&lock).map(|m| m.ino()).unwrap();
+    // The holder's own descriptor of the lock (the description its flock lives on); opening
+    // `/dev/fd/N` duplicates that descriptor, as a fork does. (`/dev/fd` reports its own device
+    // and the file's inode.)
+    let held = (3..4096)
+        .find(|n| fs::metadata(format!("/dev/fd/{n}")).is_ok_and(|m| m.ino() == inode))
+        .expect("the holder's lock descriptor");
+    let copy = fs::File::open(format!("/dev/fd/{held}")).unwrap();
+    rustix::io::fcntl_setfd(&copy, rustix::io::FdFlags::empty()).unwrap();
+    let mut child = std::process::Command::new("/bin/sleep")
+        .arg("1")
+        .spawn()
+        .unwrap();
+    drop(copy);
+    drop(receive);
+    let resumed = f.resume("forked").map(drop).map_err(|e| e.0);
+    child.wait().unwrap();
+    assert_eq!(
+        resumed,
+        Ok(()),
+        "a lock only a forked child's inherited copy still held refused the next holder"
+    );
+}
+
+/// Lane A patch 2, A-01 (REVIEW-laneA-release-astra.md): verification's last checkpoint can pass
+/// just before the operation's deadline; `complete` then waits for a busy storage ledger. The
+/// wait is bounded by the operation (its checkpoint), not by a fresh close allowance: an
+/// operation whose deadline passes while the ledger is still held is refused by its own name at
+/// about its deadline, and nothing is committed (the run stays `cleanup_required`, charged).
+fn held_ledger(f: &Fixture) -> fs::File {
+    let lock = fs::File::open(f.root.join("chain-runs/compiler-storage.lock")).unwrap();
+    lock.try_lock().unwrap();
+    lock
+}
+/// The owner's poll (500 ms): this file's waits are multiples of it (no literal durations).
+fn poll() -> std::time::Duration {
+    std::time::Duration::from_millis(
+        budgets::BudgetId::OwnerPoll
+            .span(budgets::Entries::ZERO)
+            .unwrap()
+            .millis(),
+    )
+}
+fn phase(f: &Fixture, run: &str) -> Value {
+    let v: Value = serde_json::from_slice(
+        &fs::read(f.root.join("chain-runs/compiler-storage.private.json")).unwrap(),
+    )
+    .unwrap();
+    v["entries"][run]["phase"].clone()
+}
+#[test]
+fn a_ledger_wait_ends_at_the_operations_deadline_without_committing() {
+    use std::time::Instant;
+    let f = Fixture::new();
+    let mut receive = f.begin("deadline");
+    receive.write_chunk(0, &f.bytes).unwrap();
+    let ledger = held_ledger(&f);
+    let started = Instant::now();
+    let deadline = started + poll() / 2;
+    // The other holder lets go well after the deadline, inside a fresh close allowance.
+    let holder = std::thread::spawn(move || {
+        std::thread::sleep(poll() * 3);
+        drop(ledger);
+    });
+    let got = receive.verify(&|| {
+        if Instant::now() >= deadline {
+            Err(api::compiler_inputs::Error("member_operation_deadline"))
+        } else {
+            Ok(())
+        }
+    });
+    let waited = started.elapsed();
+    holder.join().unwrap();
+    assert_eq!(got.map_err(|e| e.0), Err("member_operation_deadline"));
+    assert!(
+        waited < poll() * 2,
+        "the ledger wait outlived the operation's deadline: {waited:?}"
+    );
+    assert_eq!(phase(&f, "deadline"), "cleanup_required");
+    assert_eq!(f.charge(), f.bytes.len() as u64);
+}
+/// A-01, commit after the deadline: the ledger frees inside verification's wait for it, and the
+/// operation's deadline passes after the wait's last checkpoint but before the commit; the
+/// re-check after the acquisition refuses it, nothing committed.
+///
+/// Lane A patch 3, A2-02 (REVIEW-laneA-p2-astra.md): deterministic, one thread, no timing. A
+/// control verification on a free ledger counts the checkpoint calls before the ledger (`reads`:
+/// all but its last, the pre-commit re-check). The witness holds the ledger itself: its calls
+/// 1..=reads are verification's reads; call reads + 1 is then the busy wait (the ledger is still
+/// held by this test), where the test lets the ledger go and the operation is still current;
+/// the next try takes the lock without a checkpoint, so call reads + 2 is the re-check after the
+/// acquisition, where the deadline has passed. Without that re-check the commit happens.
+#[test]
+fn a_ledger_freed_after_the_deadline_is_not_committed() {
+    use std::cell::{Cell, RefCell};
+    let f = Fixture::new();
+    let mut control = f.begin("control");
+    control.write_chunk(0, &f.bytes).unwrap();
+    let count = Cell::new(0);
+    control
+        .verify(&|| {
+            count.set(count.get() + 1);
+            Ok(())
+        })
+        .unwrap();
+    let reads = count.get() - 1;
+    assert!(
+        reads >= 1,
+        "verification checks its operation before it reads"
+    );
+    let mut receive = f.begin("late");
+    receive.write_chunk(0, &f.bytes).unwrap();
+    let held = RefCell::new(Some(held_ledger(&f)));
+    let calls = Cell::new(0);
+    let released_at = Cell::new(None);
+    let got = receive.verify(&|| {
+        let call = calls.get() + 1;
+        calls.set(call);
+        if call <= reads {
+            return Ok(());
+        }
+        match held.borrow_mut().take() {
+            Some(ledger) => {
+                released_at.set(Some(call));
+                drop(ledger);
+                Ok(())
+            }
+            None => Err(api::compiler_inputs::Error("member_operation_deadline")),
+        }
+    });
+    let (calls, released_at) = (calls.get(), released_at.get());
+    assert_eq!(
+        released_at,
+        Some(reads + 1),
+        "the ledger was let go in the busy wait, after verification's reads"
+    );
+    assert_eq!(got.map_err(|e| e.0), Err("member_operation_deadline"));
+    assert_eq!(
+        calls,
+        reads + 2,
+        "the refusal came from the re-check after the acquisition"
+    );
+    assert_eq!(phase(&f, "late"), "cleanup_required");
+    assert_eq!(phase(&f, "control"), "retained");
+}
+/// Lane A patch 3, A2-01 (REVIEW-laneA-p2-astra.md): taking custody reserves storage under the
+/// storage ledger's lock. A busy ledger is waited for under the RECEIVING OPERATION's own bound:
+/// an operation whose deadline passes while another holder keeps the ledger is refused by its own
+/// name at about its deadline, and no reservation is written (a fresh close allowance would let it
+/// commit a `cleanup_required` charge after its operation ended).
+#[test]
+fn a_reservation_waiting_on_a_busy_ledger_ends_at_the_operations_deadline_unreserved() {
+    use std::time::Instant;
+    let f = Fixture::new();
+    drop(f.begin("first"));
+    let ledger = held_ledger(&f);
+    let started = Instant::now();
+    let deadline = started + poll() / 2;
+    // The other holder lets go well after the deadline, inside a fresh close allowance.
+    let holder = std::thread::spawn(move || {
+        std::thread::sleep(poll() * 3);
+        drop(ledger);
+    });
+    let got = f.begin_checked("deadline", &|| {
+        if Instant::now() >= deadline {
+            Err(api::compiler_inputs::Error("member_operation_deadline"))
+        } else {
+            Ok(())
+        }
+    });
+    let waited = started.elapsed();
+    holder.join().unwrap();
+    assert_eq!(
+        got.map(drop).map_err(|e| e.0),
+        Err("member_operation_deadline")
+    );
+    assert!(
+        waited < poll() * 2,
+        "the reservation's ledger wait outlived the operation's deadline: {waited:?}"
+    );
+    assert_eq!(phase(&f, "deadline"), Value::Null, "no reservation written");
+    assert_eq!(
+        f.charge(),
+        f.bytes.len() as u64,
+        "only the first run is charged"
+    );
+}
+/// A2-01, the ledger freed inside the reservation's wait: the operation is re-checked after the
+/// lock is taken and immediately before the reservation is written. Deterministic, one thread:
+/// this test holds the ledger, so the checkpoint's FIRST call is the reservation's busy wait (the
+/// operation still current: the test lets the ledger go there); the operation ends before the
+/// next call, which can only be the re-check after the acquisition.
+#[test]
+fn a_ledger_freed_inside_the_reservation_wait_is_rechecked_before_reserving() {
+    let f = Fixture::new();
+    drop(f.begin("first"));
+    let held = std::cell::RefCell::new(Some(held_ledger(&f)));
+    let calls = std::cell::Cell::new(0);
+    let got = f.begin_checked("cancelled", &|| {
+        calls.set(calls.get() + 1);
+        match held.borrow_mut().take() {
+            Some(ledger) => {
+                drop(ledger);
+                Ok(())
+            }
+            None => Err(api::compiler_inputs::Error("member_operation_cancelled")),
+        }
+    });
+    let calls = calls.get();
+    assert_eq!(
+        got.map(drop).map_err(|e| e.0),
+        Err("member_operation_cancelled")
+    );
+    assert_eq!(
+        calls, 2,
+        "one call in the busy wait (ledger held), then the re-check after acquiring it"
+    );
+    assert_eq!(
+        phase(&f, "cancelled"),
+        Value::Null,
+        "no reservation written"
+    );
+    assert_eq!(f.charge(), f.bytes.len() as u64);
 }

@@ -87,6 +87,37 @@ struct Script {
     consent_changed: Option<Arc<AtomicBool>>,
     /// EPF2: signalled once when a graceful close starts (before `close_gate`).
     close_entered: Option<mpsc::Sender<()>>,
+    /// Lane A (B6): the member's remaining command grant (`max_commands`), spent as
+    /// `NativeShard` spends it: one per step and per reset; at 0 a step and the
+    /// liveness check refuse `joined_native_consent_exhausted`. Lane A patch 2 (A-03): like
+    /// `NativeShard::step_until` / `reset`, the grant is checked again AFTER the command ran,
+    /// so the command that spends the last one itself answers the exhaustion.
+    commands: Option<Arc<AtomicU64>>,
+}
+impl Script {
+    /// `NativeShard::check` after the command (`step_until`/`reset` end with it): a grant the
+    /// command just spent to 0 answers the exhaustion; the command's output is discarded.
+    fn after(&self) -> Result<(), Error> {
+        match &self.commands {
+            Some(left) if left.load(Ordering::SeqCst) == 0 => {
+                Err(Error("joined_native_consent_exhausted"))
+            }
+            _ => Ok(()),
+        }
+    }
+    /// Spend one command of the grant, as `NativeShard::check` + `remaining -= 1`.
+    fn spend(&self) -> Result<(), Error> {
+        match &self.commands {
+            Some(left) if left.load(Ordering::SeqCst) == 0 => {
+                Err(Error("joined_native_consent_exhausted"))
+            }
+            Some(left) => {
+                left.fetch_sub(1, Ordering::SeqCst);
+                Ok(())
+            }
+            None => Ok(()),
+        }
+    }
 }
 struct Controlled {
     offer: Value,
@@ -116,6 +147,7 @@ impl StageCompute for Controlled {
         if cancel.load(Ordering::SeqCst) {
             return Err(Error("compiler_stopped"));
         }
+        self.script.spend()?;
         let mut log = self.log.lock().unwrap();
         let t = log.steps;
         log.steps += 1;
@@ -129,6 +161,7 @@ impl StageCompute for Controlled {
         {
             eprintln!("silent stage gate: {e}");
         }
+        self.script.after()?;
         if !self.last {
             return Ok(vec![t as u8; 16]);
         }
@@ -172,8 +205,10 @@ impl StageCompute for Controlled {
         if self.script.reset_fails {
             return Err(Error("native_session_reset_invalid"));
         }
+        self.script.spend()?;
         self.position = 0;
         self.log.lock().unwrap().events.push(("reset", 0));
+        self.script.after()?;
         Ok(json!({"controlled_reset":true}))
     }
     fn live(&self, current: serve::Current<'_>) -> Result<(), Error> {
@@ -182,6 +217,11 @@ impl StageCompute for Controlled {
             .script
             .consent_wall
             .is_some_and(|w| Instant::now() >= w)
+            || self
+                .script
+                .commands
+                .as_ref()
+                .is_some_and(|left| left.load(Ordering::SeqCst) == 0)
         {
             return Err(Error("joined_native_consent_exhausted"));
         }
@@ -3695,4 +3735,187 @@ fn a_forwarding_exchange_ends_at_the_signed_expiry() {
     assert_eq!(report["native"]["graceful"], true, "{report}");
     assert_eq!(report["deferred_ack"], true, "{report}");
     assert_eq!(events, [("step", 0), ("close", 0)]);
+}
+
+// ---- Lane A, release blocker B6 (ledger row 87, owner ruling R2): a stage's command
+// grant (`max_commands`) runs out mid-answer. Measured on the real model with the owner's
+// 1,000-command grant: the answer hung ~5 min and ended `chat_generation_failed_timeouterror`,
+// the page kept offering chat, Stop took ~110 s and the next run failed on unproven cleanup.
+// The ruling: the answer ends with a NAMED error, the route leaves service, cleanup is provable.
+
+/// Lane A patch 2 (A-03): one chat on a route whose stage `stage` holds `grant` commands,
+/// spent as `NativeShard` spends them (checked before AND after each step and reset). Returns
+/// the route, the chat's terminal, the time from its submission to its terminal, and the grant
+/// left.
+fn exhausting(
+    stage: usize,
+    grant: u64,
+    max_new_tokens: u64,
+) -> (EpochRoute, String, Duration, Arc<AtomicU64>) {
+    let left = Arc::new(AtomicU64::new(grant));
+    let mut scripts = [Script::default(), scripted(&[5, 9, 3, 7])];
+    scripts[stage].commands = Some(left.clone());
+    let r = epoch_route(scripts);
+    let began = Instant::now();
+    let submitted = r.submit(max_new_tokens);
+    assert!(
+        submitted.is_ok(),
+        "{:?}",
+        submitted.as_ref().err().map(|e| e.code)
+    );
+    let (id, _) = submitted.unwrap();
+    r.pump_until(span(B::WorkerStartup), |r| r.terminal(&id).is_some());
+    let elapsed = began.elapsed();
+    let terminal = r.terminal(&id).unwrap();
+    (r, terminal, elapsed, left)
+}
+/// After an exhaustion: the epoch is out of service under `code` (the carrier's retirement, the
+/// qualification and the next submission refused by it), the carrier closed, the owner's
+/// teardown is proven by every member's ACK, both stages' compute is released, and the exhausted
+/// stage's own report names the member code. Returns the reports.
+/// `qualified`: the qualification is checked too (a completed request whose own reset retired
+/// the epoch keeps its qualification by design, `RouteHandle::refusal`'s
+/// `completed_then_retired`; only the next submission is refused).
+fn left_service_as(r: EpochRoute, stage: usize, code: &'static str, qualified: bool) -> Vec<Value> {
+    let shown = r.state();
+    assert!(
+        r.handle.state.lock().unwrap().retired(),
+        "the epoch leaves service: {shown}"
+    );
+    if qualified {
+        assert_eq!(
+            r.service.qualification().err().map(|e| e.code),
+            Some(code),
+            "{}",
+            r.state()
+        );
+    }
+    assert_eq!(
+        r.submit(4).err().map(|e| e.code),
+        Some(code),
+        "the next chat is refused: {}",
+        r.state()
+    );
+    assert!(
+        r.until_closed(),
+        "the epoch's carrier closed: {}",
+        r.state()
+    );
+    let shown = r.state();
+    {
+        let o = r.handle.state.lock().unwrap();
+        assert!(
+            o.stages.iter().all(|s| s.acknowledged_ms.is_some()),
+            "the owner's teardown is proven by every member's ACK: {shown}"
+        );
+    }
+    let logs: Vec<_> = r.members.iter().map(|m| m.log.clone()).collect();
+    let reports = r.finish();
+    assert!(
+        reports[stage]["failure"]
+            .as_str()
+            .is_some_and(|f| f.ends_with("joined_native_consent_exhausted")),
+        "{:?}",
+        reports[stage]
+    );
+    for (n, log) in logs.iter().enumerate() {
+        assert!(
+            log.lock().unwrap().released.is_some(),
+            "stage {n}: compute released: {:?}",
+            reports[n]
+        );
+    }
+    reports
+}
+fn left_service_by_name(r: EpochRoute, stage: usize) -> Vec<Value> {
+    const EXHAUSTED: &str = "joined_route_member_consent_exhausted";
+    let shown = r.state();
+    assert_eq!(
+        r.handle.state.lock().unwrap().epoch_failure,
+        Some(EXHAUSTED),
+        "{shown}"
+    );
+    left_service_as(r, stage, EXHAUSTED, true)
+}
+
+/// The final stage's grant covers this chat's prefill and one more token: the THIRD step spends
+/// the last command and, as on `NativeShard`, that step itself answers the exhaustion after the
+/// worker ran it (its token is never sent). The answer ends at once (well inside one hop
+/// deadline) with the named code, and the route leaves service by name with cleanup proven.
+#[test]
+fn a_stage_whose_command_grant_runs_out_mid_answer_ends_it_by_name_and_leaves_service() {
+    let (r, terminal, elapsed, left) = exhausting(1, 3, 32);
+    assert_eq!(terminal, "failed", "{}", r.state());
+    assert_eq!(r.tokens(), vec![5, 9], "{}", r.state());
+    assert_eq!(left.load(Ordering::SeqCst), 0);
+    assert!(
+        elapsed < hop_deadline(),
+        "the answer ended by name, not after a hop deadline ({:?}): {elapsed:?}; {}",
+        hop_deadline(),
+        r.state()
+    );
+    assert_eq!(
+        r.handle.state.lock().unwrap().failure,
+        Some("joined_route_member_consent_exhausted"),
+        "{}",
+        r.state()
+    );
+    assert_eq!(kinds(&r.events(1), "step"), 3, "{:?}", r.events(1));
+    let reports = left_service_by_name(r, 1);
+    // The final step's own error path (not the next loop pass's liveness): the member released
+    // its compute at the failed step, reported by name, then ACKed the owner's teardown.
+    assert_eq!(
+        reports[1]["teardown"], "path_cancellation",
+        "{:?}",
+        reports[1]
+    );
+    assert_eq!(reports[1]["ack_delivered"], true, "{:?}", reports[1]);
+}
+
+/// A-03: the FIRST stage's grant runs out mid-answer (its second step spends the last command):
+/// the same named end and the same proof from the other stage.
+#[test]
+fn a_first_stage_whose_command_grant_runs_out_mid_answer_ends_it_by_name() {
+    let (r, terminal, elapsed, left) = exhausting(0, 2, 32);
+    assert_eq!(terminal, "failed", "{}", r.state());
+    assert_eq!(r.tokens(), vec![5], "{}", r.state());
+    assert_eq!(left.load(Ordering::SeqCst), 0);
+    assert!(elapsed < hop_deadline(), "{elapsed:?}; {}", r.state());
+    assert_eq!(
+        r.handle.state.lock().unwrap().failure,
+        Some("joined_route_member_consent_exhausted"),
+        "{}",
+        r.state()
+    );
+    let reports = left_service_by_name(r, 0);
+    assert_eq!(
+        reports[0]["teardown"], "path_cancellation",
+        "{:?}",
+        reports[0]
+    );
+    assert_eq!(reports[0]["ack_delivered"], true, "{:?}", reports[0]);
+}
+
+/// A-03: the grant runs out AT THE RESET that ends a completed answer (four steps, then the
+/// reset spends the last command and answers the exhaustion after the worker reset). The answer
+/// itself stays completed. The route leaves service through the existing reset-failure path
+/// (serve.rs: `session_reset_failed:<code>`, the owner's teardown re-dialled and ACKed): the next
+/// submission is refused `route_dropped`, NOT by the exhaustion's name (pre-existing EP1 path;
+/// kept as a named gap in the report), with both stages' compute released.
+#[test]
+fn a_command_grant_spent_by_the_answers_reset_takes_the_route_out_of_service() {
+    let (r, terminal, _, left) = exhausting(1, 5, 4);
+    assert_eq!(terminal, "completed", "{}", r.state());
+    assert_eq!(r.tokens(), vec![5, 9, 3, 7], "{}", r.state());
+    r.pump_until(span(B::WorkerStartup), |r| {
+        r.handle.state.lock().unwrap().teardown_finished
+    });
+    assert_eq!(left.load(Ordering::SeqCst), 0);
+    assert_eq!(kinds(&r.events(1), "reset"), 1, "{:?}", r.events(1));
+    let reports = left_service_as(r, 1, "route_dropped", false);
+    assert_eq!(
+        reports[1]["failure"], "session_reset_failed:joined_native_consent_exhausted",
+        "{:?}",
+        reports[1]
+    );
 }
