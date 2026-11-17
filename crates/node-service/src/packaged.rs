@@ -113,10 +113,6 @@ pub struct WindowQuit {
     /// `self.public_relay.close()` (app.py:1848-1850), after the run's join as in v0.1.4
     /// ([`WindowQuit::gate_relay`]).
     relay: crate::packaged_network::RelayClose,
-    /// The relay's own close budgets: its close starts this long before the deadline at the latest.
-    relay_budget: Duration,
-    /// When the run's close was first seen ended (the `stopped` read chance counts from there).
-    run_ended: Option<Instant>,
     /// `demo_app.close` and `_stop_local_contributor` (`crate::packaged_run`), started as Quit
     /// begins, before every other step.
     run: Option<crate::packaged_run::RunClose>,
@@ -127,48 +123,25 @@ impl WindowQuit {
     fn keep(&mut self, error: CleanupError) {
         self.failed.get_or_insert(error);
     }
-    /// Lane CHATPAGE patch 2 (REVIEW-laneCHATPAGE-astra CP-01): the relay is the joined Macs'
-    /// transport to the owner's exchange, so it closes only after the run's close ended (the run
-    /// joined: its teardown announced `stopped`, demo_chain.py:1381-1390), as v0.1.4 closes its
-    /// relay after `demo_app.close` (app.py:1818-1825, :1848-1850 @ f4e366e9), and once the joined
-    /// Macs that read through it had their chance to read that announcement
-    /// ([`crate::packaged_network::stopped_read_chance`]: a Mac B that reads it ends the wait, an
-    /// absent one is waited for no longer; an unread one is recorded `owner_stop_announce_unread`,
-    /// never a Quit failure). Quit keeps its allowance: the close starts in time for the relay's
-    /// own close budgets whatever the run still does. Without a run step it starts at once.
+    /// Lane CHATPAGE (REVIEW-laneCHATPAGE-astra CP-01; patch 3, REVIEW-laneCHATPAGE-p2-astra
+    /// CP2-01/CP2-02): the relay is the joined Macs' transport to the owner's exchange, and v0.1.4
+    /// closes it only after `demo_app.close` stopped and joined the run (app.py:1818-1825, run
+    /// `stop(); join(60)` at demo_app.py:199-203, the relay at app.py:1848-1850 @ f4e366e9), the
+    /// teardown having announced `stopped` (demo_chain.py:1381-1390). So its close starts once the
+    /// run's close ended, or once the run's join allowance (Quit's own deadline, the same 60 s) ran
+    /// out, never earlier; without a run step at once. Nothing waits for any Mac to read
+    /// `stopped`: that is best effort, as in v0.1.4.
     fn gate_relay(&mut self) {
-        if self.relay.started() {
-            return;
-        }
-        let now = Instant::now();
-        let due = self
-            .deadline
-            .and_then(|deadline| deadline.checked_sub(self.relay_budget))
-            .is_none_or(|start| now >= start);
         let ended = self
             .run
             .as_ref()
             .is_none_or(crate::packaged_run::RunClose::ended);
-        if !due && !ended {
-            return;
+        let expired = self
+            .deadline
+            .is_some_and(|deadline| Instant::now() >= deadline);
+        if ended || expired {
+            self.relay.begin();
         }
-        // The joined Macs that read through the relay within one chance before the run's close
-        // ended are waited for until they read `stopped`, for one chance from that end at most.
-        let chance = crate::packaged_network::stopped_read_chance();
-        let since = *self.run_ended.get_or_insert(now);
-        let unread = if self.run.is_some() {
-            self.relay
-                .stopped_unread(since.checked_sub(chance).unwrap_or(since))
-        } else {
-            0
-        };
-        if unread > 0 && !due && now < since + chance {
-            return;
-        }
-        if unread > 0 {
-            eprintln!("owner_stop_announce_unread: {unread}");
-        }
-        self.relay.begin();
     }
     /// The closes must start now to end within the allowance (also when it is unknown).
     fn closes_due(&self) -> bool {
@@ -276,15 +249,26 @@ impl Cleanup for AppCleanup {
         }
     }
     /// At the deadline the window may exit only once the run's workflow Stop was issued
-    /// (`workflow.stop()` after `run.join(60)`, app.py:1835-1838): issued now unless it was.
+    /// (`workflow.stop()` after `run.join(60)`, app.py:1835-1838): issued now unless it was. The
+    /// run's join allowance ran out, so the relay's close starts now if it did not (v0.1.4 goes on
+    /// to `public_relay.close()` after the join, app.py:1848-1850), and the window exits only once
+    /// it ended or its own close budgets ran out (`RelayClose::poll`); a relay close that failed is
+    /// reported (`relay_stop_failed`).
     fn expire(&mut self) -> Result<Poll, CleanupError> {
         match self {
             Self::Service(quit) => {
-                // The deadline: the relay goes now, whatever was read.
                 quit.relay.begin();
-                quit.run
+                let run = quit
+                    .run
                     .as_mut()
-                    .map_or(Ok(Poll::Verified), crate::packaged_run::RunClose::expire)
+                    .map_or(Ok(Poll::Verified), crate::packaged_run::RunClose::expire)?;
+                match (run, quit.relay.poll()) {
+                    (Poll::Pending, _) | (_, None) => Ok(Poll::Pending),
+                    (Poll::Verified, Some(Err(error))) if error != CleanupError::Deadline => {
+                        Err(error)
+                    }
+                    (Poll::Verified, Some(_)) => Ok(Poll::Verified),
+                }
             }
             Self::Nothing => Ok(Poll::Verified),
         }
@@ -646,8 +630,6 @@ pub fn assemble(services: DesktopServices, source: ModelSource) -> (Arc<dyn Core
             swarm,
             model: ModelClose::new(source),
             relay,
-            relay_budget: crate::packaged_network::RelayClose::allowance().unwrap_or(Duration::MAX),
-            run_ended: None,
             run: None,
             failed: None,
         })),

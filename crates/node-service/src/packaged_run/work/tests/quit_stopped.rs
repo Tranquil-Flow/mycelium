@@ -1,19 +1,22 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-//! Lane CHATPAGE patch 2 (REVIEW-laneCHATPAGE-astra CP-01): Quit must not take the relay away
-//! before the run's teardown published `stopped`. v0.1.4's `DemoApp.close` stops and joins the run
-//! (`demo_app.close`: `run.stop(); run.join(60)`, demo_app.py:199-203 @ f4e366e9), whose teardown
-//! announces `stopped` (demo_chain.py:1381-1390), and closes the public relay only after that join
-//! and the steps after it (app.py:1815-1850, relay at :1848-1850). The packaged `AppCleanup::begin`
-//! started the relay's close on its own thread at Quit's begin, beside the run's close, so a joined
-//! Mac reading the owner's exchange through the relay could never read `stopped`.
+//! Lane CHATPAGE (REVIEW-laneCHATPAGE-astra CP-01, REVIEW-laneCHATPAGE-p2-astra CP2-01/CP2-02):
+//! Quit closes the run FIRST and the relay AFTER, as v0.1.4 does. `DemoApp.close` stops and joins
+//! the run (`demo_app.close`: `run.stop(); run.join(60)`, demo_app.py:199-203 @ f4e366e9), whose
+//! teardown announces `stopped` (demo_chain.py:1381-1390), and only after that join (and the
+//! workflow Stop, app.py:1835-1838) runs `public_relay.close()` (app.py:1848-1850). The relay
+//! therefore waits for the run's close with the run's whole allowance (the 60 s Quit allowance),
+//! never less, and then closes; whether a joined Mac reads `stopped` before that is best effort,
+//! as in v0.1.4 (no wait for any Mac, no reply counted as a receipt).
 //!
 //! Model-free: the fixture's two packaged hosts on loopback; the run is a stand-in chain whose
 //! model step "ran" (`ctx.state['model']` set, nothing loaded) and whose teardown is the REAL
-//! `PackagedChainPorts::teardown_run`, deliberately held until the test releases it. The window's
-//! Quit is the composition's own (`packaged::assemble` + `close_run_first`). The joined Mac's
-//! standing read is its own signed `RunExchangeClient.read` statement (run_exchange.py:284-321)
-//! posted to the relay's loopback proxy, which forwards it over its verified-TLS hop to the owner's
-//! seed (the public edge's TLS is Cloudflare's and is not exercised here).
+//! `PackagedChainPorts::teardown_run`, held twice by the test (before it and after it published).
+//! The window's Quit is the composition's own (`packaged::assemble` + `close_run_first`) driven by
+//! the shell's own `desktop::lifecycle::Shutdown`; a Quit "requested 45 s ago" is the cleanup's
+//! clock origin bound in the past (no real wait). The joined Mac's standing read is its own signed
+//! `RunExchangeClient.read` statement (run_exchange.py:284-321) posted to the relay's loopback
+//! proxy, which forwards it over its verified-TLS hop to the owner's seed (the public edge's TLS is
+//! Cloudflare's and is not exercised here).
 use super::stopped::chosen_model;
 use super::*;
 use crate::desktop_host::DesktopServices;
@@ -23,8 +26,9 @@ use api::{
     run_exchange_routes::{DISCOVERY, PATH_READ, READ, RESPONSE},
     seed::{SeedClient, SeedOptions},
 };
+use budgets::Span;
 use desktop::{
-    lifecycle::{Cleanup as _, Poll},
+    lifecycle::{Cleanup as _, QuitSource, Shutdown, State},
     services::{ServiceRequest, Services as _},
 };
 use owner_run::{action::DemoFacts, owner_chain::ChainPorts as _};
@@ -48,13 +52,16 @@ impl DemoFacts for Facts {
 
 /// A run over the fixture's two Macs whose model step ran: every step answers `Ok` (`serving`
 /// announces `serving` as the serving step does), the teardown is the REAL packaged one over
-/// `ctx.state`, held until the test releases it (bounded by the worker startup patience).
+/// `ctx.state`, held until the test releases it, and held again once it published (each hold
+/// bounded by the worker startup patience; a dropped sender releases it at once).
 struct Announcing {
     ports: PackagedChainPorts,
     nodes: (String, String),
     state: Option<RunState>,
     torn: mpsc::Sender<()>,
     release: mpsc::Receiver<()>,
+    published: mpsc::Sender<()>,
+    finish: mpsc::Receiver<()>,
 }
 impl Chain for Announcing {
     fn new_run(
@@ -91,7 +98,11 @@ impl Chain for Announcing {
         // The deliberately delayed teardown: chats, the route's close, then `stopped`.
         let _ = self.release.recv_timeout(patience());
         let state = self.state.as_ref().expect("new_run ran");
-        self.ports.teardown_run(failed, state, env)
+        let torn = self.ports.teardown_run(failed, state, env);
+        // `stopped` is published; the run's close has not ended while this teardown runs.
+        self.published.send(()).unwrap_or_default();
+        let _ = self.finish.recv_timeout(patience());
+        torn
     }
 }
 
@@ -193,6 +204,8 @@ struct Served {
     config: RunConfig,
     torn: mpsc::Receiver<()>,
     release: mpsc::Sender<()>,
+    published: mpsc::Receiver<()>,
+    finish: mpsc::Sender<()>,
     mac_b: MacB,
     _run: OwnerRun,
     f: Fixture,
@@ -201,6 +214,8 @@ fn served() -> Served {
     let f = Fixture::new();
     let (torn_tx, torn) = mpsc::channel();
     let (release, release_rx) = mpsc::channel();
+    let (published_tx, published) = mpsc::channel();
+    let (finish, finish_rx) = mpsc::channel();
     let local = f
         .host
         .with(|c| c.run.contributor.as_ref().unwrap().node.clone());
@@ -210,6 +225,8 @@ fn served() -> Served {
         state: None,
         torn: torn_tx,
         release: release_rx,
+        published: published_tx,
+        finish: finish_rx,
     }));
     let config = RunConfig::default();
     let run = OwnerRun::install_with(
@@ -288,18 +305,25 @@ fn served() -> Served {
         config,
         torn,
         release,
+        published,
+        finish,
         mac_b,
         _run: run,
         f,
     }
 }
-/// The window's Quit over the served run, polled to its verdict on its own thread (as the shell's
-/// timer polls it), bounded by the Quit allowance: `(verdict, took)`.
+/// What the shell's Quit ended with: its state, its exit status and the real time it took.
+type Verdict = (State, Option<i32>, Duration);
+/// The window's Quit over the served run as the shell runs it: `Shutdown` over the composition's
+/// cleanup, requested `into` the allowance ago on the shell's clock (the cleanup's clock origin is
+/// bound that far in the past: no real wait), ticked on its own thread every 20 ms until it has a
+/// result (`expire` at the deadline, as the shell does), bounded by twice the allowance.
 fn quit(
     services: DesktopServices,
     config: &RunConfig,
     f: &Fixture,
-) -> mpsc::Receiver<(Result<Poll, desktop::lifecycle::CleanupError>, Duration)> {
+    into: Duration,
+) -> mpsc::Receiver<Verdict> {
     let (_core, mut cleanup) = crate::packaged::assemble(
         services,
         crate::app_host::ModelSource::hub(f.root.join("model-sources")),
@@ -310,140 +334,150 @@ fn quit(
     std::thread::spawn(move || {
         let _core = _core;
         let began = Instant::now();
-        cleanup.bind_clock(began).unwrap();
-        cleanup.begin(allowance).unwrap();
-        let deadline = began + Duration::from_millis(allowance.millis());
-        let verdict = loop {
-            match cleanup.poll() {
-                Ok(Poll::Pending) if Instant::now() < deadline => {
-                    std::thread::sleep(Duration::from_millis(20))
-                }
-                other => break other,
+        let origin = began
+            .checked_sub(into)
+            .expect("the monotonic clock reaches that far back");
+        cleanup.bind_clock(origin).unwrap();
+        let mut shutdown = Shutdown::new(cleanup, allowance).unwrap();
+        let shell_now = || Span::from_millis(u64::try_from(origin.elapsed().as_millis()).unwrap());
+        shutdown.request(QuitSource::Menu, Span::ZERO);
+        let limit = Duration::from_millis(allowance.millis()) * 2;
+        let state = loop {
+            let state = shutdown.tick(shell_now());
+            if state != State::Stopping || began.elapsed() > limit {
+                break state;
             }
+            std::thread::sleep(Duration::from_millis(20));
         };
-        tx.send((verdict, began.elapsed())).unwrap_or_default();
+        tx.send((state, shutdown.exit_status(), began.elapsed()))
+            .unwrap_or_default();
     });
     rx
 }
+fn relay_listens(port: u16) -> bool {
+    std::net::TcpStream::connect(("127.0.0.1", port)).is_ok()
+}
 
-/// Proves: CP-01 (Quit publishes `stopped` before the relay closes, and a joined Mac reading the
-/// owner's exchange through the relay reads it). The run's teardown is held: while it is, the
-/// relay still answers Mac B (Quit did not remove the transport ahead of the announcement); once
-/// it is released, Mac B, polling through the relay as its standing loop does, reads `stopped`
-/// for the run before the relay goes; Quit then ends `Verified` within its allowance, the relay
-/// closed.
-#[test]
-fn quit_publishes_stopped_to_a_mac_reading_through_the_relay_before_the_relay_closes() {
+/// Quit requested `into` its allowance ago: while the run's teardown is held (nothing announced
+/// yet) the relay still carries Mac B's reads; once the teardown published `stopped` (held again
+/// there: the run's close has not ended), Mac B reading through the relay reads `stopped` for the
+/// run; the teardown ends, Quit ends `Verified` within its allowance and the relay is closed.
+fn stopped_is_published_while_the_relay_is_up(into: Duration, label: &str) {
     let s = served();
-    let allowance = desktop::lifecycle::quit_allowance().unwrap();
-    let verdict = quit(s.services, &s.config, &s.f);
+    let allowance = Duration::from_millis(desktop::lifecycle::quit_allowance().unwrap().millis());
+    let verdict = quit(s.services, &s.config, &s.f, into);
     s.torn
         .recv_timeout(patience())
         .expect("Quit stops the run: its teardown begins");
     // The teardown is held: nothing is announced yet. Mac B keeps reading through the relay.
     let poll = span(BudgetId::OwnerPoll).unwrap();
     let mut held = Vec::new();
-    for _ in 0..10 {
+    for _ in 0..5 {
         held.push(s.mac_b.read(s.port).map(|a| a["phase"].clone()));
         std::thread::sleep(poll / 10);
     }
     s.release.send(()).unwrap_or_default();
+    s.published
+        .recv_timeout(patience())
+        .expect("the teardown publishes stopped");
+    // Published; the teardown (so the run's close) has not ended: the relay must still be up.
+    let read = s.mac_b.read(s.port);
+    s.finish.send(()).unwrap_or_default();
+    let (state, exit, took) = verdict
+        .recv_timeout(allowance * 2 + patience())
+        .expect("Quit ends");
+    eprintln!(
+        "{label} state={state:?} exit={exit:?} took_ms={} held={held:?} read={read:?}",
+        took.as_millis()
+    );
     assert!(
         held.iter().all(|r| *r == Ok(json!("serving"))),
         "the relay was closed before the run's teardown announced stopped: {held:?}"
     );
-    // Mac B polls through the relay (its standing loop's read) until the relay is gone.
-    let end = Instant::now() + patience();
-    let mut reads = Vec::new();
-    let gone = loop {
-        match s.mac_b.read(s.port) {
-            Ok(a) => reads.push((a["phase"].clone(), a["run_id"].clone())),
-            Err(why) => break why,
-        }
-        assert!(Instant::now() < end, "the relay never closed: {reads:?}");
-        std::thread::sleep(poll / 10);
-    };
-    assert_eq!(
-        reads.last(),
-        Some(&(json!("stopped"), json!(s.run_id))),
-        "Mac B never read stopped through the relay before it closed ({gone}): {reads:?}"
-    );
-    let (verdict, took) = verdict
-        .recv_timeout(Duration::from_millis(allowance.millis()) + patience())
-        .expect("Quit ends");
-    eprintln!(
-        "CHATPAGE_P2_QUIT_STOPPED_THROUGH_RELAY verdict={verdict:?} took_ms={} reads={}",
-        took.as_millis(),
-        reads.len()
-    );
-    assert_eq!(verdict, Ok(Poll::Verified), "Quit after {took:?}");
-    assert!(took < Duration::from_millis(allowance.millis()), "{took:?}");
-    assert!(
-        std::net::TcpStream::connect(("127.0.0.1", s.port)).is_err(),
-        "Quit left the relay listening"
-    );
-}
-
-/// Proves: CP-01's read chance (Mac B at its own cadence). A joined Mac does not poll at once:
-/// its standing loop waits 2 s between passes (`self.closed.wait(2)`, app.py:1203 @ f4e366e9).
-/// Here Mac B read `serving` through the relay while the teardown was held, then, the teardown
-/// released, waits until the owner's run reads `stopped` and one standing-loop wait more before
-/// its next read: the relay must still carry that read, and it reads `stopped`. A relay closed as
-/// soon as the run's close ended would be gone by then.
-#[test]
-fn a_mac_at_its_standing_cadence_reads_stopped_before_the_relay_closes() {
-    let s = served();
-    let allowance = desktop::lifecycle::quit_allowance().unwrap();
-    let verdict = quit(s.services, &s.config, &s.f);
-    s.torn
-        .recv_timeout(patience())
-        .expect("Quit stops the run: its teardown begins");
-    let held = s.mac_b.read(s.port).map(|a| a["phase"].clone());
-    s.release.send(()).unwrap_or_default();
-    assert_eq!(
-        held,
-        Ok(json!("serving")),
-        "the relay closed during the teardown"
-    );
-    let end = Instant::now() + patience();
-    loop {
-        let status = s
-            .config
-            .observed()
-            .and_then(|view| view.status())
-            .map_or(Value::Null, |s| s.to_value());
-        if status["state"] == "stopped" {
-            break;
-        }
-        assert!(Instant::now() < end, "the run never stopped: {status}");
-        std::thread::sleep(Duration::from_millis(10));
-    }
-    std::thread::sleep(
-        span(BudgetId::PyMyceliumA13MacosAppDemoappStandingLoopSelfClosedWaitL1203).unwrap(),
-    );
-    let read = s.mac_b.read(s.port);
-    let (verdict, took) = verdict
-        .recv_timeout(Duration::from_millis(allowance.millis()) + patience())
-        .expect("Quit ends");
-    eprintln!(
-        "CHATPAGE_P2_QUIT_STANDING_CADENCE verdict={verdict:?} took_ms={} read={read:?}",
-        took.as_millis()
-    );
-    let read = read.expect("the relay still carried Mac B's next standing read");
+    let read = read.expect("the relay was closed before the run's close ended");
     assert_eq!(
         (&read["phase"], &read["run_id"]),
         (&json!("stopped"), &json!(s.run_id)),
         "{read}"
     );
-    assert_eq!(verdict, Ok(Poll::Verified), "Quit after {took:?}");
-    assert!(
-        took < Duration::from_millis(allowance.millis() / 2),
-        "{took:?}"
+    assert_eq!(
+        (state, exit),
+        (State::Verified, Some(0)),
+        "Quit after {took:?}"
     );
-    assert!(
-        std::net::TcpStream::connect(("127.0.0.1", s.port)).is_err(),
-        "Quit left the relay listening"
+    assert!(took < allowance - into, "{took:?}");
+    assert!(!relay_listens(s.port), "Quit left the relay listening");
+}
+
+/// Proves: CP-01 (Quit publishes `stopped` before the relay closes, and a joined Mac reading the
+/// owner's exchange through the relay after the teardown published it and before the relay closed
+/// reads it). Quit requested now.
+#[test]
+fn quit_publishes_stopped_to_a_mac_reading_through_the_relay_before_the_relay_closes() {
+    stopped_is_published_while_the_relay_is_up(
+        Duration::ZERO,
+        "CHATPAGE_P3_QUIT_STOPPED_THROUGH_RELAY",
     );
+}
+
+/// Proves: CP2-02 (no relay reserve cuts the run's allowance short). The same Quit, but its
+/// teardown runs 45 s into the 60 s allowance (3/4 of it): patch 2 started the relay's close at
+/// the deadline minus the relay's own close budgets (20 s, so at 40 s) whatever the run still did,
+/// so a teardown slower than that published `stopped` with the relay already gone. The run's join
+/// keeps its whole allowance and the relay waits for it.
+#[test]
+fn a_teardown_slower_than_the_relay_reserve_still_publishes_stopped_while_the_relay_is_up() {
+    let allowance = Duration::from_millis(desktop::lifecycle::quit_allowance().unwrap().millis());
+    stopped_is_published_while_the_relay_is_up(
+        allowance * 3 / 4,
+        "CHATPAGE_P3_QUIT_STOPPED_PAST_RESERVE",
+    );
+}
+
+/// Proves: CP2-02's bound (the run's allowance runs out). Quit requested 3 s before its deadline,
+/// and the run's teardown never gets past its first hold: until the deadline the relay still
+/// carries Mac B's reads (it waits for the run's join); at the deadline the run's join gives up
+/// (v0.1.4 `run.join(60)` returns, app.py:1835-1838 stops the workflow) and the relay closes
+/// (app.py:1848-1850) although nothing announced `stopped` (best effort, as in v0.1.4); the Quit
+/// ends at the deadline (exit 0, `Deadline`), bounded by the relay's own close budgets after it.
+#[test]
+fn at_the_quit_deadline_the_relay_closes_although_the_runs_teardown_still_runs() {
+    let s = served();
+    let allowance = Duration::from_millis(desktop::lifecycle::quit_allowance().unwrap().millis());
+    let left = Duration::from_secs(3);
+    let verdict = quit(s.services, &s.config, &s.f, allowance - left);
+    s.torn
+        .recv_timeout(patience())
+        .expect("Quit stops the run: its teardown begins");
+    let before = s.mac_b.read(s.port).map(|a| a["phase"].clone());
+    let (state, exit, took) = verdict
+        .recv_timeout(allowance * 2 + patience())
+        .expect("Quit ends");
+    let listens = relay_listens(s.port);
+    let seed = s.f.host.with(|c| c.authority.seed.clone().unwrap());
+    let announced = seed.exchange.announcement(None).to_value();
+    eprintln!(
+        "CHATPAGE_P3_QUIT_DEADLINE state={state:?} exit={exit:?} took_ms={} before={before:?} announced={}",
+        took.as_millis(),
+        announced["phase"]
+    );
+    assert_eq!(
+        before,
+        Ok(json!("serving")),
+        "the relay was closed before the run's join allowance ran out"
+    );
+    assert_eq!(
+        (state, exit),
+        (
+            State::Failed(desktop::lifecycle::CleanupError::Deadline),
+            Some(0)
+        ),
+        "Quit after {took:?}"
+    );
+    assert!(took >= left, "Quit ended before its deadline: {took:?}");
+    assert!(took < left + patience(), "{took:?}");
+    assert!(!listens, "the relay outlived the Quit deadline");
+    assert_eq!(announced["phase"], json!("serving"), "{announced}");
 }
 
 /// Proves: CP-01's bound (Quit stays bounded when Mac B is absent). Mac B read through the relay,
@@ -452,28 +486,30 @@ fn a_mac_at_its_standing_cadence_reads_stopped_before_the_relay_closes() {
 #[test]
 fn quit_with_the_joined_mac_gone_still_ends_within_its_allowance() {
     let s = served();
-    let allowance = desktop::lifecycle::quit_allowance().unwrap();
-    let verdict = quit(s.services, &s.config, &s.f);
+    let allowance = Duration::from_millis(desktop::lifecycle::quit_allowance().unwrap().millis());
+    let verdict = quit(s.services, &s.config, &s.f, Duration::ZERO);
     s.torn
         .recv_timeout(patience())
         .expect("Quit stops the run: its teardown begins");
     s.release.send(()).unwrap_or_default();
-    let (verdict, took) = verdict
-        .recv_timeout(Duration::from_millis(allowance.millis()) + patience())
+    s.finish.send(()).unwrap_or_default();
+    let (state, exit, took) = verdict
+        .recv_timeout(allowance * 2 + patience())
         .expect("Quit ends");
     eprintln!(
-        "CHATPAGE_P2_QUIT_MAC_B_GONE verdict={verdict:?} took_ms={}",
+        "CHATPAGE_P3_QUIT_MAC_B_GONE state={state:?} exit={exit:?} took_ms={}",
         took.as_millis()
     );
-    assert_eq!(verdict, Ok(Poll::Verified), "Quit after {took:?}");
+    assert_eq!(
+        (state, exit),
+        (State::Verified, Some(0)),
+        "Quit after {took:?}"
+    );
     assert!(
-        took < Duration::from_millis(allowance.millis() / 2),
+        took < allowance / 2,
         "Quit waited on an absent Mac: {took:?}"
     );
-    assert!(
-        std::net::TcpStream::connect(("127.0.0.1", s.port)).is_err(),
-        "Quit left the relay listening"
-    );
+    assert!(!relay_listens(s.port), "Quit left the relay listening");
     let seed = s.f.host.with(|c| c.authority.seed.clone().unwrap());
     let announced = seed.exchange.announcement(None).to_value();
     assert_eq!(
