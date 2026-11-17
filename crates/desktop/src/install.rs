@@ -924,26 +924,39 @@ pub fn uninstall(roots: &Roots, seams: &Seams, delete_state: bool) -> Result<Val
 
 /// The source revision of the running build, for the page's version line (lane VL): the
 /// `source_revision` the install record holds for its current version, only when that version
-/// is this build's own ([`crate::bundle::VERSION`]) and `executable` resolves into that
-/// version's installed copy (`programs/<version>/`, also when launched through the Applications
-/// link). Read-only, no lock. Any doubt (no or untrusted record, another version, a copy run
-/// from elsewhere, a revision that is not 40 lower-case hex digits) is `None`, never a guess.
+/// is this build's own ([`crate::bundle::VERSION`]) and `executable` is that version's admitted
+/// installed copy (lane VL patch 1, REVIEW-laneUI-astra VL-02): the very executable file of
+/// `programs/<version>/Mycelium.app` (the same file, so launching through the Applications link,
+/// which points at that payload, still names it), whose version folder and payload are the
+/// installer's own plain folders, never a link to a copy elsewhere, and still have the digest the
+/// record holds (`installed_digest`, the check the installer itself uses to accept an installed
+/// copy). Read-only, no lock. Any doubt (no or untrusted record, another version, a copy run from
+/// elsewhere, a linked or changed copy, a revision that is not 40 lower-case hex digits) is
+/// `None`, never a guess. Reads the whole payload once when the executable is the installed one;
+/// the packaged host runs it off every request path (`node_service::desktop_host::AppRevision`).
 pub fn running_source_revision(roots: &Roots, executable: &Path) -> Option<String> {
     let record = read_record(roots).ok()??;
     let current = current_of(&record);
     if version_of(current) != crate::bundle::VERSION {
         return None;
     }
-    let installed = roots
-        .version_dir(crate::bundle::VERSION)
-        .canonicalize()
-        .ok()?;
-    if !executable.canonicalize().ok()?.starts_with(installed) {
+    let revision = field(current, "source_revision")
+        .filter(|r| r.len() == 40 && r.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))?;
+    let version_directory = roots.version_dir(crate::bundle::VERSION);
+    let running = fs::metadata(executable).ok()?;
+    let macos = version_directory
+        .join(PAYLOAD_DIRECTORY)
+        .join("Contents/MacOS");
+    let is_running = |name: &&str| {
+        fs::symlink_metadata(macos.join(name)).is_ok_and(|m| {
+            m.file_type().is_file() && (m.dev(), m.ino()) == (running.dev(), running.ino())
+        })
+    };
+    if !EXECUTABLES.iter().any(is_running) {
         return None;
     }
-    field(current, "source_revision")
-        .filter(|r| r.len() == 40 && r.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
-        .map(str::to_string)
+    (installed_digest(&version_directory)?.as_str() == field(current, "payload_digest")?)
+        .then(|| revision.to_string())
 }
 
 pub fn status(roots: &Roots) -> Result<Value> {
