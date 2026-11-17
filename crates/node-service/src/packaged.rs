@@ -252,8 +252,9 @@ impl Cleanup for AppCleanup {
     /// (`workflow.stop()` after `run.join(60)`, app.py:1835-1838): issued now unless it was. The
     /// run's join allowance ran out, so the relay's close starts now if it did not (v0.1.4 goes on
     /// to `public_relay.close()` after the join, app.py:1848-1850), and the window exits only once
-    /// it ended or its own close budgets ran out (`RelayClose::poll`); a relay close that failed is
-    /// reported (`relay_stop_failed`).
+    /// it ended or its own close budgets ran out (`RelayClose::poll`). A relay close that failed or
+    /// overran those budgets is reported (`relay_stop_failed`, exit 3: REVIEW-laneCHATPAGE-p3-astra
+    /// CP3-01); only the run's join running out is the exit-0 `Deadline`.
     fn expire(&mut self) -> Result<Poll, CleanupError> {
         match self {
             Self::Service(quit) => {
@@ -264,10 +265,8 @@ impl Cleanup for AppCleanup {
                     .map_or(Ok(Poll::Verified), crate::packaged_run::RunClose::expire)?;
                 match (run, quit.relay.poll()) {
                     (Poll::Pending, _) | (_, None) => Ok(Poll::Pending),
-                    (Poll::Verified, Some(Err(error))) if error != CleanupError::Deadline => {
-                        Err(error)
-                    }
-                    (Poll::Verified, Some(_)) => Ok(Poll::Verified),
+                    (Poll::Verified, Some(Err(error))) => Err(error),
+                    (Poll::Verified, Some(Ok(()))) => Ok(Poll::Verified),
                 }
             }
             Self::Nothing => Ok(Poll::Verified),

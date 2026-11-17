@@ -742,6 +742,13 @@ enum RelayClosing {
     Late(std::thread::JoinHandle<()>),
     Done(Result<(), desktop::lifecycle::CleanupError>),
 }
+/// The relay step's close did not end within its own close budgets (REVIEW-laneCHATPAGE-p3-astra
+/// CP3-01): v0.1.4's `public_relay.close()` raises then (its `process.wait(5)` after `kill()`,
+/// public_relay.py:445-447 @ f4e366e9), `DemoApp.close` records `relay_stop_failed`
+/// (app.py:1848-1850) and the launcher exits 3 (`cleanup_incomplete`, __main__.py:219-223). It is
+/// not the run's join running out (`Deadline`, exit 0).
+const RELAY_STOP_FAILED: desktop::lifecycle::CleanupError =
+    desktop::lifecycle::CleanupError::Unproven("relay_stop_failed");
 impl RelayClose {
     pub fn new(network: Arc<Network>) -> Self {
         Self {
@@ -821,11 +828,11 @@ impl RelayClose {
             RelayClosing::Running { worker, .. } if !worker.is_finished() => {
                 eprintln!("relay_stop_failed: relay_close_deadline");
                 self.closing = RelayClosing::Late(worker);
-                Some(Err(desktop::lifecycle::CleanupError::Deadline))
+                Some(Err(RELAY_STOP_FAILED))
             }
             RelayClosing::Late(worker) => {
                 self.closing = RelayClosing::Late(worker);
-                Some(Err(desktop::lifecycle::CleanupError::Deadline))
+                Some(Err(RELAY_STOP_FAILED))
             }
             RelayClosing::Running { worker, .. } => {
                 let result = worker.join().map_err(|_| {
