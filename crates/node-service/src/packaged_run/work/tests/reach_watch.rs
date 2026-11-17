@@ -154,6 +154,7 @@ fn collect(reports: &Reports, members: &[&str]) -> (Result<(), StepError>, RunSt
         &read,
         (RUN.into(), DEPLOYMENT.into()),
         start,
+        true,
         |watch| {
             owner_run::steps::descriptors::run_descriptors_step(
                 watch,
@@ -181,6 +182,29 @@ fn an_unselected_macs_reach_refusal_does_not_stop_the_run() {
     assert!(
         outcome.is_ok(),
         "an unselected Mac's refusal stopped the run: {outcome:?}"
+    );
+    assert_eq!(
+        state.participants,
+        vec![JOINED.to_owned(), OWNER.to_owned()]
+    );
+}
+
+/// REVIEW XB4-01: C is a live, enrolled Mac and so one of the collect's CANDIDATES (A, B, C), and it
+/// reports this run's reach refusal while A and B report ready. As the shared collect does for any
+/// candidate without a usable card, C is dropped and the run goes on with A and B (after the
+/// collect's base window, as on trunk); the watch ends collect early only below two Macs.
+#[test]
+fn a_refusing_candidate_is_dropped_and_the_run_goes_on_with_the_other_two() {
+    let reports: Reports = Rc::default();
+    reports.borrow_mut().insert(OWNER.into(), ready(OWNER));
+    reports.borrow_mut().insert(JOINED.into(), ready(JOINED));
+    reports
+        .borrow_mut()
+        .insert(LATE.into(), refusal(RUN, json!(DEPLOYMENT)));
+    let (outcome, state, _) = collect(&reports, &[JOINED, LATE]);
+    assert!(
+        outcome.is_ok(),
+        "a refusing third candidate stopped the run: {outcome:?}"
     );
     assert_eq!(
         state.participants,
@@ -313,6 +337,7 @@ fn compile(arrives: (&str, Value)) -> Result<(), StepError> {
         &read,
         (RUN.into(), DEPLOYMENT.into()),
         start,
+        false,
         |watch| {
             owner_run::steps::compile::run_compile_step(
                 watch,
@@ -400,6 +425,7 @@ fn a_refusal_that_observe_returns_itself_is_still_named() {
         &read,
         (RUN.into(), DEPLOYMENT.into()),
         start,
+        false,
         |watch| {
             owner_run::steps::observe::run_observe_step(
                 watch,
@@ -433,6 +459,7 @@ fn a_raw_member_code_without_a_participants_report_passes_unchanged() {
         &read,
         (RUN.into(), DEPLOYMENT.into()),
         vec![JOINED.into(), OWNER.into()],
+        false,
         |_| Err(owner_run::OwnerRunError::new("work_network_unavailable").into()),
     );
     assert_eq!(code(&outcome).as_deref(), Some("work_network_unavailable"));
@@ -441,6 +468,7 @@ fn a_raw_member_code_without_a_participants_report_passes_unchanged() {
         &read,
         (RUN.into(), DEPLOYMENT.into()),
         vec![LATE.into()],
+        false,
         |_| Err(StepError::Stopped),
     );
     assert!(

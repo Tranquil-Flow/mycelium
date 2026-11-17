@@ -317,24 +317,58 @@ fn member_reach_refusal_in(
 /// Patch 4 (XB3-02): the watch reads only the run's current participants: the run state's list
 /// when the step starts, then every list the step itself publishes (`participants`: the collect's
 /// candidates on its first pass, the selected Macs when it ends; observe's facts nodes).
+/// Patch 4 (REVIEW XB4-01): during collect the participants are only CANDIDATES. As the shared
+/// collect does for any candidate without a usable card (`demo_chain.py:638-643,688-713`), a
+/// candidate's reach refusal is a reason that drops that candidate; the run goes on with the
+/// Macs that reported and fails (`two_macs_required`, or the candidate's own code) only below two.
+/// The watch therefore ends collect early only when the refusals leave fewer than this many
+/// candidates; after collect (observe, compile) every participant is selected and any refusal
+/// ends the step.
+const COLLECT_REQUIRED_MACS: usize = 2;
 struct ReachWatch<'e> {
     env: &'e mut dyn StepEnv,
     reports: &'e dyn Fn() -> Value,
     run: (String, String),
     participants: Vec<String>,
+    /// The step is collect (`descriptors`): `participants` are candidates, not a selection.
+    collect: bool,
     refused: std::cell::RefCell<Option<StepError>>,
 }
 impl ReachWatch<'_> {
-    fn refused(&self) -> bool {
-        if self.refused.borrow().is_some() {
-            return true;
-        }
-        let found = member_reach_refusal_in(
+    /// A participant's named refusal of this run, scoped as [`member_reach_refusal_in`] reads.
+    fn named(&self) -> Option<StepError> {
+        member_reach_refusal_in(
             &(self.reports)(),
             &self.run.0,
             &self.run.1,
             &self.participants,
-        );
+        )
+    }
+    fn refused(&self) -> bool {
+        if self.refused.borrow().is_some() {
+            return true;
+        }
+        let found = if self.collect {
+            let reports = (self.reports)();
+            let refusing = self
+                .participants
+                .iter()
+                .filter(|node| {
+                    member_reach_refusal_in(
+                        &reports,
+                        &self.run.0,
+                        &self.run.1,
+                        std::slice::from_ref(*node),
+                    )
+                    .is_some()
+                })
+                .count();
+            (self.participants.len() - refusing < COLLECT_REQUIRED_MACS)
+                .then(|| self.named())
+                .flatten()
+        } else {
+            self.named()
+        };
         let refused = found.is_some();
         *self.refused.borrow_mut() = found;
         refused
@@ -347,6 +381,7 @@ fn watched_step(
     reports: &dyn Fn() -> Value,
     run: (String, String),
     participants: Vec<String>,
+    collect: bool,
     step: impl FnOnce(&mut dyn StepEnv) -> Result<(), StepError>,
 ) -> Result<(), StepError> {
     let mut watch = ReachWatch {
@@ -354,6 +389,7 @@ fn watched_step(
         reports,
         run,
         participants,
+        collect,
         refused: std::cell::RefCell::new(None),
     };
     let outcome = step(&mut watch);
@@ -364,8 +400,10 @@ fn watched_step(
     // they are.
     let raw_reach_refusal = matches!(&outcome, Err(StepError::Refused(raw))
         if crate::packaged_work::reach::MEMBER_REFUSALS.contains(&raw.code.as_str()));
-    if raw_reach_refusal {
-        watch.refused();
+    if raw_reach_refusal && watch.refused.borrow().is_none() {
+        // The step already failed on that code: the plain scoped rule names it (in collect too).
+        let named = watch.named();
+        *watch.refused.borrow_mut() = named;
     }
     match watch.refused.into_inner() {
         Some(refused) => Err(refused),
@@ -1553,9 +1591,14 @@ impl Chain for Composed {
         {
             let reports = move || seed.exchange.reports();
             let inner = &mut self.inner;
-            return watched_step(env, &reports, run, participants, |watch| {
-                inner.run_step(step, watch)
-            });
+            return watched_step(
+                env,
+                &reports,
+                run,
+                participants,
+                step == "descriptors",
+                |watch| inner.run_step(step, watch),
+            );
         }
         if step == "slices" {
             // A preparation refusal is returned as it is (no workflow has run).
