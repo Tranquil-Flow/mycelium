@@ -463,7 +463,20 @@ fn write_record(roots: &Roots, record: &Rec) -> Result<()> {
 
 /// Exclusive, non-blocking advisory lock; the OS drops it when the holder exits or is killed.
 #[derive(Debug)]
-pub struct LockGuard(#[allow(dead_code)] Option<File>);
+pub struct LockGuard(Option<File>);
+/// B12 (lane B): the lock is released explicitly. A `flock` belongs to the open file description,
+/// which a child forked while the lock was held shares until its exec closes its copy: closing
+/// only this descriptor would leave the lock held for that moment, and an install or rollback
+/// right after would be refused `install_already_running`.
+impl Drop for LockGuard {
+    fn drop(&mut self) {
+        if let Some(file) = &self.0
+            && file.unlock().is_err()
+        {
+            eprintln!("install_lock_release_failed");
+        }
+    }
+}
 fn lock(roots: &Roots, create: bool) -> Result<LockGuard> {
     let programs = roots.programs();
     if !create && !programs.is_dir() {
