@@ -7,6 +7,7 @@
 //! (`/managed-control/demo-run/read|report`) are a separate seam (SE-L10-EXCHANGE-ROUTES): they verify a member's
 //! envelope on the seed mailbox and then call [`RunExchange::announcement`] and `report`.
 pub mod owner_pin;
+pub mod work_network;
 use crate::{preferences::dumps_sorted, wire::Json};
 use serde_json::{Map, Value};
 use std::{
@@ -309,6 +310,9 @@ pub struct RunExchange {
     incarnation: String,
     /// The owner pin (`owner_pin::FIELD`), published only once set.
     owner_control: Mutex<Option<owner_pin::OwnerControl>>,
+    /// Lane XB patch 2 (D1): the run's signed network reach (`work_network::FIELD`), published
+    /// only for a run across networks.
+    work_network: Mutex<work_network::RunReach>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -346,6 +350,7 @@ impl RunExchange {
             provider: Mutex::new(None),
             incarnation: incarnation(),
             owner_control: Mutex::new(None),
+            work_network: Mutex::new(work_network::RunReach::SameNetwork),
         };
         let idle = Announce {
             phase: "idle".into(),
@@ -437,6 +442,12 @@ impl RunExchange {
         *lock(&self.owner_control) = control;
     }
 
+    /// Lane XB patch 2 (D1): the owner's network reach for the current run, which every later
+    /// announcement carries (`work_network::FIELD`); `SameNetwork` publishes the existing bytes.
+    pub fn set_work_network(&self, reach: work_network::RunReach) {
+        *lock(&self.work_network) = reach;
+    }
+
     /// `update_node(node_id, **extra)`.
     pub fn update_node(&self, node: &str, extra: Map<String, Value>) -> Result<(), ExchangeError> {
         check_node_extra(&extra)?;
@@ -483,6 +494,10 @@ impl RunExchange {
         // Additive (`owner_pin`): only an owner that set its pin publishes the key.
         if let Some(control) = lock(&self.owner_control).as_ref() {
             value.set(owner_pin::FIELD, control.to_json());
+        }
+        // Additive (lane XB patch 2, D1): only a run across networks publishes its reach.
+        if let Some(reach) = lock(&self.work_network).to_json() {
+            value.set(work_network::FIELD, reach);
         }
         value
     }
