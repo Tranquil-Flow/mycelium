@@ -202,14 +202,13 @@ fn picker_document(doc: &mut serde_json::Map<String, Value>) {
 
 /// `text` as the released app serialises a string (`json.dumps`, `ensure_ascii`).
 fn python_json_string(text: &str) -> String {
-    let mut out = String::from("\"");
-    for unit in serde_json::to_string(text).unwrap()[1..].encode_utf16() {
+    let mut out = String::new();
+    for unit in serde_json::to_string(text).unwrap().encode_utf16() {
         match unit {
             0x20..=0x7e => out.push(char::from(unit as u8)),
             _ => out.push_str(&format!("\\u{unit:04x}")),
         }
     }
-    out.truncate(out.len() - 1);
     out
 }
 
