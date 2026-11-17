@@ -1119,7 +1119,7 @@ mod descriptor_age_tests {
     fn identity(name: &str, byte: u8) -> Identity {
         Identity::from_secret(name, &[byte; 32]).unwrap()
     }
-    fn member(signer: &Identity) -> (Member, Value) {
+    fn member_of(signer: &Identity) -> (Member, Value) {
         let member = Member {
             node_id: "member-b".into(),
             endpoint_id: signer.endpoint_id().into(),
@@ -1159,7 +1159,7 @@ mod descriptor_age_tests {
     #[test]
     fn a_current_member_s_calls_still_bind_after_its_run_descriptor_ages_out() {
         let signer = identity("endpoint-b", 7);
-        let (member, current) = member(&signer);
+        let (member, current) = member_of(&signer);
         let card = card(&signer, &member);
         let expires = card["statement"]["expires_at"].as_f64().unwrap();
         assert_eq!(expires, SIGNED_AT + 300.0, "the descriptor's own life");
@@ -1182,7 +1182,7 @@ mod descriptor_age_tests {
     #[test]
     fn an_aged_descriptor_is_still_refused_when_anything_but_its_age_is_wrong() {
         let signer = identity("endpoint-b", 7);
-        let (member, current) = member(&signer);
+        let (member, current) = member_of(&signer);
         let late = SIGNED_AT + 400.0;
         let refused = |card: &Value, current: &Value| {
             descriptor_key(card, current, "swarm-1", late).map_err(|e| e.0)
@@ -1194,7 +1194,7 @@ mod descriptor_age_tests {
         assert_eq!(refused(&tampered, &current), unavailable);
         // Another key than the membership pins.
         let other = identity("endpoint-x", 9);
-        let (other_member, _) = member(&other);
+        let (other_member, _) = member_of(&other);
         assert_eq!(refused(&card(&other, &other_member), &current), unavailable);
         // A membership generation that moved on since the descriptor.
         let mut renewed = current.clone();
