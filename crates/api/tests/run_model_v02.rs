@@ -17,6 +17,7 @@ fn root(tag: &str) -> PathBuf {
 }
 
 #[test]
+#[ignore = "B13 parked: the product change (qualification/laneC/b13-product.patch) turns 8+ oracle and golden suites red (REPORT-laneC-release.md, B13)"]
 fn a_fresh_install_runs_qwen3_0_6b_the_one_model_proven_on_two_macs() {
     let dir = root("fresh");
     let model = run_model::selected_model(&dir, None).unwrap();
@@ -52,6 +53,7 @@ fn a_fresh_install_runs_qwen3_0_6b_the_one_model_proven_on_two_macs() {
 }
 
 #[test]
+#[ignore = "B13 parked: the product change (qualification/laneC/b13-product.patch) turns 8+ oracle and golden suites red (REPORT-laneC-release.md, B13)"]
 fn the_picker_says_which_model_was_tested_on_two_macs() {
     let dir = root("labels");
     let document = run_model::document(&dir, None, None).unwrap();
