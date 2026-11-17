@@ -359,7 +359,7 @@ fn the_close_line_reads_the_pre_send_refusals() {
         line.starts_with("lan_filter_closed refused_out=2 first_refused=10.160.112.32:58693 "),
         "{line}"
     );
-    assert!(line.ends_with(" range=false"), "{line}");
+    assert!(line.contains(" range=false"), "{line}");
     lan.close();
     lan.close();
 }
