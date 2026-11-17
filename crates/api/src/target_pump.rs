@@ -119,6 +119,11 @@ pub(crate) fn archive(root: &Path, prior: &Value, limit: u64) -> Result<()> {
         Some(kept) if prior.as_object() == Some(&kept) => {}
         Some(_) => return Err("control_archive_failed"),
     }
+    // PR-ASTRA-01: `store` can rename the file into place and then fail its directory fsync, so
+    // an identical copy found on a retry proves nothing about durability. Every call syncs the
+    // file and its directory itself; a failure refuses, and `start` keeps the live journal.
+    archive_sync(&path).map_err(archive_failed)?;
+    archive_sync(&dir).map_err(archive_failed)?;
     // Bound: only this archive's own names count; the newest ARCHIVE_KEEP stay.
     let mut kept: Vec<String> = fs::read_dir(&dir)
         .map_err(archive_failed)?
