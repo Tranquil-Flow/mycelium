@@ -70,12 +70,20 @@ pub(crate) fn archive(root: &Path, prior: &Value, limit: u64) -> Result<()> {
         .as_str()
         .ok_or("control_state_invalid")?;
     let dir = root.join(ARCHIVE_DIR);
-    match fs::DirBuilder::new().mode(0o700).create(&dir) {
-        Ok(()) => File::open(root)
+    // An existing directory is checked below exactly like a new one.
+    let created = fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&dir)
+        .map(|()| true)
+        .or_else(|error| match error.kind() {
+            std::io::ErrorKind::AlreadyExists => Ok(false),
+            _ => Err(error),
+        })
+        .map_err(archive_failed)?;
+    if created {
+        File::open(root)
             .and_then(|d| d.sync_all())
-            .map_err(archive_failed)?,
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-        Err(error) => return Err(archive_failed(error)),
+            .map_err(archive_failed)?;
     }
     let m = fs::symlink_metadata(&dir).map_err(archive_failed)?;
     if !m.file_type().is_dir()

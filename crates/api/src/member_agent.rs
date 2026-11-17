@@ -1276,14 +1276,20 @@ fn settle_finished<H: MemberHost>(host: &H, scope: &Value) -> OResult<()> {
     let Some(mut worker) = finished else {
         return Ok(());
     };
-    if let Err(ended) = worker.close() {
-        eprintln!("member target settling a finished worker: {}", ended.0);
-        if let Err(error) = worker.close() {
+    let settled = match worker.close() {
+        Ok(()) => Ok(()),
+        Err(ended) => {
+            eprintln!("member target settling a finished worker: {}", ended.0);
+            worker.close()
+        }
+    };
+    match settled {
+        Ok(()) => Ok(()),
+        Err(error) => {
             host.slot(|s| *s.worker = Some(worker))?;
-            return Err(error);
+            Err(error)
         }
     }
-    Ok(())
 }
 
 /// A new stage needs a cleanly closed previous one (never reconstruct authority from a saved PID).
