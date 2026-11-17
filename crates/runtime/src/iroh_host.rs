@@ -45,9 +45,9 @@ use transport::{Channel, Clock, Error};
 pub enum NetworkMode {
     /// 127.0.0.1 only, no relay, no address lookup.
     LocalOnly,
-    /// The n0 production preset: relay, address lookup, every direct transport.
+    /// Mycelium's relay ([`Reach`]) and every direct transport; no address lookup.
     Production,
-    /// The n0 preset without any direct IP transport: relay only.
+    /// [`NetworkMode::Production`] without any direct IP transport: relay only.
     ForceRelay,
     /// Explicitly configured direct LAN: ONE bound interface address, no relay,
     /// no address lookup, and peers only at allow-listed addresses
@@ -219,14 +219,44 @@ impl NetworkMode {
         matches!(self, Self::LocalOnly)
     }
 }
-/// Where the relay and address lookup of a network mode come from.
+/// The relay Mycelium operates for its own endpoints (ruling 29 B; deployed by the ops lane,
+/// `REPORT-OPS-relay.md`, QUIC address discovery on UDP 7842). The ONLY relay a shipped endpoint
+/// registers at: no network mode configures an n0 relay, n0 DNS or a pkarr publisher (lane XB1).
+pub const MYCELIUM_RELAY_URL: &str = "https://relay.mycelium.now";
+/// Where the relay and address lookup of a network mode come from. Neither variant has an
+/// address lookup: peers are named by endpoint ids from signed documents, never looked up.
 #[derive(Clone, Debug)]
 pub enum Reach {
-    /// The shipped n0 relays and address lookup.
+    /// The shipped relay: Mycelium's own ([`MYCELIUM_RELAY_URL`]).
     Shipped,
-    /// One explicit relay and no address lookup: nothing leaves the host unless that relay is
-    /// reachable. For tests that must not touch the public relays.
+    /// One explicit relay instead (an override): tests point it at a loopback port nothing
+    /// listens on, so nothing leaves the host.
     Hermetic(iroh::RelayUrl),
+}
+impl Reach {
+    /// The one relay this reach registers at.
+    pub fn relay_url(&self) -> Result<iroh::RelayUrl, Error> {
+        match self {
+            Self::Shipped => MYCELIUM_RELAY_URL.parse().map_err(|_| Error::Unavailable),
+            Self::Hermetic(url) => Ok(url.clone()),
+        }
+    }
+}
+/// The relay and address lookup of a relay-mode endpoint (Production / ForceRelay): exactly
+/// the reach's relay, no address lookup (the `presets::N0` relays, DNS lookup and pkarr publish
+/// are never configured, so an unreachable relay never degrades to n0).
+pub(crate) fn relay_builder(
+    mode: NetworkMode,
+    reach: &Reach,
+) -> Result<iroh::endpoint::Builder, Error> {
+    // `ForceRelay` removes every direct IP transport (`sidecar.rs:846-852 @ f4e366e9`).
+    let mut builder = Endpoint::builder(presets::Minimal)
+        .clear_address_lookup()
+        .relay_mode(RelayMode::Custom(iroh::RelayMap::from(reach.relay_url()?)));
+    if mode == NetworkMode::ForceRelay {
+        builder = builder.clear_ip_transports();
+    }
+    Ok(builder)
 }
 
 pub(crate) fn validate_local_peer(peer: &EndpointAddr) -> Result<(), Error> {
@@ -595,20 +625,7 @@ impl<'a> LoopbackHost<'a> {
                 NetworkMode::DirectLan => {
                     lan_builder(lan_transport.clone().ok_or(Error::Unavailable)?)
                 }
-                NetworkMode::Production | NetworkMode::ForceRelay => {
-                    // The production relay transport; `ForceRelay` removes every direct IP
-                    // transport (`sidecar.rs:846-852 @ f4e366e9`).
-                    let mut builder = Endpoint::builder(presets::N0);
-                    if mode == NetworkMode::ForceRelay {
-                        builder = builder.clear_ip_transports();
-                    }
-                    if let Reach::Hermetic(url) = reach {
-                        builder = builder
-                            .clear_address_lookup()
-                            .relay_mode(RelayMode::Custom(iroh::RelayMap::from(url.clone())));
-                    }
-                    builder
-                }
+                NetworkMode::Production | NetworkMode::ForceRelay => relay_builder(mode, reach)?,
             }
             .alpns(alpns);
             if let Some(secret) = secret {
@@ -1177,6 +1194,10 @@ impl<'a> LoopbackHost<'a> {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "iroh_relay_tests.rs"]
+mod relay_tests;
 
 #[cfg(test)]
 mod late_close_tests {
