@@ -538,38 +538,70 @@ fn a_ledger_wait_ends_at_the_operations_deadline_without_committing() {
     assert_eq!(phase(&f, "deadline"), "cleanup_required");
     assert_eq!(f.charge(), f.bytes.len() as u64);
 }
-/// A-01, commit after the deadline: the ledger frees exactly as the operation's deadline passes
-/// (the holder marks the deadline passed, then lets go); the acquisition that follows re-checks
-/// the operation before committing and is refused, nothing committed.
+/// A-01, commit after the deadline: the ledger frees inside verification's wait for it, and the
+/// operation's deadline passes after the wait's last checkpoint but before the commit; the
+/// re-check after the acquisition refuses it, nothing committed.
+///
+/// Lane A patch 3, A2-02 (REVIEW-laneA-p2-astra.md): deterministic, one thread, no timing. A
+/// control verification on a free ledger counts the checkpoint calls before the ledger (`reads`:
+/// all but its last, the pre-commit re-check). The witness holds the ledger itself: its calls
+/// 1..=reads are verification's reads; call reads + 1 is then the busy wait (the ledger is still
+/// held by this test), where the test lets the ledger go and the operation is still current;
+/// the next try takes the lock without a checkpoint, so call reads + 2 is the re-check after the
+/// acquisition, where the deadline has passed. Without that re-check the commit happens.
 #[test]
 fn a_ledger_freed_after_the_deadline_is_not_committed() {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    };
+    use std::cell::{Cell, RefCell};
     let f = Fixture::new();
+    let mut control = f.begin("control");
+    control.write_chunk(0, &f.bytes).unwrap();
+    let count = Cell::new(0);
+    control
+        .verify(&|| {
+            count.set(count.get() + 1);
+            Ok(())
+        })
+        .unwrap();
+    let reads = count.get() - 1;
+    assert!(
+        reads >= 1,
+        "verification checks its operation before it reads"
+    );
     let mut receive = f.begin("late");
     receive.write_chunk(0, &f.bytes).unwrap();
-    let ledger = held_ledger(&f);
-    let passed = Arc::new(AtomicBool::new(false));
-    let mark = passed.clone();
-    let holder = std::thread::spawn(move || {
-        std::thread::sleep(poll() / 2);
-        mark.store(true, Ordering::SeqCst);
-        drop(ledger);
-    });
+    let held = RefCell::new(Some(held_ledger(&f)));
+    let calls = Cell::new(0);
+    let released_at = Cell::new(None);
     let got = receive.verify(&|| {
-        if passed.load(Ordering::SeqCst) {
-            Err(api::compiler_inputs::Error("member_operation_deadline"))
-        } else {
-            Ok(())
+        let call = calls.get() + 1;
+        calls.set(call);
+        if call <= reads {
+            return Ok(());
+        }
+        match held.borrow_mut().take() {
+            Some(ledger) => {
+                released_at.set(Some(call));
+                drop(ledger);
+                Ok(())
+            }
+            None => Err(api::compiler_inputs::Error("member_operation_deadline")),
         }
     });
-    holder.join().unwrap();
+    let (calls, released_at) = (calls.get(), released_at.get());
+    assert_eq!(
+        released_at,
+        Some(reads + 1),
+        "the ledger was let go in the busy wait, after verification's reads"
+    );
     assert_eq!(got.map_err(|e| e.0), Err("member_operation_deadline"));
+    assert_eq!(
+        calls,
+        reads + 2,
+        "the refusal came from the re-check after the acquisition"
+    );
     assert_eq!(phase(&f, "late"), "cleanup_required");
+    assert_eq!(phase(&f, "control"), "retained");
 }
-
 /// Lane A patch 3, A2-01 (REVIEW-laneA-p2-astra.md): taking custody reserves storage under the
 /// storage ledger's lock. A busy ledger is waited for under the RECEIVING OPERATION's own bound:
 /// an operation whose deadline passes while another holder keeps the ledger is refused by its own
