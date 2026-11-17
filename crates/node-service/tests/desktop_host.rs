@@ -1124,7 +1124,7 @@ const REVISION: &str = "0123456789abcdef0123456789abcdef01234567";
 
 /// Lane VL patch round 1 (REVIEW-laneUI-astra VL-01): the status never waits for the running
 /// build's revision. While its reader has not returned (a stalled filesystem, a FIFO), more status
-/// requests than the window's callback slots, sent at once, each answer with the app's version and
+/// requests than the window's callback slots each answer with the app's version and
 /// `source_revision: null`; Stop answers, and Quit verifies with the reader still blocked.
 #[test]
 fn the_status_names_the_version_at_once_while_the_build_revision_is_still_read() {
@@ -1134,6 +1134,8 @@ fn the_status_names_the_version_at_once_while_the_build_revision_is_still_read()
         "private-local-token".into(),
         node_service::native::development_qualification().unwrap(),
     );
+    // The packaged app publishes its initial status before the window's first request.
+    api::actions::Backend::publish(&mut node.clone()).unwrap();
     let private = private();
     let (release, held) = std::sync::mpsc::channel::<()>();
     let (inside_tx, inside) = std::sync::mpsc::channel::<()>();
@@ -1148,10 +1150,10 @@ fn the_status_names_the_version_at_once_while_the_build_revision_is_still_read()
     let services = DesktopServices::new(node, node_service::packaged::CALLBACK_CAPACITY, &private)
         .with_app_revision(revision.clone());
     let (submit, mut cleanup) = assembled(services, &private);
-    let pending: Vec<_> = (0..2 * node_service::packaged::CALLBACK_CAPACITY.get())
-        .map(|_| submit("GET", "/api/status"))
-        .collect();
-    for status in pending {
+    // One after another, more than the callback slots: a status that waited (or held its slot)
+    // would leave the first unanswered, or the later ones refused for capacity.
+    for _ in 0..2 * node_service::packaged::CALLBACK_CAPACITY.get() {
+        let status = submit("GET", "/api/status");
         let (code, body) = answered(status, "a status while the revision is read");
         assert_eq!(code, 200, "{body}");
         assert_eq!(
@@ -1183,6 +1185,7 @@ fn the_status_names_the_build_once_its_revision_is_known() {
         "private-local-token".into(),
         node_service::native::development_qualification().unwrap(),
     );
+    api::actions::Backend::publish(&mut node.clone()).unwrap();
     let private = private();
     let services = DesktopServices::new(node, node_service::packaged::CALLBACK_CAPACITY, &private)
         .with_app_revision(AppRevision::acquire(|| Some(REVISION.into())));
