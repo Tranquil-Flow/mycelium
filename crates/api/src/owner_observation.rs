@@ -314,20 +314,58 @@ impl<H: ChainHost> PinnedHost<H> {
 }
 /// The verification key a member's reported installation descriptor names, which a managed-control
 /// call to or from that member binds the mailbox to (`guarded`).
+///
+/// The descriptor's AGE is not a reason to refuse a call (B3, ledger row 111). v0.1.4's guard
+/// (`managed_control.py:909-990 @ f4e366e9`, `_member_guard` / `_verify_target`) pins each call's
+/// key to the CURRENT membership record and checks the call's own signed envelope (TTL, nonce); it
+/// verifies the installation descriptor with its expiry only where it is consumed, at observe
+/// (`chain_observation.py:94`) and compile (`chain_compile.py:505`). The member signs that
+/// descriptor once per run at collect (300 s life), so re-checking its age on every call refused
+/// every call of a run whose observe + compile + slices outlasted it, and every call while serving
+/// after that. Here a descriptor past its life is still checked in full at its own signing instant
+/// (signature, key pin, generation, incarnation, swarm, run binding, facts) and the member's lease
+/// at `now`; every other refusal stands, its inner code on stderr.
 fn descriptor_key(card: &Value, member: &Value, swarm: &str, now: f64) -> OResult<Value> {
-    crate::installation_descriptor::verify_installation_descriptor(
-        card,
-        member,
-        swarm,
-        card["statement"]["run_id"]
-            .as_str()
-            .ok_or(OwnerError("managed_control_run_invalid"))?,
-        card["statement"]["deployment_id"]
-            .as_str()
-            .ok_or(OwnerError("managed_control_deployment_invalid"))?,
-        now,
-    )
-    .map_err(|_| OwnerError("managed_control_descriptor_unavailable"))?;
+    let verify = |at: f64| {
+        crate::installation_descriptor::verify_installation_descriptor(
+            card,
+            member,
+            swarm,
+            card["statement"]["run_id"].as_str().unwrap_or_default(),
+            card["statement"]["deployment_id"]
+                .as_str()
+                .unwrap_or_default(),
+            at,
+        )
+    };
+    card["statement"]["run_id"]
+        .as_str()
+        .ok_or(OwnerError("managed_control_run_invalid"))?;
+    card["statement"]["deployment_id"]
+        .as_str()
+        .ok_or(OwnerError("managed_control_deployment_invalid"))?;
+    let refused = |code: &str| {
+        eprintln!("managed_control_descriptor_unavailable:{code}");
+        OwnerError("managed_control_descriptor_unavailable")
+    };
+    match verify(now) {
+        Ok(_) => {}
+        Err(e) if e.code == "installation_descriptor_expired" => {
+            let signed = card["statement"]["issued_at"]
+                .as_f64()
+                .filter(|t| t.is_finite() && *t <= now);
+            let leased = member["lease_expires_at"]
+                .as_f64()
+                .is_some_and(|end| now < end);
+            match signed {
+                Some(at) if leased => {
+                    verify(at).map_err(|e| refused(&e.code))?;
+                }
+                _ => return Err(refused(&e.code)),
+            }
+        }
+        Err(e) => return Err(refused(&e.code)),
+    }
     Ok(card["verification_key"].clone())
 }
 fn binding(member: &Value, run: &Value, deployment: &Value) -> OResult<Value> {
@@ -1211,8 +1249,13 @@ mod descriptor_age_tests {
         assert_eq!(refused(&card(&signer, &member), &lapsed), unavailable);
         // A descriptor from the future stays refused too.
         assert_eq!(
-            descriptor_key(&card(&signer, &member), &current, "swarm-1", SIGNED_AT - 60.0)
-                .map_err(|e| e.0),
+            descriptor_key(
+                &card(&signer, &member),
+                &current,
+                "swarm-1",
+                SIGNED_AT - 60.0
+            )
+            .map_err(|e| e.0),
             unavailable
         );
     }
