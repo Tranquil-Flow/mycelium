@@ -22,7 +22,10 @@ fn a_fresh_install_runs_qwen3_0_6b_the_one_model_proven_on_two_macs() {
     let model = run_model::selected_model(&dir, None).unwrap();
     assert_eq!(
         (model.model_id, model.resolved_commit),
-        ("Qwen/Qwen3-0.6B", "c1899de289a04d12100db370d81485cdf75e47ca")
+        (
+            "Qwen/Qwen3-0.6B",
+            "c1899de289a04d12100db370d81485cdf75e47ca"
+        )
     );
     let document = run_model::document(&dir, None, None).unwrap();
     assert_eq!(document["selected"], "qwen3-0.6b");
@@ -39,7 +42,9 @@ fn a_fresh_install_runs_qwen3_0_6b_the_one_model_proven_on_two_macs() {
     );
     let fresh = root("env");
     assert_eq!(
-        run_model::selected_model(&fresh, Some("a9-route")).unwrap().model_id,
+        run_model::selected_model(&fresh, Some("a9-route"))
+            .unwrap()
+            .model_id,
         "Qwen/Qwen2.5-0.5B-Instruct"
     );
     fs::remove_dir_all(dir).unwrap();
@@ -68,7 +73,10 @@ fn the_picker_says_which_model_was_tested_on_two_macs() {
     );
     for name in ["a9-route", "qwen3-8b", "qwen3-14b"] {
         let text = label(name);
-        assert!(text.contains("not yet tested on two Macs"), "{name}: {text}");
+        assert!(
+            text.contains("not yet tested on two Macs"),
+            "{name}: {text}"
+        );
         assert!(!text.contains("tested starter"), "{name}: {text}");
     }
     assert_eq!(choices.len(), 4, "{choices:?}");
