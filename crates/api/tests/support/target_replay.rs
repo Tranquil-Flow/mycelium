@@ -350,6 +350,89 @@ fn replay_local_revocation_and_cancellation_never_become_requeue() {
     }
 }
 
+/// Every journal in the pump root's private archive, oldest first; each file private (0600) in a
+/// private (0700) directory.
+fn archived(f: &Fixture) -> Vec<Value> {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = f.root.join("archive");
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    assert_eq!(
+        fs::symlink_metadata(&dir).unwrap().permissions().mode() & 0o7777,
+        0o700
+    );
+    let mut paths: Vec<_> = entries.map(|e| e.unwrap().path()).collect();
+    paths.sort();
+    paths
+        .iter()
+        .map(|p| {
+            let meta = fs::symlink_metadata(p).unwrap();
+            assert!(meta.is_file(), "{}", p.display());
+            assert_eq!(meta.permissions().mode() & 0o7777, 0o600, "{}", p.display());
+            serde_json::from_slice(&fs::read(p).unwrap()).unwrap()
+        })
+        .collect()
+}
+/// PR-ASTRA-01, the native-result case: Stop ran natively and returned STOPPED, but its ACK never
+/// reached the owner (refused before the mailbox committed it), so the target journal is the ONLY
+/// record of what native work returned. A transport failure ends the run; cleanup is proven and
+/// the pump closes with `pending.native_response`, `native_stop_receipt` and the signed ACK in
+/// `outbound`. The next run must archive that journal whole before replacing it, never replay
+/// the ACK and never re-execute Stop; the owner's claim stays `claimed`.
+#[test]
+#[ignore = "requires pinned real model-free helper"]
+fn replay_next_run_archives_an_uncommitted_ack_and_its_native_result_without_replaying_them() {
+    let old = Fixture::new();
+    let mut pump = old.pump();
+    old.cleanup();
+    old.enqueue(1, "stop");
+    fault(&old, "ack", false, "managed_control_command_interrupted");
+    assert_eq!(pump.step(), Err("managed_control_command_interrupted"));
+    native_stopped(&old);
+    pump.record_failure("managed_control_command_interrupted")
+        .unwrap();
+    pump.close().unwrap();
+    drop(pump);
+    let interrupted = state(&old);
+    assert_eq!(interrupted["phase"], "closed");
+    assert_eq!(
+        interrupted["pending"]["native_response"]["result"]["state"],
+        "STOPPED"
+    );
+    assert_eq!(
+        interrupted["native_stop_receipt"],
+        interrupted["pending"]["native_response"]
+    );
+    assert_eq!(
+        interrupted["outbound"]["statement"]["protocol"],
+        "mycelium.managed_control.target_ack.v1"
+    );
+    assert_eq!(server_state(&old), "claimed", "the ACK never committed");
+    let old_requests = old.host.requests.lock().unwrap().clone();
+    assert!(archived(&old).is_empty());
+
+    let next = old.next_run("run-2", "deployment-2");
+    let mut pump = next
+        .try_pump()
+        .unwrap_or_else(|failure| panic!("next run refused: {}", failure.code()));
+    assert_eq!(archived(&next), vec![interrupted.clone()]);
+    let started = state(&next);
+    assert!(started["pending"].is_null());
+    assert!(started["native_stop_receipt"].is_null());
+    assert_eq!(started["sequence"], interrupted["sequence"]);
+    next.enqueue(1, "stop");
+    assert!(pump.step().unwrap());
+    let sent = next.host.requests.lock().unwrap().clone();
+    let stale = protocol::canonical::to_bytes(&interrupted["outbound"]).unwrap();
+    assert!(!sent.contains(&stale), "earlier run's ACK replayed");
+    assert_eq!(*old.host.requests.lock().unwrap(), old_requests);
+    assert_eq!(server_state(&old), "claimed");
+    next.cleanup();
+    pump.close().unwrap();
+    // A closed, resolved run-2 journal is not archived when nothing of it is unresolved.
+    assert_eq!(archived(&next), vec![interrupted]);
+}
 fn command_state(f: &Fixture, mailbox: &str, command: &str) -> String {
     rusqlite::Connection::open(f.root.join(mailbox))
         .unwrap()
@@ -402,6 +485,10 @@ fn replay_next_run_starts_after_interrupted_run_without_replaying_its_outbound()
     assert!(!same.owner_retained());
     drop(same);
     assert_eq!(state(&old), interrupted);
+    assert!(
+        archived(&old).is_empty(),
+        "a refused reopen archives nothing"
+    );
     assert!(!old.root.join("stage").exists());
 
     // The next owner run (fresh run/deployment id) on the same Mac starts.
@@ -410,6 +497,10 @@ fn replay_next_run_starts_after_interrupted_run_without_replaying_its_outbound()
         .try_pump()
         .unwrap_or_else(|failure| panic!("next run refused: {}", failure.code()));
     let started = state(&next);
+    // PR-ASTRA-01: before the live journal is replaced, the earlier run's unresolved journal
+    // (binding, signed outbound, failure, process, source) is kept whole in a private run-keyed
+    // archive beside it, as v0.1.4 keeps `managed/<old run>/pump` (target_app.py:256).
+    assert_eq!(archived(&next), vec![interrupted.clone()]);
     assert_eq!(started["phase"], "running");
     assert_eq!(started["binding"], next.scope);
     assert!(started["outbound"].is_null());
