@@ -27,6 +27,10 @@ type Result<T> = std::result::Result<T, Error>;
 fn state(error: private_state::StateError) -> Error {
     Error(error.0)
 }
+/// Diagnostic lines this module wrote to the log, kept for the tests that check the log names
+/// what it should (lane A, B11 (a)).
+#[cfg(test)]
+pub(crate) static DIAGNOSTICS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
 pub fn validate_hosts(document: &Value, facts: usize) -> Result<()> {
     let rows = document["observations"]

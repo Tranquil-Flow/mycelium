@@ -742,3 +742,29 @@ fn a_crash_before_the_retirements_ledger_rename_recovers_without_refusing() {
     );
     assert_eq!(ledger_runs(&f.root), ["next"]);
 }
+
+/// Lane A, release blocker B11 (a) (owner ruling 4 a, ledger rows 77 and 93): a storage ledger the
+/// compile cannot read (here the hand-indented copy row 77 found on Mac A: 63 bytes where the
+/// canonical document is 56) still answers the closed `authority_state_invalid`, and the log
+/// names the file beside that code, so the next reader of an app log knows which file it was.
+#[test]
+fn an_unreadable_storage_ledger_is_named_in_the_log() {
+    use std::os::unix::fs::PermissionsExt;
+    let f = Fixture::new();
+    let runs = f.root.join("chain-runs");
+    directory(&runs).unwrap();
+    let ledger = runs.join(STORAGE_LEDGER);
+    fs::write(
+        &ledger,
+        "{\n  \"entries\": {},\n  \"protocol\": \"mycelium.compiler_storage.v1\"\n}",
+    )
+    .unwrap();
+    fs::set_permissions(&ledger, fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(
+        storage_ledger(&runs).err().map(|e| e.0),
+        Some("authority_state_invalid")
+    );
+    let named = format!("authority_state_invalid:{}", ledger.display());
+    let lines = DIAGNOSTICS.lock().unwrap().clone();
+    assert!(lines.contains(&named), "{named} not in {lines:?}");
+}
