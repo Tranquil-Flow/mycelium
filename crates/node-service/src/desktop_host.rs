@@ -96,7 +96,7 @@ impl AppRevision {
             .name("mycelium-app-revision".into())
             .spawn(move || {
                 if let Some(revision) = read() {
-                    let _ = found.set(revision);
+                    found.set(revision).unwrap_or_default();
                 }
             });
         if reader.is_err() {
