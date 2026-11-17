@@ -289,6 +289,10 @@ fn seed_member_cache(owner: &Instance, member_root: &Path) {
         fs::create_dir_all(dir).unwrap();
         fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).unwrap();
     }
+    // The member opens its own run model's acquisition (without the cached snapshot it reports
+    // `member_model_download_not_ported`): it takes the owner's model, `a9-route`, explicitly too,
+    // since v0.2's starter is Qwen3-0.6B (B13).
+    api::preferences::run_model::save_choice(member_root, "a9-route").unwrap();
 }
 
 /// `/api/model/download` from the test repository until this process's model is prepared.

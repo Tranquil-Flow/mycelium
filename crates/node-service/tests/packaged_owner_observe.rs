@@ -61,12 +61,22 @@ fn launch(state: &Path, repository: &Repository, network: NetworkConfig, run: Ru
         state: state.to_owned(),
     }
 }
+/// A Mac's state root. The repository serves the tiny Qwen2 snapshot of `a9-route` (`SOURCE`):
+/// both Macs take that run model explicitly, as a saved picker choice, since v0.2's starter is
+/// Qwen3-0.6B (B13, `api/contracts/divergences.json` `run_model_default`); a member opens its own
+/// run model's acquisition. These tests are about the observation, not the default.
 fn private_dir(base: &Path, name: &str) -> PathBuf {
     let state = base.join(name);
     std::fs::DirBuilder::new()
         .mode(0o700)
         .create(&state)
         .unwrap();
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(private(&state))
+        .unwrap();
+    api::preferences::run_model::save_choice(&private(&state), "a9-route").unwrap();
     state
 }
 /// `/api/model/download` of the tiny snapshot until this Mac's acquisition prepared it.

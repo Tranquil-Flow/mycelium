@@ -27,6 +27,8 @@ pub const ORACLE_SOURCE: &str = "f4e366e98a1f705dfaf182897044500d290dbd7f";
 pub const ORACLE_EXE: &str = "8fff41823d357949ffa55c00b3fb8dfb0b4cc541f66343a72f21e3d8dd89186f";
 /// v0.1.4's built-in run model (run_model.py:69-75 @ f4e366e9 `demo_default_choice`).
 pub const ORACLE_STARTER: &str = "a9-route";
+/// The model the journeys choose in place of the oracle's starter (`/api/run-model`).
+pub const ORACLE_PICK: &str = "qwen3-0.6b";
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Target {
@@ -52,36 +54,51 @@ impl Target {
             "Library/Application Support/org.mycelium.app/state"
         }
     }
-    /// The run model a fresh installation shows (`/run_model/selected` while `/run_model/source`
-    /// is `demo_default`): v0.1.4's starter `a9-route` (run_model.py:69-75) for the certified
-    /// oracle, v0.2's `qwen3-0.6b` for the Rust launcher (B13, ORCHESTRATOR DECISION 17 Nov 2026 on
-    /// ruling 28; `crates/api/contracts/divergences.json` `diverged.run_model_default`).
-    pub fn starter_run_model(&self) -> &'static str {
-        if self.implementation == "python-v0.1.4" {
-            ORACLE_STARTER
-        } else {
-            "qwen3-0.6b"
+    /// The run model this target shows where the certified oracle shows `oracle`: its starter
+    /// [`ORACLE_STARTER`] or [`ORACLE_PICK`], the other model the journeys choose. v0.2 swaps the
+    /// two (B13, ORCHESTRATOR DECISION 17 Nov 2026 on ruling 28;
+    /// `crates/api/contracts/divergences.json` `diverged.run_model_default`): its starter is
+    /// `qwen3-0.6b`, so the Rust launcher's journeys choose `a9-route` to change the model, as the
+    /// oracle's choose `qwen3-0.6b` (re-choosing the open model reopens its closed acquisition,
+    /// app.py:649-672, which is not the journey). Any other name is no journey's.
+    pub fn run_model(&self, oracle: &str) -> Result<&'static str> {
+        let python = self.implementation == "python-v0.1.4";
+        match oracle {
+            ORACLE_STARTER if python => Ok(ORACLE_STARTER),
+            ORACLE_PICK if python => Ok(ORACLE_PICK),
+            ORACLE_STARTER => Ok(ORACLE_PICK),
+            ORACLE_PICK => Ok(ORACLE_STARTER),
+            _ => Err("journey:run_model_not_a_journey_choice".into()),
         }
     }
+    /// The run model a fresh installation shows (`/run_model/source` `demo_default`).
+    pub fn starter_run_model(&self) -> Result<&'static str> {
+        self.run_model(ORACLE_STARTER)
+    }
+    /// The run model the journeys choose in place of the starter.
+    pub fn picked_run_model(&self) -> Result<&'static str> {
+        self.run_model(ORACLE_PICK)
+    }
     /// A golden's observations as this target reproduces them. Goldens are captured from the
-    /// oracle: every observation of the starter (`/run_model/source` `demo_default`) must show the
-    /// oracle's starter, which moves to this target's ([`Target::starter_run_model`]); every other
-    /// field is compared as recorded.
+    /// oracle: every run-model selection field (`/run_model/selected`, and `/selected` of the
+    /// `/api/run-model` answer) must name the oracle's starter or pick, and moves to this target's
+    /// ([`Target::run_model`]); every other field is compared as recorded.
     pub fn golden_observations(&self, golden: &Value) -> Result<Value> {
         let mut observations = golden.clone();
         for observation in observations
             .as_array_mut()
             .ok_or("golden:observations_not_array")?
         {
-            let fields = &mut observation["fields"];
-            if fields["/run_model/source"] != "demo_default" {
-                continue;
+            let run_model_answer = observation["path"] == "/api/run-model";
+            let fields = observation["fields"]
+                .as_object_mut()
+                .ok_or("golden:fields_not_map")?;
+            for (key, value) in fields.iter_mut() {
+                if key == "/run_model/selected" || (run_model_answer && key == "/selected") {
+                    let oracle = value.as_str().ok_or("golden:run_model_not_a_name")?;
+                    *value = json!(self.run_model(oracle)?);
+                }
             }
-            require(
-                fields["/run_model/selected"] == ORACLE_STARTER,
-                "golden:starter_not_the_oracle_starter",
-            )?;
-            fields["/run_model/selected"] = json!(self.starter_run_model());
         }
         Ok(observations)
     }

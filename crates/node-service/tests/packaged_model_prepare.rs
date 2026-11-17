@@ -116,7 +116,20 @@ fn state_root() -> TestRoot {
         .mode(0o700)
         .create(&root)
         .unwrap();
+    take_the_served_model(&root.join("v02-node/private"));
     TestRoot(root)
+}
+/// The repository serves the tiny Qwen2 snapshot of `a9-route` (`SOURCE`, `MODEL_DIR`): every
+/// packaged host root here takes that run model explicitly, as a saved picker choice, since v0.2's
+/// starter is Qwen3-0.6B (B13, `api/contracts/divergences.json` `run_model_default`). These tests
+/// are about the acquisition, not the default.
+fn take_the_served_model(private: &Path) {
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(private)
+        .unwrap();
+    api::preferences::run_model::save_choice(private, "a9-route").unwrap();
 }
 fn identity() -> Value {
     api::acquisition::model_identity(&api::model_catalog::registered()[1])
@@ -1758,10 +1771,7 @@ fn packaged_policy_loop_cancels_a_download_when_the_membership_is_lost() {
     let owner = action_root(&state, &source);
     assert_created(&owner);
     let unenrolled = state.join("unenrolled-private");
-    std::fs::DirBuilder::new()
-        .mode(0o700)
-        .create(&unenrolled)
-        .unwrap();
+    take_the_served_model(&unenrolled);
     let not_member = DesktopServices::with_model_source(
         NodeService::new(
             Arc::new(MustNotRun),

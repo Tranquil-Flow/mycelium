@@ -34,7 +34,9 @@ use std::{
 };
 
 const DB_FILE: &str = api::swarm::publisher::app::DB_FILE;
-const SOURCE: &str = "model-source-7ae557604adf";
+/// The acquisition root of a fresh install's run model (`'model-source-' + resolved_commit[:12]`):
+/// Qwen3-0.6B, v0.2's starter (B13, `api/contracts/divergences.json` `run_model_default`).
+const SOURCE: &str = "model-source-c1899de289a0";
 
 fn millis(id: B) -> Duration {
     Duration::from_millis(id.span(Entries::ZERO).unwrap().millis())
