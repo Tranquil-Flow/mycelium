@@ -309,3 +309,40 @@ fn the_shipped_page_offers_no_one_mac_chat_and_hides_the_model_card() {
         "{prepare}"
     );
 }
+
+/// Lane XB patch 2 (REVIEW XB-05, decisions D1/D2): both page copies (the packaged window's and
+/// the `api` mirror) carry ONE contained network section: the owner's per-run choice between
+/// "Macs on the same network" (default) and "Macs on different networks (through the Mycelium
+/// relay)", and this Mac's portmapping preference (default off), both saved through the
+/// packaged action `/api/network/reach`, and the ACTIVE mode and a named error read back from
+/// `status.network_reach`. No dialog gates either choice.
+#[test]
+fn both_pages_offer_the_network_choices_in_one_contained_section() {
+    const MIRROR: &str = include_str!("../../api/assets/desktop/app.js");
+    for (name, page) in [("desktop", APP_JS), ("api mirror", MIRROR)] {
+        let begin = "// ---- Network reach (lane XB patch 2) ----";
+        let end = "// ---- end network reach ----";
+        assert_eq!(page.matches(begin).count(), 1, "{name}: one section");
+        let section = &page[page.find(begin).unwrap()..page.find(end).expect("closed section")];
+        for needed in [
+            "'/api/network/reach'",
+            "{reach:",
+            "{portmapping:",
+            "Macs on the same network",
+            "Macs on different networks (through the Mycelium relay)",
+            "network_reach",
+            "relay_unreachable",
+            ".active",
+        ] {
+            assert!(section.contains(needed), "{name}: the section lacks {needed}");
+        }
+        assert!(
+            !script_without_comments(section).contains("window.confirm("),
+            "{name}: no dialog gates a network choice"
+        );
+        assert!(
+            !page[..page.find(begin).unwrap()].contains("/api/network/reach"),
+            "{name}: nothing outside the section posts the action"
+        );
+    }
+}
