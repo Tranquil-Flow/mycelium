@@ -279,6 +279,13 @@ pub(crate) struct Admission {
     /// CONNECTION_CLOSE frames still reach admitted peers.
     closing: AtomicBool,
     refused: AtomicU64,
+    /// The first destination the pre-send filter refused (B4: the `lan_filter_closed` line).
+    first_refused: Mutex<Option<SocketAddr>>,
+    /// B9: source hosts whose Local Network probe was answered, and when (one answer per host per
+    /// `inbound_ttl`; at most `provisional_capacity` hosts at a time).
+    probes: Mutex<HashMap<IpAddr, Instant>>,
+    /// B9: probes answered.
+    answered: AtomicU64,
     /// Inbound datagrams the receive filter dropped (never reached iroh).
     dropped: AtomicU64,
     /// Remote addresses this admission let reach iroh's never-evicting
@@ -317,6 +324,9 @@ impl Admission {
                 .unwrap_or(Duration::ZERO),
             closing: AtomicBool::new(false),
             refused: AtomicU64::new(0),
+            first_refused: Mutex::new(None),
+            probes: Mutex::new(HashMap::new()),
+            answered: AtomicU64::new(0),
             dropped: AtomicU64::new(0),
             admitted: AtomicU64::new(0),
             #[cfg(test)]
@@ -721,7 +731,9 @@ impl Admission {
     /// Closing: pins stop releasing, and nothing stays learned (B14; a
     /// recycle takes its successor, learned hosts included, before this).
     pub(crate) fn close(&self) {
-        self.closing.store(true, Ordering::SeqCst);
+        if !self.closing.swap(true, Ordering::SeqCst) {
+            eprintln!("{}", self.summary());
+        }
         if let Ok(mut learned) = self.learned.write() {
             learned.clear();
         }
@@ -737,6 +749,60 @@ impl Admission {
     /// See the `admitted` field.
     pub(crate) fn admitted(&self) -> u64 {
         self.admitted.load(Ordering::SeqCst)
+    }
+    /// The pre-send filter refused a datagram to `dst` (counted; the first one is kept).
+    pub(crate) fn refuse(&self, dst: SocketAddr) {
+        self.refused.fetch_add(1, Ordering::SeqCst);
+        if let Ok(mut first) = self.first_refused.lock() {
+            first.get_or_insert(canonical(dst));
+        }
+    }
+    /// B4 (ledger rows 101-103): the line each direct-LAN endpoint prints once, when it closes, so
+    /// a run's log READS `refused_out` for every endpoint (a passing run prints 0) instead of
+    /// showing it only on a failed connect. Rows 101-102: the owner's sender refused every datagram
+    /// to its own contributor's member control and only the timeout lines said so.
+    pub(crate) fn summary(&self) -> String {
+        let first = self
+            .first_refused
+            .lock()
+            .ok()
+            .and_then(|first| *first)
+            .map_or_else(|| "none".to_owned(), |a| a.to_string());
+        format!(
+            "lan_filter_closed refused_out={} first_refused={first} dropped_in={} admitted={} range={} probes_answered={}",
+            self.refused(),
+            self.dropped(),
+            self.admitted(),
+            self.policy.range_allowed(),
+            self.answered.load(Ordering::SeqCst),
+        )
+    }
+    /// B9 (owner ruling 16 Nov (2 a), ledger rows 92-93): whether `datagram` from `src` is the
+    /// owner's Local Network probe (`api::local_network::Udp`: exactly one zero byte) that this
+    /// listener answers with one zero byte, so a joined Mac sends its first LAN packet (and gets its
+    /// own Local Network alert) at the owner's step 4, before the compile. Only an allow-listed
+    /// source (and, when signed peer hosts are set, one of them), at most once per source host per
+    /// `inbound_ttl`, at most `provisional_capacity` hosts remembered, never while closing: never a
+    /// reflector, never more bytes out than came in.
+    pub(crate) fn answer_probe(&self, src: SocketAddr, datagram: &[u8], now: Instant) -> bool {
+        let src = canonical(src);
+        if datagram != [0] || !self.policy.allows(src.ip()) || self.closing.load(Ordering::SeqCst) {
+            return false;
+        }
+        match self.hosts.read() {
+            Ok(hosts) if hosts.as_ref().is_none_or(|h| h.contains(&src.ip())) => {}
+            _ => return false,
+        }
+        let Ok(mut probes) = self.probes.lock() else {
+            return false;
+        };
+        probes.retain(|_, at| now.saturating_duration_since(*at) < self.inbound_ttl);
+        if probes.contains_key(&src.ip()) || probes.len() >= self.provisional_capacity {
+            return false;
+        }
+        probes.insert(src.ip(), now);
+        self.answered.fetch_add(1, Ordering::SeqCst);
+        true
     }
 }
 /// Holds exact destination pins; releases them on drop (not while closing).
@@ -909,6 +975,19 @@ impl CustomEndpoint for LanEndpoint {
                 // on the next poll if it persists.
                 Poll::Ready(Err(_)) => break,
                 Poll::Ready(Ok(source)) => {
+                    if self.admission.answer_probe(source, read.filled(), now) {
+                        // B9: one zero byte back, best effort (a full send buffer loses it; on a
+                        // Mac whose Local Network answer is pending the attempt is what raises
+                        // the alert, and it fails at once with EHOSTUNREACH).
+                        let sent = self.socket.try_send_to(&[0], source);
+                        eprintln!(
+                            "lan_probe_answered:{source}:{}",
+                            sent.map_or_else(
+                                |e| format!("os_error_{}", e.raw_os_error().unwrap_or(0)),
+                                |_| "sent".to_owned()
+                            )
+                        );
+                    }
                     if !self.admission.admit_inbound(source, read.filled(), now) {
                         // The receive filter: iroh never sees (or maps) this
                         // source; the slot is reused for the next datagram.
@@ -965,7 +1044,7 @@ impl CustomSender for LanSender {
         };
         if !self.admission.may_send(dst) {
             // The pre-send filter: nothing reaches the socket.
-            self.admission.refused.fetch_add(1, Ordering::SeqCst);
+            self.admission.refuse(dst);
             return Poll::Ready(Ok(()));
         }
         let size = transmit

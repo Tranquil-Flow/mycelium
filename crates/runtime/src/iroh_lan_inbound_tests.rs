@@ -212,3 +212,63 @@ fn inbound_sources_reaching_iroh_are_bounded_on_real_interfaces() {
         "in-range flood",
     );
 }
+
+/// B9 (owner ruling 16 Nov (2 a), ledger rows 92-93): the owner's step-4 Local Network probe (one
+/// one-byte datagram, `api::local_network::Udp`, to a joined Mac's signed work address) used to be
+/// dropped unread by the joined Mac's receive filter (`member_control_filter dropped_in=1` on Mac B
+/// in row 111), so Mac B sent nothing on the LAN until the owner's step-6 dial and its own Local
+/// Network alert came after the compile, costing a run. The joined Mac's listener now answers that
+/// probe with one one-byte datagram to its source: B's first LAN packet, which raises B's alert at
+/// step 4 too. It answers only the exact probe, only to an allow-listed source, at most once per
+/// source host per handshake window, and the probe still never reaches iroh.
+#[test]
+fn the_joined_macs_listener_answers_the_owners_local_network_probe_once() {
+    let loopback = ip("127.0.0.1");
+    let mut rig = Rig::new(loopback, LanPolicy::with_explicit(vec![loopback]).unwrap());
+    let owner = UdpSocket::bind(SocketAddr::new(loopback, 0)).unwrap();
+    owner
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    owner.send_to(&[0], rig.local).unwrap();
+    assert!(rig.drain().is_empty(), "the probe must never reach iroh");
+    let mut reply = [9u8; 16];
+    let (n, from) = owner
+        .recv_from(&mut reply)
+        .expect("the joined Mac's listener did not answer the owner's probe");
+    assert_eq!((n, reply[0], from), (1, 0, rig.local));
+    // A second probe from the same host inside the window: no second answer (no reflector), and
+    // a datagram that is not the probe is never answered.
+    owner.send_to(&[0], rig.local).unwrap();
+    let other = UdpSocket::bind(SocketAddr::new(loopback, 0)).unwrap();
+    other
+        .set_read_timeout(Some(Duration::from_millis(400)))
+        .unwrap();
+    other.send_to(&[1], rig.local).unwrap();
+    other.send_to(&short_header(), rig.local).unwrap();
+    rig.drain();
+    owner
+        .set_read_timeout(Some(Duration::from_millis(400)))
+        .unwrap();
+    assert!(owner.recv_from(&mut reply).is_err(), "answered twice");
+    assert!(other.recv_from(&mut reply).is_err(), "answered a non-probe");
+}
+
+/// B9: a probe from a source outside the allow-list is never answered (the listener sends nothing
+/// the transport's own policy would refuse).
+#[test]
+fn a_probe_from_outside_the_allow_list_is_not_answered() {
+    let loopback = ip("127.0.0.1");
+    // Loopback bound, but the policy allows only the private ranges: 127.0.0.1 is outside.
+    let mut rig = Rig::new(loopback, LanPolicy::private_only());
+    let stranger = UdpSocket::bind(SocketAddr::new(loopback, 0)).unwrap();
+    stranger
+        .set_read_timeout(Some(Duration::from_millis(400)))
+        .unwrap();
+    stranger.send_to(&[0], rig.local).unwrap();
+    assert!(rig.drain().is_empty());
+    let mut reply = [9u8; 4];
+    assert!(
+        stranger.recv_from(&mut reply).is_err(),
+        "answered a stranger"
+    );
+}

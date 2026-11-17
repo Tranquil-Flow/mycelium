@@ -28,6 +28,10 @@ use serde_json::Value;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Recorded {
     pub renewal_error: Option<&'static str>,
+    /// `DemoApp.recovery_error` (app.py:557, :625): a joined Mac whose start found a dead relay
+    /// or a lapsed membership keeps the app started but not running and records the code here; a
+    /// later successful start or reconnect clears it (app.py:1434, :1636).
+    pub recovery_error: Option<&'static str>,
     pub standing_error: Option<String>,
     pub standing_error_http: Option<Value>,
     pub standing_last: Option<Value>,
@@ -116,6 +120,10 @@ pub fn fast_mode(root: &std::path::Path, facts: &Facts<'_>) -> Json {
 pub fn renewal_error(recorded: &Recorded) -> Json {
     recorded.renewal_error.map_or(Json::Null, Json::from)
 }
+/// `self.recovery_error` (app.py:1273).
+pub fn recovery_error(recorded: &Recorded) -> Json {
+    recorded.recovery_error.map_or(Json::Null, Json::from)
+}
 /// `self._leave_status()`: a joined Mac's leave record (member_leave.py), `null` for an owner.
 pub fn leave<M: ManagedSlot>(c: &Authority<M>) -> Json {
     if !c.target {
@@ -127,7 +135,7 @@ pub fn leave<M: ManagedSlot>(c: &Authority<M>) -> Json {
 /// The fields of `DemoApp.status()` both hosts take from the authority and `facts`, in the source's
 /// key order (`STATUS_FIELDS`): `role`, `model_contract`, `run_model`, `fast_mode`, `installation_role`,
 /// `resource_policy`, `running`, `authority` (owner member rows: node_id / generation / lifecycle_state /
-/// clock, app.py:1253-1258), `renewal_error`, `leave`, `join_flow` (`_join_flow_status`,
+/// clock, app.py:1253-1258), `renewal_error`, `recovery_error`, `leave`, `join_flow` (`_join_flow_status`,
 /// app.py:1214-1237, with what the app recorded).
 pub fn shared<M: ManagedSlot>(
     c: &Authority<M>,
@@ -158,6 +166,8 @@ pub fn shared<M: ManagedSlot>(
         ("running", c.running.into()),
         ("authority", joined_member::authority_status(c)),
         ("renewal_error", renewal_error(&c.recorded)),
+        // B10: v0.1.4's next status key (app.py:1273); the joined Mac's relay line reads it.
+        ("recovery_error", recovery_error(&c.recorded)),
         ("leave", leave(c)),
         (
             "join_flow",

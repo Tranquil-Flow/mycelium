@@ -714,21 +714,34 @@ pub fn resume_membership(cell: &impl Cell, options: &SeedOptions) -> Result<(), 
             cell.with(|c| {
                 c.session = started.session;
                 c.running = true;
+                c.recorded.recovery_error = None;
             });
             Ok(())
         }
-        Err(failed) => match failed.error.code {
-            "peer_transport_unreachable"
-            | "seed_http_remote_error"
-            | "peer_member_expired"
-            | "peer_generation_stale"
-            | "peer_member_unknown" => {
-                cell.with(|c| c.running = false);
+        Err(failed) => match recovery_code(failed.error.code) {
+            Some(code) => {
+                cell.with(|c| {
+                    c.running = false;
+                    c.recorded.recovery_error = Some(code);
+                });
                 Ok(())
             }
-            code => Err(code.to_owned()),
+            None => Err(failed.error.code.to_owned()),
         },
     }
+}
+/// The start refusals that leave a joined Mac started but not running, recorded as
+/// `recovery_error` (app.py:617-625 @ f4e366e9): a dead relay or a lapsed membership.
+pub fn recovery_code(code: &str) -> Option<&'static str> {
+    [
+        "peer_transport_unreachable",
+        "seed_http_remote_error",
+        "peer_member_expired",
+        "peer_generation_stale",
+        "peer_member_unknown",
+    ]
+    .into_iter()
+    .find(|c| *c == code)
 }
 /// The durable half of a member leave's "this Mac owns no compute" proof: no own-contributor or
 /// native-bootstrap state on disk (unreadable paths and symlink residue refuse) and no cleanup

@@ -1043,7 +1043,7 @@ fn status_json(core: &Core, demo: Option<Json>) -> Json {
         ("running", take("running")),
         ("authority", take("authority")),
         ("renewal_error", take("renewal_error")),
-        ("recovery_error", Json::Null),
+        ("recovery_error", take("recovery_error")),
         (
             "distribution",
             "unsigned development software; not notarized".into(),

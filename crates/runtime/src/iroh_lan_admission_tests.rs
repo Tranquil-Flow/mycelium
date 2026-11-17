@@ -338,3 +338,28 @@ fn only_a_full_size_quic_initial_opens_a_provisional_entry() {
         assert!(!quic_initial(&datagram), "{name} must not open an entry");
     }
 }
+
+/// B4 (ledger rows 101-103): the close line carries the pre-send filter's refusals and the first
+/// refused destination, printed once per endpoint (a repeated close prints nothing new).
+#[test]
+fn the_close_line_reads_the_pre_send_refusals() {
+    let lan = admission(LanPolicy::private_only());
+    assert!(
+        lan.summary()
+            .starts_with("lan_filter_closed refused_out=0 first_refused=none dropped_in=0"),
+        "{}",
+        lan.summary()
+    );
+    let own: SocketAddr = "10.160.112.32:58693".parse().unwrap();
+    assert!(!lan.may_send(own), "nothing pinned: refused");
+    lan.refuse(own);
+    lan.refuse("10.160.112.32:1".parse().unwrap());
+    let line = lan.summary();
+    assert!(
+        line.starts_with("lan_filter_closed refused_out=2 first_refused=10.160.112.32:58693 "),
+        "{line}"
+    );
+    assert!(line.contains(" range=false"), "{line}");
+    lan.close();
+    lan.close();
+}
