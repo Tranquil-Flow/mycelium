@@ -1184,6 +1184,7 @@ dependencies = [
  "api",
  "budgets",
  "ed25519-dalek 2.2.0",
+ "libc",
  "node-service",
  "objc2",
  "objc2-foundation",

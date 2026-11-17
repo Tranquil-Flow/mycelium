@@ -426,13 +426,7 @@ fn read_record(roots: &Roots) -> Result<Option<Rec>> {
     {
         return Err(untrusted());
     }
-    let mut bytes = Vec::new();
-    File::open(&path)
-        .and_then(|f| f.take(MAX_RECORD_BYTES + 1).read_to_end(&mut bytes))
-        .map_err(|_| untrusted())?;
-    if bytes.len() as u64 != meta.len() {
-        return Err(untrusted());
-    }
+    let bytes = read_checked(&path, &meta).ok_or_else(untrusted)?;
     let invalid = || Refusal("installation_record_invalid");
     let Ok(Value::Object(record)) = serde_json::from_slice::<Value>(&bytes) else {
         return Err(invalid());
@@ -441,6 +435,33 @@ fn read_record(roots: &Roots) -> Result<Option<Rec>> {
         return Err(invalid());
     }
     Ok(Some(record))
+}
+/// The record file whose path metadata `checked` was admitted, read through one descriptor (lane
+/// VL patch round 1, REVIEW-laneUI-astra VL-01): opened without following a link or waiting on a
+/// FIFO (`O_NOFOLLOW | O_NONBLOCK`), and read only when the opened object itself is that same
+/// single-link, owner-only regular file within the size bound, so a swap between the path check
+/// and the open is refused, never waited on. `None`: anything else.
+fn read_checked(path: &Path, checked: &fs::Metadata) -> Option<Vec<u8>> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+        .ok()?;
+    let opened = file.metadata().ok()?;
+    if !opened.file_type().is_file()
+        || (opened.dev(), opened.ino()) != (checked.dev(), checked.ino())
+        || opened.nlink() != 1
+        || opened.uid() != checked.uid()
+        || opened.mode() & 0o7777 != 0o600
+        || opened.len() > MAX_RECORD_BYTES
+    {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_RECORD_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (bytes.len() as u64 == opened.len()).then_some(bytes)
 }
 fn write_record(roots: &Roots, record: &Rec) -> Result<()> {
     let programs = roots.programs();
