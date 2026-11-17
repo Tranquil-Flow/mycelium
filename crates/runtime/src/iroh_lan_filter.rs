@@ -279,6 +279,8 @@ pub(crate) struct Admission {
     /// CONNECTION_CLOSE frames still reach admitted peers.
     closing: AtomicBool,
     refused: AtomicU64,
+    /// The first destination the pre-send filter refused (B4: the `lan_filter_closed` line).
+    first_refused: Mutex<Option<SocketAddr>>,
     /// Inbound datagrams the receive filter dropped (never reached iroh).
     dropped: AtomicU64,
     /// Remote addresses this admission let reach iroh's never-evicting
@@ -317,6 +319,7 @@ impl Admission {
                 .unwrap_or(Duration::ZERO),
             closing: AtomicBool::new(false),
             refused: AtomicU64::new(0),
+            first_refused: Mutex::new(None),
             dropped: AtomicU64::new(0),
             admitted: AtomicU64::new(0),
             #[cfg(test)]
@@ -721,7 +724,9 @@ impl Admission {
     /// Closing: pins stop releasing, and nothing stays learned (B14; a
     /// recycle takes its successor, learned hosts included, before this).
     pub(crate) fn close(&self) {
-        self.closing.store(true, Ordering::SeqCst);
+        if !self.closing.swap(true, Ordering::SeqCst) {
+            eprintln!("{}", self.summary());
+        }
         if let Ok(mut learned) = self.learned.write() {
             learned.clear();
         }
@@ -737,6 +742,32 @@ impl Admission {
     /// See the `admitted` field.
     pub(crate) fn admitted(&self) -> u64 {
         self.admitted.load(Ordering::SeqCst)
+    }
+    /// The pre-send filter refused a datagram to `dst` (counted; the first one is kept).
+    pub(crate) fn refuse(&self, dst: SocketAddr) {
+        self.refused.fetch_add(1, Ordering::SeqCst);
+        if let Ok(mut first) = self.first_refused.lock() {
+            first.get_or_insert(canonical(dst));
+        }
+    }
+    /// B4 (ledger rows 101-103): the line each direct-LAN endpoint prints once, when it closes, so
+    /// a run's log READS `refused_out` for every endpoint (a passing run prints 0) instead of
+    /// showing it only on a failed connect. Rows 101-102: the owner's sender refused every datagram
+    /// to its own contributor's member control and only the timeout lines said so.
+    pub(crate) fn summary(&self) -> String {
+        let first = self
+            .first_refused
+            .lock()
+            .ok()
+            .and_then(|first| *first)
+            .map_or_else(|| "none".to_owned(), |a| a.to_string());
+        format!(
+            "lan_filter_closed refused_out={} first_refused={first} dropped_in={} admitted={} range={}",
+            self.refused(),
+            self.dropped(),
+            self.admitted(),
+            self.policy.range_allowed(),
+        )
     }
 }
 /// Holds exact destination pins; releases them on drop (not while closing).
@@ -965,7 +996,7 @@ impl CustomSender for LanSender {
         };
         if !self.admission.may_send(dst) {
             // The pre-send filter: nothing reaches the socket.
-            self.admission.refused.fetch_add(1, Ordering::SeqCst);
+            self.admission.refuse(dst);
             return Poll::Ready(Ok(()));
         }
         let size = transmit
