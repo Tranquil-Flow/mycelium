@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Same-incarnation durable signed poll/ACK replay; uncertain native work is never retried.
 //! An unresolved journal of the SAME run is refused on reopen: this is not crash-resume
-//! recovery. One left by an earlier run is never replayed and does not block a new run.
+//! recovery. One left by an earlier run is never replayed and does not block a new run; it is
+//! first kept whole in a bounded private archive beside the live journal ([`ARCHIVE_KEEP`]).
 use crate::managed_carrier::TargetFence;
 use crate::{
     bootstrap_process::{BootstrapProcess, ProcessControl, TrustedBootstrap},
@@ -15,8 +16,8 @@ use protocol::{
 };
 use serde_json::{Value, json};
 use std::{
-    fs::{File, OpenOptions},
-    os::unix::fs::{MetadataExt, OpenOptionsExt},
+    fs::{self, File, OpenOptions},
+    os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     path::Path,
     time::{Duration, Instant},
 };
@@ -45,6 +46,82 @@ fn state_limit() -> Result<u64> {
         .bytes()
         .map(|b| b.get())
         .map_err(|_| "budget_unavailable")
+}
+/// The private directory beside `state.json` that keeps earlier runs' unresolved journals.
+pub const ARCHIVE_DIR: &str = "archive";
+/// v0.2's bound on that archive. v0.1.4 keeps every run's pump journal under its own
+/// `managed/<run_id>/pump` and never removes one (target_app.py:256, managed_runtime.py:5 @
+/// f4e366e9); v0.2 has one live journal per Mac and keeps, instead, at most this many earlier
+/// journals, and only UNRESOLVED ones (a non-null `outbound` or `pending`). The oldest (lowest
+/// sequence) is dropped first. Each file is within the pump state limit, so the archive holds at
+/// most `ARCHIVE_KEEP` x that limit.
+pub const ARCHIVE_KEEP: usize = 8;
+fn archive_failed<T>(_: T) -> &'static str {
+    "control_archive_failed"
+}
+/// Keep an earlier run's unresolved journal `prior` whole, durably and privately, before the
+/// live journal is replaced: `archive/<sequence, 20 digits>-<run digest>.json`, 0600 in a 0700
+/// directory. The signer-wide sequence never repeats, so a name is never reused; a retry after a
+/// later start failure finds its own identical copy. Nothing archived is ever read back, replayed
+/// or reconciled automatically.
+pub(crate) fn archive(root: &Path, prior: &Value, limit: u64) -> Result<()> {
+    let sequence = prior["sequence"].as_u64().ok_or("control_state_invalid")?;
+    let run = prior["binding"]["run_id"]
+        .as_str()
+        .ok_or("control_state_invalid")?;
+    let dir = root.join(ARCHIVE_DIR);
+    match fs::DirBuilder::new().mode(0o700).create(&dir) {
+        Ok(()) => File::open(root)
+            .and_then(|d| d.sync_all())
+            .map_err(archive_failed)?,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(archive_failed(error)),
+    }
+    let m = fs::symlink_metadata(&dir).map_err(archive_failed)?;
+    if !m.file_type().is_dir()
+        || m.uid() != rustix::process::geteuid().as_raw()
+        || m.mode() & 0o7777 != 0o700
+    {
+        return Err("control_archive_failed");
+    }
+    use sha2::Digest;
+    let digest: String = sha2::Sha256::digest(run.as_bytes())[..16]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let name = format!("{sequence:020}-{digest}.json");
+    let path = dir.join(&name);
+    match private_state::load(&path, limit).map_err(archive_failed)? {
+        None => private_state::store(&path, prior, limit).map_err(archive_failed)?,
+        Some(kept) if prior.as_object() == Some(&kept) => {}
+        Some(_) => return Err("control_archive_failed"),
+    }
+    // Bound: only this archive's own names count; the newest ARCHIVE_KEEP stay.
+    let mut kept: Vec<String> = fs::read_dir(&dir)
+        .map_err(archive_failed)?
+        .map(|entry| entry.map(|e| e.file_name().to_string_lossy().into_owned()))
+        .collect::<std::io::Result<_>>()
+        .map_err(archive_failed)?;
+    kept.retain(|n| {
+        n.len() == 58
+            && n.ends_with(".json")
+            && n.as_bytes()[20] == b'-'
+            && n[..20].bytes().all(|b| b.is_ascii_digit())
+            && n[21..53]
+                .bytes()
+                .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+    });
+    kept.sort();
+    let excess = kept.len().saturating_sub(ARCHIVE_KEEP);
+    for old in kept.iter().take(excess).filter(|n| **n != name) {
+        fs::remove_file(dir.join(old)).map_err(archive_failed)?;
+    }
+    if excess > 0 {
+        File::open(&dir)
+            .and_then(|d| d.sync_all())
+            .map_err(archive_failed)?;
+    }
+    Ok(())
 }
 /// Recoverable transport outcomes are explicit; arbitrary errors remain fatal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -180,7 +257,15 @@ impl<H: TargetHost> TargetPump<H> {
             {
                 return Err("control_restart_requires_reconciliation".into());
             }
-            prior["sequence"].as_u64().ok_or("control_state_invalid")?
+            let sequence = prior["sequence"].as_u64().ok_or("control_state_invalid")?;
+            // PR-ASTRA-01: an earlier run's unresolved evidence (binding, outbound, pending with
+            // any native response, stop receipt, failure, process, source) is the only record
+            // of what its native work returned when its ACK never committed. Keep it durably
+            // before the replacement below; it is never replayed and the sequence carries on.
+            if !prior["outbound"].is_null() || !prior["pending"].is_null() {
+                archive(root, &prior, limit)?;
+            }
+            sequence
         } else {
             0
         };
@@ -573,5 +658,114 @@ impl<H: TargetHost> Drop for TargetPump<H> {
         if let Err(code) = self.close() {
             eprintln!("target pump cleanup: {code}");
         }
+    }
+}
+#[cfg(test)]
+mod archive_tests {
+    //! PR-ASTRA-01: the earlier-run archive's own bound, identity and refusals (no helper needed).
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    fn root(tag: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "pump-archive-{tag}-{}-{}",
+            std::process::id(),
+            crate::app_host::hex(&crate::app_host::random(8).unwrap())
+        ));
+        fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+        root
+    }
+    fn journal(sequence: u64, run: &str) -> Value {
+        json!({"protocol":"mycelium.a13.api_target_control.v1","binding":{"run_id":run},
+            "sequence":sequence,"phase":"closed","outbound":{"statement":{"sequence":sequence}},
+            "pending":null,"failure":"managed_control_command_interrupted"})
+    }
+    fn names(root: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(root.join(ARCHIVE_DIR))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+    #[test]
+    fn the_archive_keeps_only_the_newest_bounded_number_of_journals() {
+        let root = root("bound");
+        let limit = state_limit().unwrap();
+        let total = ARCHIVE_KEEP as u64 + 3;
+        for sequence in 1..=total {
+            archive(&root, &journal(sequence, &format!("run-{sequence}")), limit).unwrap();
+        }
+        let names = names(&root);
+        assert_eq!(names.len(), ARCHIVE_KEEP, "{names:?}");
+        let first: u64 = names[0][..20].parse().unwrap();
+        assert_eq!(
+            first,
+            total - ARCHIVE_KEEP as u64 + 1,
+            "oldest dropped first"
+        );
+        for name in &names {
+            let path = root.join(ARCHIVE_DIR).join(name);
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o7777,
+                0o600
+            );
+            let sequence: u64 = name[..20].parse().unwrap();
+            let kept = private_state::load(&path, limit).unwrap().unwrap();
+            assert_eq!(
+                Value::Object(kept),
+                journal(sequence, &format!("run-{sequence}"))
+            );
+        }
+        let dir = fs::symlink_metadata(root.join(ARCHIVE_DIR)).unwrap();
+        assert_eq!(dir.permissions().mode() & 0o7777, 0o700);
+        fs::remove_dir_all(&root).unwrap();
+    }
+    #[test]
+    fn a_retried_archive_is_idempotent_and_a_different_journal_never_overwrites_it() {
+        let root = root("same");
+        let limit = state_limit().unwrap();
+        let first = journal(7, "run-a");
+        archive(&root, &first, limit).unwrap();
+        archive(&root, &first, limit).unwrap();
+        let mut changed = first.clone();
+        changed["failure"] = "changed".into();
+        assert_eq!(
+            archive(&root, &changed, limit),
+            Err("control_archive_failed")
+        );
+        let names = names(&root);
+        assert_eq!(names.len(), 1);
+        let kept = private_state::load(&root.join(ARCHIVE_DIR).join(&names[0]), limit)
+            .unwrap()
+            .unwrap();
+        assert_eq!(Value::Object(kept), first);
+        fs::remove_dir_all(&root).unwrap();
+    }
+    #[test]
+    fn a_foreign_or_open_archive_directory_is_refused() {
+        let root = root("foreign");
+        let limit = state_limit().unwrap();
+        let elsewhere = root.join("elsewhere");
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&elsewhere)
+            .unwrap();
+        std::os::unix::fs::symlink(&elsewhere, root.join(ARCHIVE_DIR)).unwrap();
+        assert_eq!(
+            archive(&root, &journal(1, "run-a"), limit),
+            Err("control_archive_failed")
+        );
+        assert_eq!(fs::read_dir(&elsewhere).unwrap().count(), 0);
+        fs::remove_file(root.join(ARCHIVE_DIR)).unwrap();
+        fs::DirBuilder::new()
+            .mode(0o755)
+            .create(root.join(ARCHIVE_DIR))
+            .unwrap();
+        fs::set_permissions(root.join(ARCHIVE_DIR), fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(
+            archive(&root, &journal(1, "run-a"), limit),
+            Err("control_archive_failed")
+        );
+        fs::remove_dir_all(&root).unwrap();
     }
 }
