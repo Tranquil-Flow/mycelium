@@ -474,3 +474,50 @@ fn a_joined_mac_binds_in_the_mode_the_owner_signed_and_names_a_foreign_relay() {
     assert_eq!(report["detail"], "work_network_relay_mismatch", "{report}");
     m.close();
 }
+/// Lane XB patch 2 (decision D3, REVIEW XB-02): in a run across networks a joined Mac checks
+/// ITS OWN relay connection (both work endpoints, bounded by the ready-address window) before it
+/// announces ready. With the relay unreachable it publishes no work endpoint and names
+/// `relay_unreachable` on its card and in its report to the owner, so the owner's run fails by
+/// that name instead of timing out on a Mac that looked available.
+#[cfg(feature = "desktop-shell")]
+#[test]
+fn a_joined_mac_whose_relay_is_unreachable_refuses_by_name_before_announcing_ready() {
+    use api::run_exchange::work_network::RunReach;
+    let mut m = ReachMember::new();
+    m.p.seed
+        .exchange
+        .set_work_network(RunReach::Relay("http://127.0.0.1:1".parse().unwrap()));
+    let started = std::time::Instant::now();
+    m.tick();
+    let elapsed = started.elapsed();
+    let (reach_status, card) = m.status();
+    assert_eq!(reach_status["error"], "relay_unreachable", "{reach_status}");
+    assert_eq!(reach_status["active"], serde_json::Value::Null, "{reach_status}");
+    assert_eq!(card["state"], "error", "{card}");
+    assert_eq!(card["detail"], "relay_unreachable", "{card}");
+    let report = m.report();
+    assert_eq!(
+        (report["state"].as_str(), report["detail"].as_str()),
+        (Some("error"), Some("relay_unreachable")),
+        "{report}"
+    );
+    assert!(
+        m.p.seed
+            .work_members
+            .get(
+                &m.p.seed.coordinator,
+                m.p.session.node_id(),
+                m.p.owner.public(),
+                "run-s4cb2",
+                "dep-s4cb2",
+                &|_| true,
+            )
+            .is_err(),
+        "no work endpoint is announced ready"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(15),
+        "bounded: {elapsed:?}"
+    );
+    m.close();
+}

@@ -481,8 +481,15 @@ impl Service {
             unprovable: false,
             across,
         };
+        // Across networks the start also waits for the relay (one ready-address window).
+        let start = duration(B::RouterClose)?
+            + if service.across {
+                duration(B::SidecarReadyAddressWindow)?
+            } else {
+                Duration::ZERO
+            };
         let (address, endpoint) = ready
-            .recv_timeout(duration(B::RouterClose)?)
+            .recv_timeout(start)
             .map_err(|_| "member_work_start_failed")??;
         service.carrier = Some(
             Identity::from_secret(&endpoint, &service.shared.signer.secret_bytes())
@@ -696,6 +703,28 @@ fn bind<'r>(
     }
     .map_err(|e| format!("member_work_bind_failed:{e:?}"))
 }
+/// Lane XB patch 2 (D3): across networks, both endpoints reach their relay within ONE
+/// ready-address window (`SidecarReadyAddressWindow`, the oracle's wait for a relay address);
+/// `Err(relay_unreachable)` otherwise. A same-network or loopback service needs no relay.
+fn relay_ready(
+    clock: &HostClock,
+    network: &NetworkChoice,
+    hosts: [&LoopbackHost<'_>; 2],
+) -> std::result::Result<(), &'static str> {
+    if !network
+        .0
+        .as_ref()
+        .is_some_and(|(_, policy)| policy.relay().is_some())
+    {
+        return Ok(());
+    }
+    let deadline = work::until(clock, B::SidecarReadyAddressWindow)
+        .map_err(|_| runtime::iroh_host::RELAY_UNREACHABLE)?;
+    for host in hosts {
+        host.relay_ready(clock, deadline)?;
+    }
+    Ok(())
+}
 fn drive(
     shared: Arc<Shared>,
     requests: mpsc::Receiver<Result<work::Operation>>,
@@ -718,6 +747,15 @@ fn drive(
     let outcome = (|| {
         let mut control = bind(&rt, &clock, &network, &[Channel::NodeControl])?;
         let outcome = (|| {
+            // Lane XB patch 2 (D3, XB-02): across networks this Mac announces ready only once
+            // BOTH work endpoints hold their relay; otherwise it refuses by name before anything
+            // is published (the starter reports `relay_unreachable` on the card and to the owner).
+            if let Err(code) = relay_ready(&clock, &network, [&carrier, &control]) {
+                ready
+                    .send(Err(code.to_owned()))
+                    .map_err(|_| "member_work_starter_gone")?;
+                return Err(code.to_owned());
+            }
             let address = control
                 .address()
                 .map_err(|_| "member_work_address_unavailable")?;
