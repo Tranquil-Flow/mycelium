@@ -426,3 +426,42 @@ fn drop_keeps_debt_and_exclusive_custody_can_resume() {
     receive.discard().unwrap();
     assert_eq!(f.charge(), 0);
 }
+
+/// Lane A, release blocker B12 (ledger row 96): the api lib test
+/// `member_refund_interrupted_before_ledger_rename_retains_charge_and_recovers` failed now and then
+/// with `member_shard_busy` at a resume after the previous holder was dropped. Mechanism: the
+/// custody lock is a `flock` on the lock file's open description; a child this process forks
+/// (every confined worker spawn runs a pre-exec loop over the whole descriptor table) holds a
+/// copy of EVERY descriptor from fork to exec, so a holder dropped in that window leaves its
+/// lock held by the child until the child execs. Deterministic model of that window: a child
+/// holding a copy of the dropped holder's lock description for a short while (`/bin/sleep 1`
+/// inherits it). The next holder must not be refused for a lock nobody in this process holds.
+#[test]
+fn a_lock_copy_still_held_by_a_forked_child_does_not_refuse_the_next_holder() {
+    use std::os::unix::fs::MetadataExt;
+    let f = Fixture::new();
+    let receive = f.begin("forked");
+    let lock = fs::canonicalize(f.root.join("chain-runs/forked/member-shard.lock")).unwrap();
+    let inode = fs::metadata(&lock).map(|m| m.ino()).unwrap();
+    // The holder's own descriptor of the lock (the description its flock lives on); opening
+    // `/dev/fd/N` duplicates that descriptor, as a fork does. (`/dev/fd` reports its own device
+    // and the file's inode.)
+    let held = (3..4096)
+        .find(|n| fs::metadata(format!("/dev/fd/{n}")).is_ok_and(|m| m.ino() == inode))
+        .expect("the holder's lock descriptor");
+    let copy = fs::File::open(format!("/dev/fd/{held}")).unwrap();
+    rustix::io::fcntl_setfd(&copy, rustix::io::FdFlags::empty()).unwrap();
+    let mut child = std::process::Command::new("/bin/sleep")
+        .arg("1")
+        .spawn()
+        .unwrap();
+    drop(copy);
+    drop(receive);
+    let resumed = f.resume("forked").map(drop).map_err(|e| e.0);
+    child.wait().unwrap();
+    assert_eq!(
+        resumed,
+        Ok(()),
+        "a lock only a forked child's inherited copy still held refused the next holder"
+    );
+}
