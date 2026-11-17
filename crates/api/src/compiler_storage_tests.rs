@@ -816,3 +816,31 @@ fn a_dead_runs_lock_copy_still_held_by_a_forked_child_does_not_keep_it_live() {
     child.wait().unwrap();
     assert_eq!(retirement.map_err(|e| e.0), Ok(vec!["dead".to_owned()]));
 }
+
+/// Lane A patch 2, A-01 (REVIEW-laneA-release-astra.md): a retirement pass has ONE bound for all
+/// its lock waiting, not the close allowance per live run while it holds the ledger. Eight live
+/// runs (the ledger's limit, `MAX_RETAINED_SHARD_RUNS`) are all kept live, and the pass answers
+/// within one allowance (plus slack for I/O), not about eight allowances (32 s).
+#[test]
+fn a_retirement_pass_over_eight_live_runs_waits_one_allowance_in_total() {
+    let f = Fixture::new();
+    let live: Vec<_> = (0..MAX_RETAINED_SHARD_RUNS)
+        .map(|n| compiled_run(&f, &format!("live-{n}"), 1_000_000))
+        .collect();
+    let allowance = budgets::BudgetId::RouterClose
+        .span(budgets::Entries::ZERO)
+        .unwrap()
+        .millis();
+    let started = std::time::Instant::now();
+    let retirement = compiler_inputs::retire_dead_runs(&f.root).unwrap();
+    let waited = started.elapsed();
+    assert!(retirement.retired.is_empty(), "{retirement:?}");
+    assert!(retirement.refused.is_empty(), "{retirement:?}");
+    assert_eq!(ledger_runs(&f.root).len(), MAX_RETAINED_SHARD_RUNS);
+    assert!(
+        waited < std::time::Duration::from_millis(allowance + 2_000),
+        "a pass over {} live runs waited {waited:?} (allowance {allowance} ms)",
+        live.len()
+    );
+    drop(live);
+}

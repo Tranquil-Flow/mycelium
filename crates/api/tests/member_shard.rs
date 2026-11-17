@@ -465,3 +465,84 @@ fn a_lock_copy_still_held_by_a_forked_child_does_not_refuse_the_next_holder() {
         "a lock only a forked child's inherited copy still held refused the next holder"
     );
 }
+
+/// Lane A patch 2, A-01 (REVIEW-laneA-release-astra.md): verification's last checkpoint can pass
+/// just before the operation's deadline; `complete` then waits for a busy storage ledger. The
+/// wait is bounded by the operation (its checkpoint), not by a fresh close allowance: an
+/// operation whose deadline passes while the ledger is still held is refused by its own name at
+/// about its deadline, and nothing is committed (the run stays `cleanup_required`, charged).
+fn held_ledger(f: &Fixture) -> fs::File {
+    let lock = fs::File::open(f.root.join("chain-runs/compiler-storage.lock")).unwrap();
+    lock.try_lock().unwrap();
+    lock
+}
+fn phase(f: &Fixture, run: &str) -> Value {
+    let v: Value = serde_json::from_slice(
+        &fs::read(f.root.join("chain-runs/compiler-storage.private.json")).unwrap(),
+    )
+    .unwrap();
+    v["entries"][run]["phase"].clone()
+}
+#[test]
+fn a_ledger_wait_ends_at_the_operations_deadline_without_committing() {
+    use std::time::{Duration, Instant};
+    let f = Fixture::new();
+    let mut receive = f.begin("deadline");
+    receive.write_chunk(0, &f.bytes).unwrap();
+    let ledger = held_ledger(&f);
+    let started = Instant::now();
+    let deadline = started + Duration::from_millis(300);
+    // The other holder lets go well after the deadline, inside a fresh close allowance.
+    let holder = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(1_500));
+        drop(ledger);
+    });
+    let got = receive.verify(&|| {
+        if Instant::now() >= deadline {
+            Err(api::compiler_inputs::Error("member_operation_deadline"))
+        } else {
+            Ok(())
+        }
+    });
+    let waited = started.elapsed();
+    holder.join().unwrap();
+    assert_eq!(got.map_err(|e| e.0), Err("member_operation_deadline"));
+    assert!(
+        waited < Duration::from_millis(1_000),
+        "the ledger wait outlived the operation's deadline: {waited:?}"
+    );
+    assert_eq!(phase(&f, "deadline"), "cleanup_required");
+    assert_eq!(f.charge(), f.bytes.len() as u64);
+}
+/// A-01, commit after the deadline: the ledger frees exactly as the operation's deadline passes
+/// (the holder marks the deadline passed, then lets go); the acquisition that follows re-checks
+/// the operation before committing and is refused, nothing committed.
+#[test]
+fn a_ledger_freed_after_the_deadline_is_not_committed() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    use std::time::Duration;
+    let f = Fixture::new();
+    let mut receive = f.begin("late");
+    receive.write_chunk(0, &f.bytes).unwrap();
+    let ledger = held_ledger(&f);
+    let passed = Arc::new(AtomicBool::new(false));
+    let mark = passed.clone();
+    let holder = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(200));
+        mark.store(true, Ordering::SeqCst);
+        drop(ledger);
+    });
+    let got = receive.verify(&|| {
+        if passed.load(Ordering::SeqCst) {
+            Err(api::compiler_inputs::Error("member_operation_deadline"))
+        } else {
+            Ok(())
+        }
+    });
+    holder.join().unwrap();
+    assert_eq!(got.map_err(|e| e.0), Err("member_operation_deadline"));
+    assert_eq!(phase(&f, "late"), "cleanup_required");
+}
