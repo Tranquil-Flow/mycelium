@@ -741,17 +741,22 @@ impl DesktopServices {
             // Lane XB patch 2 (XB-05, D1/D2): the window's network choices (this Mac's
             // portmapping preference; the owner's same/different-networks choice for its next run).
             ("POST", crate::packaged_work::reach::ACTION) => {
-                let owner = self.authority.as_ref().is_some_and(|authority| {
-                    authority
-                        .lock()
-                        .is_ok_and(|a| !a.target && a.owner_authority().is_some())
-                });
                 let body = body
                     .as_object()
                     .ok_or(PublicError::new(400, "invalid_request"))?;
+                // Lane XB patch 3 (REVIEW XB2-06): one action transaction, like every other
+                // control action: the role and run checks, the load and the save happen as one
+                // piece; no other change (nor Start) interleaves.
                 let value = self
-                    .network
-                    .reach_action(body, owner)
+                    .actions
+                    .exclusive(|| {
+                        let owner = self.authority.as_ref().is_some_and(|authority| {
+                            authority
+                                .lock()
+                                .is_ok_and(|a| !a.target && a.owner_authority().is_some())
+                        });
+                        self.network.reach_action(body, owner)
+                    })?
                     .map_err(|code| PublicError::new(400, code))?;
                 Self::json(value)
             }

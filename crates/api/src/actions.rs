@@ -301,6 +301,15 @@ impl<S: Backend> Control<S> {
             backend: Mutex::new(backend),
         }
     }
+    /// Lane XB patch 3 (REVIEW XB2-06): run `transaction` as one action transaction: no other
+    /// action of this control (Start included) runs while it does, as for every action above.
+    pub fn exclusive<T>(&self, transaction: impl FnOnce() -> T) -> Result<T, PublicError> {
+        let _held = self
+            .backend
+            .lock()
+            .map_err(|_| PublicError::new(503, "action_unavailable"))?;
+        Ok(transaction())
+    }
 }
 impl<S: Backend> desktop::Service for Control<S> {
     fn action(&self, path: &str, body: &Map<String, Value>) -> Result<Value, PublicError> {

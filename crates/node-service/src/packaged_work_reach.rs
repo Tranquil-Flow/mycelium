@@ -238,6 +238,10 @@ pub struct State {
     member_run: Mutex<Option<(String, bool)>>,
     active: Mutex<Option<Value>>,
     refusal: Mutex<Option<Refusal>>,
+    /// Test-only (REVIEW XB2-06): the window action's next run waits here between its load and
+    /// its save, so a test can overlap a second action with that window.
+    #[cfg(test)]
+    after_load: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 fn held<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
@@ -252,7 +256,14 @@ impl State {
             member_run: Mutex::new(None),
             active: Mutex::new(None),
             refusal: Mutex::new(None),
+            #[cfg(test)]
+            after_load: Mutex::new(None),
         }
+    }
+    /// Test-only (REVIEW XB2-06): hold the window action's next run between load and save.
+    #[cfg(test)]
+    pub(crate) fn hold_after_load(&self, hold: Box<dyn FnOnce() + Send>) {
+        *held(&self.after_load) = Some(hold);
     }
     /// The one relay this Mac's endpoints register at (Mycelium's unless a test overrides it).
     pub fn relay(&self) -> &Reach {
@@ -373,6 +384,14 @@ pub fn action(
     owner: bool,
 ) -> Result<Value, &'static str> {
     let mut stored = load(root).unwrap_or_default();
+    #[cfg(test)]
+    {
+        // Taken first: the hook never runs while the slot's lock is held.
+        let hold = held(&state.after_load).take();
+        if let Some(hold) = hold {
+            hold();
+        }
+    }
     match (body.len(), body.get("reach"), body.get("portmapping")) {
         (1, Some(reach), None) => {
             if !owner {
