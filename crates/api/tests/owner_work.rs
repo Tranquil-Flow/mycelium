@@ -221,6 +221,11 @@ struct TestMember {
     /// The offer it received and the controlled document it answered `prepare_native` with.
     offer: Option<Value>,
     proof: Option<Value>,
+    /// Lane B (B5/QV, ledger row 67): a serving member's prepared stage worker is live from its
+    /// successful `prepare_native` until `native_close` or the end of its `serve` (which closes
+    /// its compute), and while it is live the member refuses `discard` as the product member
+    /// does (`joined_shard/native.rs` `NativeShard::discard`: `joined_native_cleanup_required`).
+    worker: bool,
 }
 const NO_NATIVE: &str = "test_member_native_unavailable";
 const CANCELLED: &str = "member_operation_cancelled";
@@ -254,11 +259,28 @@ impl TestMember {
                 }
                 // CONTROLLED, not a resident proof: only the test's controlled admission
                 // reads it; the product's proof verifier never sees it.
+                if let Some(code) = self.serving.as_ref().and_then(|s| s.prepare_refused) {
+                    return Err(refused(code));
+                }
                 let proof =
                     json!({"controlled_proof":self.session.node_id(),"worker_pid":CONTROLLED_PID});
                 self.proof = Some(proof.clone());
+                self.worker = true;
                 Ok(proof)
             }
+            // The member's `native_close` (`joined_member/work.rs` `Work::native_close`): closes
+            // the prepared worker; a close that fails keeps it.
+            Some("native_close") => {
+                if !self.worker {
+                    return Err(refused("joined_native_not_prepared"));
+                }
+                if let Some(code) = self.serving.as_ref().and_then(|s| s.close_refused) {
+                    return Err(refused(code));
+                }
+                self.worker = false;
+                Ok(json!({"controlled_close":true}))
+            }
+            Some("discard") if self.worker => Err(refused("joined_native_cleanup_required")),
             Some("discard") => {
                 self.seen
                     .lock()
@@ -426,6 +448,8 @@ impl TestMember {
                 }
                 "serve" => {
                     let served = self.serve_route(host.as_ref(), &rt, &clock, &command, cancelled);
+                    // The member's serve ends with its compute closed (EP2).
+                    self.worker = false;
                     if let Some(mut h) = host.take() {
                         h.close(&clock, until(B::RouterClose)).unwrap();
                     }
@@ -561,6 +585,11 @@ struct Serving {
     /// spent, the command runs, then checked AGAIN, so the command that spends the last one
     /// itself answers `joined_native_consent_exhausted` (its output discarded).
     commands: Option<Arc<AtomicU64>>,
+    /// Lane B (B5/QV): this stage refuses its `prepare_native` with this code (after the other
+    /// stage may have prepared).
+    prepare_refused: Option<&'static str>,
+    /// Lane B (B5/QV): this stage's `native_close` fails with this code (its worker stays live).
+    close_refused: Option<&'static str>,
 }
 impl Serving {
     /// `NativeShard::check` before a command: a spent grant refuses it.
@@ -868,6 +897,7 @@ fn swarm(n: usize) -> Swarm {
             serving: None,
             offer: None,
             proof: None,
+            worker: false,
         };
         let registration =
             joined_shard::register(&session, &member.signer, &member.carrier(), app_host::now())
@@ -1129,6 +1159,96 @@ fn a_member_that_never_answers_its_discard_leaves_cleanup_unproven_within_the_st
         ended.duration_since(asked)
     );
     work.teardown().unwrap();
+}
+
+/// Lane B, B5/QV: the code a test stage refuses its native prepare with.
+const PREPARE_REFUSED: &str = "test_stage_prepare_refused";
+/// Lane B, B5/QV: a publish whose second stage refuses its prepare after the first stage prepared
+/// its worker (scripts per stage); returns the settled workflow state and the members.
+fn publish_failed_after_a_prepare(first: Serving) -> (OwnerWork, Value, Vec<Watched>) {
+    let mut s = swarm(2);
+    let plan = s.serving_plan();
+    let scripts = vec![
+        first,
+        Serving {
+            prepare_refused: Some(PREPARE_REFUSED),
+            ..Serving::default()
+        },
+    ];
+    let (mut work, members) = s.serving(plan, scripts);
+    let started = work.start_serving(&json!({"max_wall_seconds":60}));
+    assert!(started.is_ok(), "{started:?}");
+    let state = work.wait_state(settled, span(B::WorkerStartup) + stop_allowance(60, 2));
+    assert_eq!(state["state"], "failed", "{state}");
+    assert_eq!(state["error_code"], PREPARE_REFUSED, "{state}");
+    (work, state, members)
+}
+fn position(commands: &[String], name: &str) -> Option<usize> {
+    commands.iter().position(|c| c == name)
+}
+
+/// Proves: B5/QV (b) (ledger rows 67, 69 F1, 70 FLK-04; owner ruling 15 Nov, row 57). A publish
+/// that fails after one stage prepared its native worker (the other stage refuses its prepare by
+/// name) must CLOSE that stage: the owner sends the member's own `native_close`
+/// (`joined_member/work.rs` `Work::native_close`) before its `discard`, because a member refuses
+/// `discard` while a prepared worker is live (`joined_shard/native.rs` `NativeShard::discard`:
+/// `joined_native_cleanup_required`). With `discard` alone the worker kept running and the run's
+/// cleanup stayed unproven (D8). A stage that never prepared gets no close.
+#[test]
+fn a_publish_that_fails_after_a_stage_prepared_closes_that_stage_before_its_discard() {
+    let (mut work, state, members) = publish_failed_after_a_prepare(Serving::default());
+    let (first, second) = (
+        members[0].0.lock().unwrap().commands.clone(),
+        members[1].0.lock().unwrap().commands.clone(),
+    );
+    eprintln!("B5_QV_CLOSE first={first:?} second={second:?} state={state}");
+    let (close, discard) = (position(&first, "native_close"), position(&first, "discard"));
+    assert!(
+        close.is_some() && close < discard,
+        "the prepared stage is closed before its discard: {first:?}"
+    );
+    assert_eq!(position(&second, "native_close"), None, "{second:?}");
+    assert!(position(&second, "discard").is_some(), "{second:?}");
+    assert_eq!(
+        state["cleanup_error"],
+        Value::Null,
+        "the closed stage's discard proves its cleanup: {state}"
+    );
+    work.teardown().unwrap();
+}
+
+/// Proves: B5/QV (b): the run's verdict reflects whether that close was proven. The prepared
+/// stage's `native_close` fails (its worker stays live), so its `discard` is refused and the
+/// run's cleanup is `owner_target_cleanup_unproven`, with the close's own code on the member's
+/// row; never a discard that pretends otherwise.
+#[test]
+fn a_prepared_stage_whose_close_fails_leaves_the_runs_cleanup_unproven_by_name() {
+    let (mut work, state, members) = publish_failed_after_a_prepare(Serving {
+        close_refused: Some("test_native_close_refused"),
+        ..Serving::default()
+    });
+    let first = members[0].0.lock().unwrap().commands.clone();
+    eprintln!("B5_QV_CLOSE_FAILED first={first:?} state={state}");
+    assert_eq!(
+        state["cleanup_error"], "owner_target_cleanup_unproven",
+        "{state}"
+    );
+    let node = s_node(&members, 0, &state);
+    let row = state["member_cleanup"]
+        .as_array()
+        .and_then(|rows| rows.iter().find(|r| r["node_id"] == node.as_str()))
+        .cloned()
+        .unwrap_or(Value::Null);
+    assert_eq!(
+        (&row["discarded"], &row["code"], &row["native_close"]),
+        (
+            &json!(false),
+            &json!("joined_native_cleanup_required"),
+            &json!("test_native_close_refused")
+        ),
+        "{state}"
+    );
+    drop(work.teardown());
 }
 
 /// What a Stop answered: teardown's result and the final workflow state.
