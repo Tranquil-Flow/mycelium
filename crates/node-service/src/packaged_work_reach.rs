@@ -215,17 +215,27 @@ pub fn active_document(choice: &NetworkChoice) -> Value {
     }
 }
 /// Lane XB patch 3 (REVIEW XB2-04): every live connection of this Mac to another Mac, sampled
-/// now (`runtime::iroh_paths`): `{remote, direction, reach, path}`, `path` = `relay` / `direct` /
-/// `none` as iroh selected it at this moment.
-pub fn live_paths() -> Value {
+/// now (`runtime::iroh_paths`): `{remote, direction, reach, channel, path}`, `path` = `relay` /
+/// `direct` / `none` as iroh selected it at this moment. Patch 4 (REVIEW XB3-03): only the
+/// connections registered since `from` (the active run's start mark), none without a run.
+pub fn live_paths(from: Option<u64>) -> Value {
+    let Some(from) = from else {
+        return json!([]);
+    };
     runtime::iroh_paths::snapshot()
         .into_iter()
+        .filter(|sample| sample.id >= from)
         .map(|sample| {
             json!({"remote": sample.remote, "direction": sample.direction,
-                "reach": sample.reach, "path": sample.path})
+                "reach": sample.reach, "channel": sample.channel, "path": sample.path})
         })
         .collect()
 }
+/// Patch 4 (REVIEW XB3-03): what `status.network_reach.paths` covers, said in status itself.
+pub const PATHS_COVER: &str = "this Mac's iroh connections to another Mac opened or accepted \
+     since the active run began: member control (node_control), model bytes (artifact_chunk) and \
+     stage traffic (router); the owner's relay link to the joined Macs (Cloudflare) is not one of \
+     them";
 /// A named refusal of a joined Mac's work start, kept for the run it refused.
 #[derive(Clone, Debug)]
 struct Refusal {
@@ -240,6 +250,9 @@ pub struct State {
     run: Mutex<Option<Result<(RunReach, bool), &'static str>>>,
     /// Joined Mac: the run whose work it first started, with its portmapping then (XB2-05).
     member_run: Mutex<Option<(String, bool)>>,
+    /// Patch 4 (REVIEW XB3-03): the active run (owner: `""`; joined Mac: its run id) and the
+    /// path registry's mark at its start; status lists only connections registered since.
+    paths_from: Mutex<Option<(String, u64)>>,
     /// Lane XB patch 4 (REVIEW XB3-01): the one transaction over this Mac's preference file and
     /// the owner run's snapshot of it. The window's action holds it from its load to its save
     /// (its run check included) and the runner's [`State::begin_run`] from its read to the
@@ -265,6 +278,7 @@ impl State {
             relay,
             run: Mutex::new(None),
             member_run: Mutex::new(None),
+            paths_from: Mutex::new(None),
             preferences: Mutex::new(()),
             active: Mutex::new(None),
             refusal: Mutex::new(None),
@@ -292,6 +306,7 @@ impl State {
             load(root).and_then(|stored| Ok((run_reach(stored, &self.relay)?, stored.portmapping)));
         *held(&self.run) = Some(choice.clone());
         *held(&self.active) = None;
+        *held(&self.paths_from) = Some((String::new(), runtime::iroh_paths::mark()));
         choice.map(|(choice, _)| choice)
     }
     /// Owner: the active run's choice and its frozen portmapping; `None` without a run.
@@ -311,6 +326,14 @@ impl State {
         *frozen = Some((run_id.to_owned(), on));
         Ok(on)
     }
+    /// Joined Mac (patch 4, REVIEW XB3-03): the run `run_id` announced its work; its first
+    /// announcement starts this Mac's path window (status lists connections since then).
+    pub fn member_paths(&self, run_id: &str) {
+        let mut from = held(&self.paths_from);
+        if from.as_ref().is_none_or(|(run, _)| run != run_id) {
+            *from = Some((run_id.to_owned(), runtime::iroh_paths::mark()));
+        }
+    }
     /// Owner: the active run's choice; `None` without a run.
     pub fn run_choice(&self) -> Option<Result<RunReach, &'static str>> {
         held(&self.run)
@@ -321,6 +344,7 @@ impl State {
     pub fn end_run(&self) {
         *held(&self.run) = None;
         *held(&self.active) = None;
+        *held(&self.paths_from) = None;
     }
     /// The endpoints of a run or a work service bound `choice` (status's `active`).
     pub fn activate(&self, choice: &NetworkChoice) {
@@ -385,7 +409,8 @@ impl State {
             "portmapping": stored.map(|c| c.portmapping).unwrap_or(false),
             "relay_url": self.relay.relay_url().ok().map(|u| u.to_string()),
             "error": error,
-            "paths": live_paths(),
+            "paths": live_paths(held(&self.paths_from).as_ref().map(|(_, mark)| *mark)),
+            "paths_cover": PATHS_COVER,
         })
     }
 }
@@ -743,6 +768,7 @@ mod tests {
         use transport::Channel;
         let dir = root("paths");
         let state = State::new(Reach::Shipped);
+        state.begin_run(&dir).unwrap();
         let paths = |state: &State| state.status(&dir)["paths"].clone();
         let has = |paths: &Value, remote: &str, path: &str| {
             paths.as_array().is_some_and(|all| {
@@ -754,6 +780,7 @@ mod tests {
             "relay-double".into(),
             "out",
             "relay",
+            "router",
             Box::new(|| Some("relay")),
         );
         let now = paths(&state);
@@ -761,7 +788,7 @@ mod tests {
         assert!(
             now.as_array().unwrap().iter().any(|p| p
                 == &json!({"remote": "relay-double", "direction": "out", "reach": "relay",
-                    "path": "relay"})),
+                    "channel": "router", "path": "relay"})),
             "{now}"
         );
         drop(relayed);
@@ -1009,6 +1036,65 @@ mod tests {
             state.run_binding(),
             Some(Ok((RunReach::Relay(mycelium()), true)))
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+    /// REVIEW XB3-03: status lists only the ACTIVE run's connections (registered since its
+    /// start), each with its channel; nothing without a run; a joined Mac's window starts at its
+    /// run's first work announcement and a new run starts a new one. What is covered is said in
+    /// status (`paths_cover`).
+    #[test]
+    fn status_lists_only_the_active_runs_connections_with_their_channel() {
+        use runtime::iroh_paths::register;
+        let dir = root("paths-scope");
+        let paths = |state: &State| state.status(&dir)["paths"].clone();
+        let has = |paths: &Value, remote: &str| {
+            paths
+                .as_array()
+                .is_some_and(|all| all.iter().any(|p| p["remote"] == remote))
+        };
+        let owner = State::new(Reach::Shipped);
+        let before = register(
+            "xb303-before".into(),
+            "out",
+            "relay",
+            "node_control",
+            Box::new(|| Some("direct")),
+        );
+        assert!(!has(&paths(&owner), "xb303-before"), "no run: no paths");
+        owner.begin_run(&dir).unwrap();
+        let during = register(
+            "xb303-during".into(),
+            "out",
+            "relay",
+            "node_control",
+            Box::new(|| Some("relay")),
+        );
+        let now = paths(&owner);
+        assert!(!has(&now, "xb303-before"), "an earlier connection: {now}");
+        assert!(
+            now.as_array().unwrap().iter().any(|p| p
+                == &json!({"remote": "xb303-during", "direction": "out", "reach": "relay",
+                    "channel": "node_control", "path": "relay"})),
+            "{now}"
+        );
+        assert_eq!(owner.status(&dir)["paths_cover"], PATHS_COVER);
+        owner.end_run();
+        assert!(!has(&paths(&owner), "xb303-during"), "the run ended");
+        // A joined Mac: from its run's first announcement; the same run keeps its window.
+        let member = State::new(Reach::Shipped);
+        member.member_paths("run-1");
+        let first = register(
+            "xb303-run1".into(),
+            "in",
+            "relay",
+            "router",
+            Box::new(|| Some("direct")),
+        );
+        member.member_paths("run-1");
+        assert!(has(&paths(&member), "xb303-run1"));
+        member.member_paths("run-2");
+        assert!(!has(&paths(&member), "xb303-run1"), "the next run's window");
+        drop((before, during, first));
         std::fs::remove_dir_all(&dir).ok();
     }
     fn body_of(v: Value) -> Map<String, Value> {

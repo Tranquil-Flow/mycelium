@@ -610,3 +610,128 @@ fn an_unadmitted_inbound_peer_gets_no_application_stream_and_is_counted() {
     close(&mut intruder, &clock);
     close(&mut server, &clock);
 }
+
+/// Lane XB patch 4 (REVIEW XB3-03): the owner's member-control call (`NodeControlClient`, what
+/// `RemoteMember` uses) dials through the host's endpoint itself; its connection is registered
+/// too: while the call is open (the member holds its answer) the owner's side reports an `out`
+/// entry on the `node_control` channel with its live path, and the entry leaves once the call
+/// has closed its connection. Two endpoints across networks on loopback, dead relay.
+#[test]
+fn a_member_control_call_reports_its_path_while_open_and_leaves_after() {
+    use runtime::{
+        iroh_control::{ControlRequest, NodeControlClient},
+        iroh_paths::snapshot,
+    };
+    let rt = runtime();
+    let clock = Mono(Instant::now());
+    let (member_key, owner_key) = (SecretKey::generate(), SecretKey::generate());
+    let member_short: String = member_key.public().to_string().chars().take(12).collect();
+    // The owner's side of its connections to the member.
+    let owner_side = |member: &str| {
+        snapshot()
+            .into_iter()
+            .filter(|s| s.remote == member && s.direction == "out")
+            .collect::<Vec<_>>()
+    };
+    let control_host = |key: &SecretKey| {
+        LoopbackHost::bind_lan(
+            &rt,
+            &clock,
+            deadline(&clock, B::RouterClose),
+            key.clone(),
+            &[Channel::NodeControl],
+            LOOPBACK,
+            across(),
+        )
+        .unwrap()
+    };
+    let mut member = control_host(&member_key);
+    member.admit_peer_ids(&[owner_key.public()]).unwrap();
+    let address = member.address().unwrap();
+    let signed = EndpointAddr::from_parts(
+        address.id,
+        address.ip_addrs().map(|s| iroh::TransportAddr::Ip(*s)),
+    );
+    let mut owner = control_host(&owner_key);
+    owner.admit_peer_ids(&[member_key.public()]).unwrap();
+    let fence = transport::ConnectionFence {
+        endpoint_id: *member_key.public().as_bytes(),
+        local_generation: 1,
+        remote_generation: 1,
+    };
+    let (_authority_tx, mut authority) = tokio::sync::watch::channel(Some(fence));
+    let control = NodeControlClient::new(&owner, &clock, Entries::new(1)).unwrap();
+    let (release, released) = tokio::sync::oneshot::channel::<()>();
+    let (seen, answer) = std::thread::scope(|scope| {
+        let serving = scope.spawn(|| {
+            let connection = member
+                .accept(&clock, deadline(&clock, B::SidecarLocalHandshake))
+                .unwrap();
+            rt.block_on(async {
+                let (mut send, mut recv) = connection.accept_bi().await.unwrap();
+                let command = recv.read_to_end(4096).await.unwrap();
+                // Hold the answer until the owner's side was sampled (bounded by the test).
+                drop(tokio::time::timeout(std::time::Duration::from_secs(10), released).await);
+                // The call may already have ended (no answer is expected then).
+                if send.write_all(&command).await.is_ok() {
+                    send.finish().unwrap_or_default();
+                }
+                connection.closed().await;
+            });
+        });
+        let short = member_short.clone();
+        let sampler = scope.spawn(move || {
+            let began = Instant::now();
+            let seen = loop {
+                let now = owner_side(&short);
+                // Bounded well inside the call's own deadline (`RouterClose`, 4 s).
+                if now.iter().any(|s| s.path != "none") || began.elapsed().as_millis() >= 2_000 {
+                    break now;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            };
+            release.send(()).unwrap_or_default();
+            seen
+        });
+        let answer = control.call(
+            ControlRequest {
+                peer: &signed,
+                fence,
+                command: b"xb3-03-control",
+                deadline: deadline(&clock, B::RouterClose),
+            },
+            &mut authority,
+        );
+        let seen = sampler.join().unwrap();
+        serving.join().unwrap();
+        (seen, answer)
+    });
+    assert_eq!(
+        seen.len(),
+        1,
+        "the owner's control dial is not in the path registry: {seen:?}"
+    );
+    assert_eq!(
+        (
+            seen[0].direction,
+            seen[0].reach,
+            seen[0].channel,
+            seen[0].path
+        ),
+        ("out", "relay", "node_control", "direct"),
+        "{seen:?}"
+    );
+    assert_eq!(answer.as_deref(), Ok(&b"xb3-03-control"[..]));
+    let began = Instant::now();
+    while !owner_side(&member_short).is_empty() && began.elapsed().as_secs() < 5 {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    assert!(
+        owner_side(&member_short).is_empty(),
+        "{:?}",
+        owner_side(&member_short)
+    );
+    drop(control);
+    close(&mut owner, &clock);
+    close(&mut member, &clock);
+}

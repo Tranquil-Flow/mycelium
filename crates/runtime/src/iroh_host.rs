@@ -1465,7 +1465,9 @@ impl<'a> LoopbackHost<'a> {
     /// `l11_path:<relay|direct|none>` when first seen and on every change, `l11_path_closed:<last>`
     /// when it ends (or this host closes). Each route epoch is one connection, so a run's log has
     /// one line per epoch at least. Loopback-only hosts are not another Mac's: nothing is kept.
-    fn observe_path(&self, connection: &Connection, direction: &'static str) {
+    /// Patch 4 (REVIEW XB3-03): also called by the owner's member-control dial
+    /// (`iroh_control::NodeControlClient`), which connects through this host's endpoint itself.
+    pub(crate) fn observe_path(&self, connection: &Connection, direction: &'static str) {
         let reach = match self.mode {
             NetworkMode::CrossNetwork => "relay",
             NetworkMode::DirectLan => "same_network",
@@ -1480,12 +1482,14 @@ impl<'a> LoopbackHost<'a> {
             .chars()
             .take(12)
             .collect();
+        let channel = crate::iroh_paths::channel_name(connection.alpn());
         let weak = connection.weak_handle();
         let sampled = weak.clone();
         let registration = crate::iroh_paths::register(
             remote.clone(),
             direction,
             reach,
+            channel,
             Box::new(move || {
                 sampled
                     .upgrade()
@@ -1493,7 +1497,8 @@ impl<'a> LoopbackHost<'a> {
                     .map(|c| crate::iroh_paths::path_kind(&c))
             }),
         );
-        let mut log = crate::iroh_paths::PathLog::new(remote, direction, reach, registration);
+        let mut log =
+            crate::iroh_paths::PathLog::new(remote, direction, reach, channel, registration);
         let task = self.runtime.spawn(async move {
             let closed = weak.closed();
             tokio::pin!(closed);

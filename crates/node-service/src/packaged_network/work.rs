@@ -71,6 +71,13 @@ impl Network {
     ) -> Result<crate::packaged_work::NetworkChoice, &'static str> {
         use crate::packaged_work::reach;
         use api::run_exchange::work_network::RunReach;
+        // Lane XB patch 4 (REVIEW XB3-03): this run's path window starts with its first work
+        // announcement (status lists this run's connections only).
+        self.reach.member_paths(
+            announcement.announcement()["run_id"]
+                .as_str()
+                .unwrap_or_default(),
+        );
         let signed = RunReach::from_announcement(announcement)?;
         let portmapping = match signed {
             RunReach::SameNetwork => false,

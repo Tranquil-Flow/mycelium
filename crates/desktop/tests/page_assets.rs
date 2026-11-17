@@ -373,7 +373,10 @@ fn the_network_section_shows_live_paths_and_portmapping_honestly() {
     let section = network_section();
     for needed in [
         ".paths",
-        "Live paths now",
+        "Live paths of this run now",
+        "p.channel",
+        "model data",
+        "stage traffic",
         "through the Mycelium relay",
         "direct",
         "portmapping requested",

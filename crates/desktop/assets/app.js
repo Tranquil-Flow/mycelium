@@ -727,7 +727,8 @@ for (const trigger of document.querySelectorAll('summary > button.disclosure-btn
     const paths = Array.isArray(reach.paths) ? reach.paths : [];
     if (!paths.length) return reach.active ? 'No connection to another Mac right now.' : '';
     const kind = (p) => p.path === 'relay' ? 'through the Mycelium relay' : p.path === 'direct' ? 'direct' : 'no path chosen yet';
-    return `Live paths now: ${paths.map((p) => `${kind(p)} (${p.direction === 'in' ? 'from' : 'to'} ${p.remote}…)`).join('; ')}.`;
+    const what = (p) => ({node_control: 'control', artifact_chunk: 'model data', router: 'stage traffic'})[p.channel] || 'connection';
+    return `Live paths of this run now: ${paths.map((p) => `${kind(p)} (${what(p)}, ${p.direction === 'in' ? 'from' : 'to'} ${p.remote}…)`).join('; ')}.`;
   }
   function render(status) {
     const reach = status.network_reach; const role = status.installation_role;

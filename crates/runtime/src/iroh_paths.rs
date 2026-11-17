@@ -11,6 +11,12 @@
 //! epoch is one) when its path is first seen, on every change and when it closes, so a run has
 //! independent path evidence in its log.
 //!
+//! Patch 4 (REVIEW XB3-03): every entry names its channel (`node_control`: the owner's member
+//! control calls and the member's control server; `artifact_chunk`: model bytes; `router`: stage
+//! traffic), and the owner's member-control dial (`NodeControlClient`) is registered too. Each
+//! entry carries its registration number, so a reader can keep only the connections opened since
+//! a point ([`mark`]): the packaged status shows the ACTIVE run's connections only.
+//!
 //! Portmapping is NOT evidence here: iroh 1.0.2 exposes a granted mapping only through its
 //! `metrics` feature, which this build does not enable; status says "requested, outcome not
 //! observable in this build" instead of claiming a mapping.
@@ -28,6 +34,7 @@ struct Entry {
     remote: String,
     direction: &'static str,
     reach: &'static str,
+    channel: &'static str,
     sample: Sampler,
 }
 
@@ -37,12 +44,16 @@ static NEXT: AtomicU64 = AtomicU64::new(1);
 /// One live connection as sampled now.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PathSample {
+    /// The registration number (increasing): entries registered after [`mark`] have `id >=` it.
+    pub id: u64,
     /// The peer's endpoint id (short form).
     pub remote: String,
     /// `out` (this Mac dialled) or `in` (this Mac accepted).
     pub direction: &'static str,
     /// The run's reach the endpoint was bound in: `same_network` or `relay`.
     pub reach: &'static str,
+    /// `node_control`, `artifact_chunk`, `router` (or `other`): see [`channel_name`].
+    pub channel: &'static str,
     /// `relay`, `direct` or `none`.
     pub path: &'static str,
 }
@@ -67,6 +78,7 @@ pub fn register(
     remote: String,
     direction: &'static str,
     reach: &'static str,
+    channel: &'static str,
     sample: Sampler,
 ) -> Registration {
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
@@ -75,9 +87,30 @@ pub fn register(
         remote,
         direction,
         reach,
+        channel,
         sample,
     });
     Registration(id)
+}
+
+/// The registration number the next connection gets: every connection registered from now on has
+/// `id >=` this (patch 4: a run keeps the mark of its start and shows only its own connections).
+pub fn mark() -> u64 {
+    NEXT.load(Ordering::Relaxed)
+}
+
+/// The name of the channel a connection's ALPN carries: `router` (stage traffic), `node_control`
+/// (member control), `artifact_chunk` (model bytes), else `other`.
+pub fn channel_name(alpn: &[u8]) -> &'static str {
+    use transport::Channel;
+    [
+        (Channel::Router, "router"),
+        (Channel::NodeControl, "node_control"),
+        (Channel::ArtifactChunk, "artifact_chunk"),
+    ]
+    .into_iter()
+    .find(|(channel, _)| channel.alpn() == alpn)
+    .map_or("other", |(_, name)| name)
 }
 
 /// Every registered connection, sampled now; connections that are gone are dropped.
@@ -87,9 +120,11 @@ pub fn snapshot() -> Vec<PathSample> {
     entries.retain(|entry| match (entry.sample)() {
         Some(path) => {
             live.push(PathSample {
+                id: entry.id,
                 remote: entry.remote.clone(),
                 direction: entry.direction,
                 reach: entry.reach,
+                channel: entry.channel,
                 path,
             });
             true
@@ -107,6 +142,7 @@ pub struct PathLog {
     remote: String,
     direction: &'static str,
     reach: &'static str,
+    channel: &'static str,
     last: Option<&'static str>,
     _registration: Registration,
 }
@@ -115,12 +151,14 @@ impl PathLog {
         remote: String,
         direction: &'static str,
         reach: &'static str,
+        channel: &'static str,
         registration: Registration,
     ) -> Self {
         Self {
             remote,
             direction,
             reach,
+            channel,
             last: None,
             _registration: registration,
         }
@@ -129,8 +167,8 @@ impl PathLog {
     pub fn saw(&mut self, path: &'static str) {
         if self.last != Some(path) {
             eprintln!(
-                "l11_path:{path} remote={} dir={} reach={}",
-                self.remote, self.direction, self.reach
+                "l11_path:{path} remote={} dir={} reach={} channel={}",
+                self.remote, self.direction, self.reach, self.channel
             );
             self.last = Some(path);
         }
@@ -139,11 +177,12 @@ impl PathLog {
 impl Drop for PathLog {
     fn drop(&mut self) {
         eprintln!(
-            "l11_path_closed:{} remote={} dir={} reach={}",
+            "l11_path_closed:{} remote={} dir={} reach={} channel={}",
             self.last.unwrap_or("none"),
             self.remote,
             self.direction,
-            self.reach
+            self.reach,
+            self.channel
         );
     }
 }
