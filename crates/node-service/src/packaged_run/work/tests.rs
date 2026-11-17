@@ -9,6 +9,7 @@ mod local_network;
 mod quit_stopped;
 mod quit_verified;
 mod regressions;
+mod restart_contributor;
 mod retire;
 mod serving_q;
 mod serving_r2;
