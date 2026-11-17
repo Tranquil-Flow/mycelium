@@ -135,6 +135,40 @@ fn packaged_owner_keeps_its_swarm_while_its_seed_cannot_reopen() {
     std::fs::remove_dir_all(&state).unwrap_or_default();
 }
 
+/// A seed whose database is busy at launch (another writer holds it past the busy timeout) is not
+/// a lost identity: only `seed_authority_key_missing` and `authority_tls_identity_missing` are
+/// refused for the process (REVIEW-laneSK-astra SK-01). Once the writer is gone, Stop then Start
+/// brings the same swarm's seed back in this process, as trunk 3baedc02 did.
+#[test]
+fn packaged_owner_reopens_its_seed_once_a_busy_database_is_free() {
+    let state = created_owner("busy-seed");
+    let record = std::fs::read(private(&state).join("owner-swarm.json")).unwrap();
+    let writer = rusqlite::Connection::open(private(&state).join("seed-rs/seed.sqlite")).unwrap();
+    writer.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let owner = launch(&state);
+    writer.execute_batch("ROLLBACK").unwrap();
+    drop(writer);
+    assert_eq!(owner.post("/api/stop", json!({})).0, 200);
+    let started = owner.post("/api/start", json!({}));
+    assert_eq!(started.0, 200, "{}", started.1);
+    let status = owner.status();
+    assert_eq!(
+        (
+            &status["running"],
+            &status["authority"]["swarm_created"],
+            &status["authority"]["membership_state"],
+        ),
+        (&json!(true), &json!(true), &json!("current")),
+        "{status}"
+    );
+    assert_eq!(
+        std::fs::read(private(&state).join("owner-swarm.json")).unwrap(),
+        record
+    );
+    assert_eq!(owner.quit(), Ok(Poll::Verified));
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
+
 /// A fresh owner (no swarm, nothing prepared) stops and starts again: `/api/stop` then `/api/start`
 /// answer 200 (app.py:1626-1640; the partial-state guard does not fire, REVIEW-laneS1R M6).
 #[test]
