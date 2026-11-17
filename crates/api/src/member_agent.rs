@@ -1851,4 +1851,44 @@ mod settle_tests {
         assert!(held(&host));
         assert_eq!(locked(&script).unwrap().len(), 1, "not closed");
     }
+    #[test]
+    fn a_same_run_worker_of_another_deployment_or_incarnation_is_left_alone() {
+        // PR-ASTRA-05: only a finished worker of a DIFFERENT, validated run_id is settled. A
+        // worker of the same run under another deployment or member incarnation, or a scope
+        // without a usable run_id, keeps blocking exactly as before (worker and close untouched).
+        fn scope(run: Value, deployment: &str, incarnation: &str) -> Value {
+            json!({"run_id": run, "deployment_id": deployment, "member_incarnation": incarnation})
+        }
+        let new = scope(json!("run-a"), "dep-2", "inc-1");
+        for (old, wanted) in [
+            (scope(json!("run-a"), "dep-1", "inc-1"), new.clone()),
+            (scope(json!("run-a"), "dep-2", "inc-0"), new.clone()),
+            (scope(Value::Null, "dep-1", "inc-1"), new.clone()),
+            (scope(json!(""), "dep-1", "inc-1"), new.clone()),
+            (scope(json!(7), "dep-1", "inc-1"), new.clone()),
+            (
+                scope(json!("run-a"), "dep-1", "inc-1"),
+                scope(Value::Null, "dep-2", "inc-1"),
+            ),
+            (
+                scope(json!("run-a"), "dep-1", "inc-1"),
+                scope(json!(""), "dep-2", "inc-1"),
+            ),
+        ] {
+            let host = Host::default();
+            let script = holding(
+                &host,
+                false,
+                old.clone(),
+                vec![Err(OwnerError("never_closed"))],
+            );
+            assert_eq!(settle_finished(&host, &wanted), Ok(()), "{old} -> {wanted}");
+            assert!(held(&host), "{old} -> {wanted}: the worker stays");
+            assert_eq!(
+                locked(&script).unwrap().len(),
+                1,
+                "{old} -> {wanted}: not closed"
+            );
+        }
+    }
 }
