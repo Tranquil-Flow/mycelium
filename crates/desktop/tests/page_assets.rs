@@ -323,7 +323,9 @@ fn both_pages_offer_the_network_choices_in_one_contained_section() {
         let begin = "// ---- Network reach (lane XB patch 2) ----";
         let end = "// ---- end network reach ----";
         assert_eq!(page.matches(begin).count(), 1, "{name}: one section");
-        let section = &page[page.find(begin).unwrap()..page.find(end).expect("closed section")];
+        let whole = &page[page.find(begin).unwrap()..page.find(end).expect("closed section")];
+        // The code, not its comments, must carry every piece.
+        let section = &script_without_comments(whole);
         for needed in [
             "'/api/network/reach'",
             "{reach:",
