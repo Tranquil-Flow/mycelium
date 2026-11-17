@@ -210,7 +210,10 @@ struct Refusal {
 /// mode and a joined Mac's last named refusal.
 pub struct State {
     relay: Reach,
-    run: Mutex<Option<Result<RunReach, &'static str>>>,
+    /// Owner: the run's choice and this Mac's portmapping, both read once at the run's start.
+    run: Mutex<Option<Result<(RunReach, bool), &'static str>>>,
+    /// Joined Mac: the run whose work it first started, with its portmapping then (XB2-05).
+    member_run: Mutex<Option<(String, bool)>>,
     active: Mutex<Option<Value>>,
     refusal: Mutex<Option<Refusal>>,
 }
@@ -224,6 +227,7 @@ impl State {
         Self {
             relay,
             run: Mutex::new(None),
+            member_run: Mutex::new(None),
             active: Mutex::new(None),
             refusal: Mutex::new(None),
         }
@@ -232,16 +236,38 @@ impl State {
     pub fn relay(&self) -> &Reach {
         &self.relay
     }
-    /// Owner: the choice of the run starting now, read once and kept for the run.
+    /// Owner: the choice of the run starting now, read once and kept for the run, with this
+    /// Mac's portmapping preference (REVIEW XB2-05: frozen with the run, like the choice; a
+    /// change saved meanwhile applies to the next run).
     pub fn begin_run(&self, root: &Path) -> Result<RunReach, &'static str> {
-        let choice = owner_choice(root, &self.relay);
+        let choice = owner_choice(root, &self.relay)
+            .and_then(|choice| portmapping(root).map(|portmapping| (choice, portmapping)));
         *held(&self.run) = Some(choice.clone());
         *held(&self.active) = None;
-        choice
+        choice.map(|(choice, _)| choice)
+    }
+    /// Owner: the active run's choice and its frozen portmapping; `None` without a run.
+    pub fn run_binding(&self) -> Option<Result<(RunReach, bool), &'static str>> {
+        held(&self.run).clone()
+    }
+    /// Joined Mac (REVIEW XB2-05): this Mac's portmapping preference for the run `run_id`,
+    /// read at the run's first work start and kept for every retry of that run.
+    pub fn member_portmapping(&self, run_id: &str, root: &Path) -> Result<bool, &'static str> {
+        let mut frozen = held(&self.member_run);
+        if let Some((run, on)) = frozen.as_ref()
+            && run == run_id
+        {
+            return Ok(*on);
+        }
+        let on = portmapping(root)?;
+        *frozen = Some((run_id.to_owned(), on));
+        Ok(on)
     }
     /// Owner: the active run's choice; `None` without a run.
     pub fn run_choice(&self) -> Option<Result<RunReach, &'static str>> {
-        held(&self.run).clone()
+        held(&self.run)
+            .clone()
+            .map(|run| run.map(|(choice, _)| choice))
     }
     /// Owner: the run ended.
     pub fn end_run(&self) {
@@ -585,6 +611,34 @@ mod tests {
                 "{bound:?}"
             );
         }
+    }
+
+    /// Lane XB patch 3 (REVIEW XB2-05): a joined Mac's portmapping preference is frozen with the
+    /// run it first started work for: a change saved during that run waits for the next run.
+    #[test]
+    fn a_joined_macs_portmapping_is_frozen_for_its_run() {
+        let dir = root("member-pm");
+        let state = State::new(Reach::Shipped);
+        assert_eq!(state.member_portmapping("run-1", &dir), Ok(false));
+        save(
+            &dir,
+            ReachChoice {
+                across_networks: false,
+                portmapping: true,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            state.member_portmapping("run-1", &dir),
+            Ok(false),
+            "the running run keeps its value"
+        );
+        assert_eq!(
+            state.member_portmapping("run-2", &dir),
+            Ok(true),
+            "the next run reads it"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// The owner's stored choice, its signed form, the window's action and status; an invalid

@@ -610,3 +610,62 @@ fn a_signed_relay_run_never_binds_a_loopback_only_service_on_the_joined_mac() {
         m.close();
     }
 }
+/// Lane XB patch 3 (REVIEW XB2-05): the owner's portmapping preference is frozen with its run,
+/// like the run's reach: a change saved while the run is active (during the model or the compile)
+/// applies to the next run, never to endpoints the running run binds later (its compose).
+#[cfg(feature = "desktop-shell")]
+#[test]
+fn the_owners_portmapping_is_frozen_with_its_run() {
+    use node_service::{
+        packaged_network::{Network, NetworkConfig},
+        packaged_work::{WorkNetwork, reach},
+    };
+    use runtime::iroh_host::LanPolicy;
+    let root = std::env::temp_dir().join(format!("xb3-owner-pm-{}", std::process::id()));
+    std::fs::remove_dir_all(&root).ok();
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
+    let network = Network::new(
+        &root,
+        NetworkConfig {
+            work_network: WorkNetwork::Read(
+                Arc::new(move || api::lan_interface::Selection::Lan(loopback)),
+                LanPolicy::with_explicit(vec![loopback]).unwrap(),
+            ),
+            ..Default::default()
+        },
+    );
+    let portmapping = |network: &Network| {
+        let resolved = network.owner_run_network().unwrap().resolution();
+        let (_, policy) = resolved.choice.0.expect("bound across networks");
+        assert!(policy.relay().is_some(), "{policy:?}");
+        policy.portmapping()
+    };
+    reach::save(
+        &root,
+        reach::ReachChoice {
+            across_networks: true,
+            portmapping: false,
+        },
+    )
+    .unwrap();
+    network.begin_owner_run().unwrap();
+    assert!(!portmapping(&*network));
+    // Saved during the run: the running run keeps portmapping off.
+    reach::save(
+        &root,
+        reach::ReachChoice {
+            across_networks: true,
+            portmapping: true,
+        },
+    )
+    .unwrap();
+    assert!(!portmapping(&*network), "the running run's value is frozen");
+    network.end_owner_run();
+    network.begin_owner_run().unwrap();
+    assert!(portmapping(&*network), "the next run reads it");
+    network.end_owner_run();
+    network.quit();
+    std::fs::remove_dir_all(&root).ok();
+}

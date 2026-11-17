@@ -49,13 +49,14 @@ impl Network {
     /// this Mac cannot bind is a named refusal (`network_reach_invalid`, `work_network_*`).
     pub fn owner_run_network(&self) -> Result<crate::packaged_work::WorkNetwork, &'static str> {
         use crate::packaged_work::reach;
-        match self.reach.run_choice() {
+        match self.reach.run_binding() {
             None => Ok(self.work_network.clone()),
-            Some(choice) => {
-                let signed = choice?;
+            Some(binding) => {
+                // Lane XB patch 3 (REVIEW XB2-05): the portmapping frozen at the run's start.
+                let (signed, portmapping) = binding?;
                 let portmapping = match signed {
                     api::run_exchange::work_network::RunReach::SameNetwork => false,
-                    _ => reach::portmapping(&self.root)?,
+                    _ => portmapping,
                 };
                 reach::follow(&self.work_network, self.reach.relay(), &signed, portmapping)
             }
@@ -73,7 +74,12 @@ impl Network {
         let signed = RunReach::from_announcement(announcement)?;
         let portmapping = match signed {
             RunReach::SameNetwork => false,
-            RunReach::Relay(_) => reach::portmapping(&self.root)?,
+            RunReach::Relay(_) => self.reach.member_portmapping(
+                announcement.announcement()["run_id"]
+                    .as_str()
+                    .unwrap_or_default(),
+                &self.root,
+            )?,
         };
         let network = reach::follow(&self.work_network, self.reach.relay(), &signed, portmapping)?;
         let resolved = network.resolution();
