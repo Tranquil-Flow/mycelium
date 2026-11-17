@@ -310,16 +310,21 @@ fn the_shipped_page_offers_no_one_mac_chat_and_hides_the_model_card() {
     );
 }
 
-/// Lane XB patch 2 (REVIEW XB-05, decisions D1/D2): both page copies (the packaged window's and
-/// the `api` mirror) carry ONE contained network section: the owner's per-run choice between
-/// "Macs on the same network" (default) and "Macs on different networks (through the Mycelium
-/// relay)", and this Mac's portmapping preference (default off), both saved through the
-/// packaged action `/api/network/reach`, and the ACTIVE mode and a named error read back from
-/// `status.network_reach`. No dialog gates either choice.
+/// Lane XB patch 2 (REVIEW XB-05, decisions D1/D2): the packaged window's page carries ONE
+/// contained network section: the owner's per-run choice between "Macs on the same network"
+/// (default) and "Macs on different networks (through the Mycelium relay)", and this Mac's
+/// portmapping preference (default off), both saved through the packaged action
+/// `/api/network/reach`, and the ACTIVE mode and a named error read back from
+/// `status.network_reach`. No dialog gates either choice. The `api` crate's copy stays the
+/// pinned v0.1.4 oracle asset (`crates/api/contracts/assets.json`): it never carries it.
 #[test]
-fn both_pages_offer_the_network_choices_in_one_contained_section() {
+fn the_page_offers_the_network_choices_in_one_contained_section() {
     const MIRROR: &str = include_str!("../../api/assets/desktop/app.js");
-    for (name, page) in [("desktop", APP_JS), ("api mirror", MIRROR)] {
+    assert!(
+        !MIRROR.contains("/api/network/reach"),
+        "the api crate's oracle copy is unchanged"
+    );
+    for (name, page) in [("desktop", APP_JS)] {
         let begin = "// ---- Network reach (lane XB patch 2) ----";
         let end = "// ---- end network reach ----";
         assert_eq!(page.matches(begin).count(), 1, "{name}: one section");
