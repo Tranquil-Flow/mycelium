@@ -8,6 +8,7 @@ mod flake;
 mod local_network;
 mod quit_stopped;
 mod quit_verified;
+mod recovery_fence;
 mod regressions;
 mod restart_contributor;
 mod retire;
