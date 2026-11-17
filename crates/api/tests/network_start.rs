@@ -89,11 +89,15 @@ impl EndpointHost for EpHandle {
         ep.calls.push("attach".into());
         Ok(())
     }
-    fn relocate_authority(&mut self, origin: &str, _: u16) -> Result<(), PublicError> {
+    fn relocate_authority(
+        &mut self,
+        origin: &str,
+        _: u16,
+    ) -> Result<Option<serde_json::Value>, PublicError> {
         let mut ep = self.0.lock().expect("ep");
         ep.configured = Some(origin.to_owned());
         ep.calls.push("relocate".into());
-        Ok(())
+        Ok(None)
     }
     fn seed_backend(&self) -> Option<Arc<dyn SeedBackend>> {
         self.0

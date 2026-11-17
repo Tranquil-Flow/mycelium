@@ -929,9 +929,16 @@ pub fn stop_authority(cell: &impl Cell) {
 /// owner without one, beside what a failed `create_swarm` prepared, refuses
 /// `authority_partial_state` before anything starts (`authority.start()`, authority.py:386-391 @
 /// f4e366e9), as its relaunch does ([`Authority::load`]).
+///
+/// A joined target with a retained membership resumes it (`RemoteMacMember.start`, the same
+/// `authority.start()`): only then is it running and its `recovery_error` cleared (lane C review
+/// C-01, [`crate::joined_member::start_membership`]); a refusal is answered by name.
 pub fn start_authority(cell: &impl Cell) -> Result<(), PublicError> {
     if resumable(cell) {
         return open_owner_seed(cell);
+    }
+    if cell.with(|c| c.target && c.root.join("membership.state.json").exists()) {
+        return crate::joined_member::start_membership(cell, &cell.member_seed_options());
     }
     if cell
         .with(|c| !c.target && c.swarm.is_none() && c.legacy.is_none() && prepared_state(&c.root))

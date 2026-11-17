@@ -18,6 +18,7 @@ pub mod compiled_handoff;
 pub mod compiler_inputs;
 pub mod desktop;
 pub mod directory;
+pub mod endpoint_recovery;
 pub mod framing;
 pub mod gateway;
 pub mod handoff;

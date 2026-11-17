@@ -24,7 +24,7 @@ mod work;
 use api::{
     actions::{Action, Backend},
     app_host::{self, Cell, HostView, NETWORK_FILE, RelayOrigin, cap},
-    app_status, joined_member,
+    app_status, endpoint_recovery, joined_member,
     persistent::RelayState,
     preferences::private_state,
     relay::{EndpointHost, Hooks, OwnerRelay, Probe, Proxy, RichHandler, SeedBackend, StartGuard},
@@ -318,6 +318,76 @@ impl Network {
             eprintln!("member_leave_renewal_still_running");
         }
     }
+    /// `/api/network/restart` (app.py:1444-1475 @ f4e366e9, lane B B10) as [`Network::start`]
+    /// runs the Start: the relay is taken out of this host while the new one starts.
+    pub fn restart(
+        &self,
+        authority: &Arc<Mutex<Authority>>,
+        body: &serde_json::Map<String, Value>,
+    ) -> Result<Json, PublicError> {
+        let mut relay = std::mem::replace(
+            &mut *lock(&self.relay),
+            Self::fresh(&self.root, &self.hooks),
+        );
+        relay.set_start_guard(self.start_guard.clone());
+        let probe = self.serving_probe();
+        let outcome = relay.restart_public_relay(
+            body,
+            &mut Endpoint {
+                authority: authority.clone(),
+                network: self,
+            },
+            probe,
+        );
+        *lock(&self.relay) = relay;
+        outcome
+    }
+    /// `/api/network/recovery-card` (app.py:1436-1442, `refresh_endpoint_card`,
+    /// endpoint_recovery.py:117-142 @ f4e366e9, lane B B10): the owner's persisted card reissued
+    /// for the origin its seed answers on now.
+    pub fn recovery_card(
+        &self,
+        authority: &Arc<Mutex<Authority>>,
+        body: &serde_json::Map<String, Value>,
+    ) -> Result<Json, PublicError> {
+        let (seed, root) = {
+            let a = lock(authority);
+            (a.seed.clone(), a.root.clone())
+        };
+        let configured = app_host::configured_public_origin(&self.cell(authority));
+        let old = endpoint_recovery::load_card(&root)?;
+        let (Some(old), Some(configured), Some(seed)) = (old, configured, seed) else {
+            // `endpoint_recovery_requires_retained_authority` (a `ValueError`)
+            return Err(endpoint_recovery::value_error());
+        };
+        let c = &seed.coordinator;
+        let card = endpoint_recovery::refresh_endpoint_card(
+            c.signer(),
+            c.swarm_id(),
+            c.seed_node_id(),
+            &configured,
+            &old,
+            body.get("previous_origin"),
+            app_host::now(),
+        )?;
+        endpoint_recovery::store_card(&root, &card)?;
+        Ok(Json::from(json!({"recovery_card": card})))
+    }
+    /// `/api/network/reconnect` (app.py:1427-1435 @ f4e366e9, lane B B10): the joined Mac follows
+    /// its owner's seed to the origin the card names, over its own seed path.
+    pub fn reconnect(
+        &self,
+        authority: &Arc<Mutex<Authority>>,
+        body: &serde_json::Map<String, Value>,
+    ) -> Result<Json, PublicError> {
+        let options = self.seams.member_seed.clone();
+        endpoint_recovery::reconnect_peer(&self.cell(authority), &options, &body["card"])
+            .map(Json::from)
+    }
+    /// Quit has closed this host's relay start (`application_closed` for every later action).
+    pub fn closed(&self) -> bool {
+        self.start_guard.closed()
+    }
     /// `_start_public_relay` after the persistent backend's closed/role/shape checks: the relay is
     /// taken out of this host while it starts, so the endpoint seams (which lock the authority)
     /// never meet the relay's own lock.
@@ -412,6 +482,15 @@ impl Endpoint<'_> {
     fn cell(&self) -> PackagedCell<'_> {
         self.network.cell(&self.authority)
     }
+    /// The running seed is closed and opened again on the configured origin.
+    fn reopen_seed(&self) -> Result<(), PublicError> {
+        let old = lock(&self.authority).seed.take();
+        if let Some(old) = old {
+            old.close();
+            app_host::open_owner_seed(&self.cell())?;
+        }
+        Ok(())
+    }
 }
 impl EndpointHost for Endpoint<'_> {
     fn swarm_created(&self) -> bool {
@@ -438,15 +517,41 @@ impl EndpointHost for Endpoint<'_> {
     /// A swarm that exists answers on the new origin: its seed is reopened bound to it.
     fn attach_public_endpoint(&mut self, origin: &str, port: u16) -> Result<(), PublicError> {
         self.configure_public_endpoint(origin, port)?;
-        let old = lock(&self.authority).seed.take();
-        if let Some(old) = old {
-            old.close();
-            app_host::open_owner_seed(&self.cell())?;
-        }
-        Ok(())
+        self.reopen_seed()
     }
-    fn relocate_authority(&mut self, origin: &str, port: u16) -> Result<(), PublicError> {
-        self.attach_public_endpoint(origin, port)
+    /// `endpoint_recovery.relocate_authority` (endpoint_recovery.py:39-57 @ f4e366e9, lane B B10):
+    /// a retained configuration and seed sign the card from the old origin to the new one; the new
+    /// configuration and the card are persisted, then the seed is reopened on the new origin.
+    fn relocate_authority(
+        &mut self,
+        origin: &str,
+        port: u16,
+    ) -> Result<Option<Value>, PublicError> {
+        let previous = self.configured_public_origin();
+        let (seed, root) = {
+            let a = lock(&self.authority);
+            (a.seed.clone(), a.root.clone())
+        };
+        let (Some(previous), Some(seed)) = (previous, seed) else {
+            return Err(
+                PublicError::new(409, "network_recovery_requires_retained_authority")
+                    .raised_by(Raised::Authority),
+            );
+        };
+        let c = &seed.coordinator;
+        let card = endpoint_recovery::endpoint_card(
+            c.signer(),
+            c.swarm_id(),
+            c.seed_node_id(),
+            &Value::from(previous),
+            &Value::from(origin),
+            app_host::now(),
+        )?;
+        self.configure_public_endpoint(origin, port)?;
+        // Identity, journals and the card stay inspectable whatever the reopen does.
+        endpoint_recovery::store_card(&root, &card)?;
+        self.reopen_seed()?;
+        Ok(Some(card))
     }
     fn seed_backend(&self) -> Option<Arc<dyn SeedBackend>> {
         let a = lock(&self.authority);
@@ -695,7 +800,13 @@ impl PackagedActions {
 }
 impl Backend for PackagedActions {
     fn prepare(&mut self, action: Action, body: &Map<String, Value>) -> Result<(), PublicError> {
-        if action == Action::NetworkStart {
+        if matches!(
+            action,
+            Action::NetworkStart
+                | Action::NetworkRestart
+                | Action::NetworkRecoveryCard
+                | Action::NetworkReconnect
+        ) {
             return Ok(());
         }
         self.serving.prepare(action, body)
@@ -715,6 +826,35 @@ impl Backend for PackagedActions {
                 .as_ref()
                 .map_err(|code| PublicError::new(409, code))?;
             return self.network.start(authority, body);
+        }
+        // Lane B, B10: the endpoint recovery routes (app.py:1427-1475 @ f4e366e9). Each refuses
+        // the other role (and a restart without a swarm) as its consent refusal, as the source.
+        if matches!(
+            action,
+            Action::NetworkRestart | Action::NetworkRecoveryCard | Action::NetworkReconnect
+        ) {
+            if self.network.closed() {
+                return Err(PublicError::new(400, "application_closed"));
+            }
+            let authority = self
+                .authority
+                .as_ref()
+                .map_err(|code| PublicError::new(409, code))?;
+            let target = lock(authority).target;
+            let swarm = app_host::swarm_created(&self.network.cell(authority));
+            let allowed = match action {
+                Action::NetworkReconnect => target,
+                Action::NetworkRestart => !target && swarm,
+                _ => !target,
+            };
+            if !allowed {
+                return Err(PublicError::new(400, "network_consent_required"));
+            }
+            return match action {
+                Action::NetworkRestart => self.network.restart(authority, body),
+                Action::NetworkRecoveryCard => self.network.recovery_card(authority, body),
+                _ => self.network.reconnect(authority, body),
+            };
         }
         self.serving.execute_json(action, body)
     }

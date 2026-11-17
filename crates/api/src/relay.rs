@@ -1626,8 +1626,10 @@ pub trait EndpointHost {
     fn configure_public_endpoint(&mut self, origin: &str, port: u16) -> Result<(), PublicError>;
     /// `endpoint_recovery.attach_public_endpoint` (a swarm created without a relay).
     fn attach_public_endpoint(&mut self, origin: &str, port: u16) -> Result<(), PublicError>;
-    /// `endpoint_recovery.relocate_authority` (the swarm moves to a new origin).
-    fn relocate_authority(&mut self, origin: &str, port: u16) -> Result<(), PublicError>;
+    /// `endpoint_recovery.relocate_authority` (the swarm moves to a new origin): the signed recovery
+    /// card from the old origin to the new one (lane B, B10), `None` from a host that signs none.
+    fn relocate_authority(&mut self, origin: &str, port: u16)
+    -> Result<Option<Value>, PublicError>;
     /// `authority.seed_server` as the relay's verified-TLS hop; `None` while no seed server exists.
     fn seed_backend(&self) -> Option<Arc<dyn SeedBackend>>;
     /// `self.running = True`.
@@ -1860,6 +1862,81 @@ impl OwnerRelay {
         let status = relay.status();
         self.relay = Some(relay);
         Ok(status)
+    }
+    /// `/api/network/restart` (app.py:1444-1475 @ f4e366e9) after the persistent backend's closed
+    /// check and the dispatch's role/swarm/shape check (lane B, B10): an external restart takes the
+    /// address it does not name from the remembered one; the new relay is validated before the old
+    /// one is closed; once it runs, the seed moves to its origin with a signed recovery card
+    /// (`relocate_authority`), unless an external address did not change (no card then). Any
+    /// failure after the start closes the new relay. Answers `{'network', 'recovery_card'}`.
+    pub fn restart_public_relay(
+        &mut self,
+        body: &Map<String, Value>,
+        host: &mut dyn EndpointHost,
+        probe: Probe,
+    ) -> Result<Json, PublicError> {
+        let external = body.get("provider").is_some_and(|v| v == "external");
+        let spec = if external {
+            let mut spec = self.saved_external_address()?;
+            spec.extend(body.clone());
+            spec
+        } else {
+            body.clone()
+        };
+        if external && !(spec.contains_key("public_origin") && spec.contains_key("proxy_port")) {
+            return Err(PublicError::new(400, "relay_origin_invalid"));
+        }
+        // validated before the old relay is touched
+        let fresh = self.new_relay(&spec, &probe)?;
+        if let Some(old) = self.relay.take() {
+            old.close();
+        }
+        if let Some(guard) = &self.guard {
+            guard.adopt(&fresh)?;
+        }
+        fresh
+            .start(&body["relay_acknowledged"], &body["max_seconds"])
+            .map_err(|_| value_error())?;
+        let outcome = (|| -> Result<Option<Value>, PublicError> {
+            let origin = fresh.public_origin().unwrap_or_default();
+            let port = free_seed_port(fresh.proxy_port())?;
+            let card = if external && host.configured_public_origin().as_deref() == Some(&origin) {
+                None // the address did not change: members need no recovery card
+            } else {
+                host.relocate_authority(&origin, port)?
+            };
+            if let Some(proxy) = fresh.proxy() {
+                proxy.bind_seed(host.seed_backend());
+            }
+            Ok(card)
+        })();
+        let card = match outcome {
+            Ok(card) => card,
+            Err(error) => {
+                fresh.close();
+                return Err(error);
+            }
+        };
+        host.set_running();
+        if external {
+            self.remember_external_address(&spec)?;
+        }
+        if let Some(proxy) = fresh.proxy() {
+            host.bind_public_routes(&proxy);
+        }
+        let network = fresh.status();
+        self.relay = Some(fresh);
+        Ok(Json::from(serde_json::json!({
+            "network": network.to_value(),
+            "recovery_card": card,
+        })))
+    }
+    /// `_saved_external_address`: what `_remember_external_address` kept, `{}` when nothing.
+    fn saved_external_address(&self) -> Result<Map<String, Value>, PublicError> {
+        let limit = crate::preferences::private_state::private_json_limit().unwrap_or(0);
+        crate::preferences::private_state::load(&self.root.join("external-origin.json"), limit)
+            .map(Option::unwrap_or_default)
+            .map_err(|e| PublicError::new(409, e.0).raised_by(Raised::Authority))
     }
     /// `_remember_external_address`: kept so a later restart reuses it.
     fn remember_external_address(&self, spec: &Map<String, Value>) -> Result<(), PublicError> {

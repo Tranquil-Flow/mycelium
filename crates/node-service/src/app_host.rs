@@ -1214,8 +1214,10 @@ impl Host for PackagedHost {
             app_host::stop_authority(authority);
         }
     }
+    /// Over the member's seed path (`crate::packaged_network`'s join seams): a joined Mac's Start
+    /// resumes its membership there (lane B, C-01).
     fn start_authority(&mut self) -> Result<(), PublicError> {
-        app_host::start_authority(self.authority()?)
+        app_host::start_authority(&self.network.cell(self.authority()?))
     }
     fn pair_request(&mut self) -> Result<Json, PublicError> {
         app_host::pair_request(self.authority()?)

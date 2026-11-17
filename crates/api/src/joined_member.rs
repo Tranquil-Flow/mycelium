@@ -730,6 +730,36 @@ pub fn resume_membership(cell: &impl Cell, options: &SeedOptions) -> Result<(), 
         },
     }
 }
+/// `authority.start()` of a joined target from the user's Start (app.py:1632-1636 @ f4e366e9) or
+/// a reconnect (`reconnect_peer` -> `peer.start()`, endpoint_recovery.py:113, app.py:1432-1434):
+/// the retained membership resumes over `options`, and only a resumed one makes the Mac running
+/// again and clears its `recovery_error` (lane C review C-01). A refusal is the action's own: the
+/// Mac stays not running and keeps the error its launch recorded.
+pub fn start_membership(cell: &impl Cell, options: &SeedOptions) -> Result<(), PublicError> {
+    let root = cell.with(|c| c.root.clone());
+    let (signer, _, _) = identity(&root)?;
+    let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();
+    let env = crate::peer::JoinEnv {
+        signer: &signer,
+        clock: &now,
+        random_hex: &random_hex,
+        seed: options,
+    };
+    match crate::peer::start(&root, &signer, true, &env) {
+        Ok(started) => {
+            cell.with(|c| {
+                c.session = started.session;
+                c.running = true;
+                c.recorded.recovery_error = None;
+            });
+            Ok(())
+        }
+        Err(failed) => {
+            cell.with(|c| c.running = false);
+            Err(failed.error)
+        }
+    }
+}
 /// The start refusals that leave a joined Mac started but not running, recorded as
 /// `recovery_error` (app.py:617-625 @ f4e366e9): a dead relay or a lapsed membership.
 pub fn recovery_code(code: &str) -> Option<&'static str> {
