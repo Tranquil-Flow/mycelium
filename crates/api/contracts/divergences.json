@@ -68,8 +68,9 @@
       ],
       "parity_tests": [
         "api/tests/support/oracle_context.rs at_product_picker / at_product_picker_bytes (oracle side checked against this record, then moved), used by run_model_document.rs, persistent_backend.rs, wire_routes.rs and node-service packaged_action_root.rs",
-        "test-support/journeys Target::starter_run_model / golden_observations (the L3 golden's first_run)",
-        "api/tests/model_routes_e2e.rs and support/headless_observation.rs take a9-route explicitly (they download the recorded Qwen2 snapshot)"
+        "test-support/journeys Target::run_model / golden_observations: the Rust target's starter and pick are the oracle's swapped (the L3 golden's first_run, choose_model_without_download and restart observations)",
+        "api/tests/model_routes_e2e.rs, support/headless_observation.rs (owner and member), node-service packaged_model_prepare.rs, packaged_owner_observe.rs and packaged_owner_run.rs take a9-route explicitly: they download the recorded tiny Qwen2 snapshot",
+        "node-service packaged_publisher.rs asserts the fresh install's acquisition root is Qwen3-0.6B's (model-source-c1899de289a0)"
       ],
       "product_tests": [
         "api/tests/run_model_v02.rs (fresh install, saved choice and environment, picker texts)",
