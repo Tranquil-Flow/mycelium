@@ -323,8 +323,8 @@ impl<H: ChainHost> PinnedHost<H> {
 /// descriptor once per run at collect (300 s life), so re-checking its age on every call refused
 /// every call of a run whose observe + compile + slices outlasted it, and every call while serving
 /// after that. Here a descriptor past its life is still checked in full at its own signing instant
-/// (signature, key pin, generation, incarnation, swarm, run binding, facts) and the member's lease
-/// at `now`; every other refusal stands, its inner code on stderr.
+/// (signature, key pin, generation, incarnation, swarm, run binding, facts), after the member's
+/// lease was checked at `now`; every other refusal stands, its inner code on stderr.
 fn descriptor_key(card: &Value, member: &Value, swarm: &str, now: f64) -> OResult<Value> {
     let verify = |at: f64| {
         crate::installation_descriptor::verify_installation_descriptor(
@@ -350,18 +350,16 @@ fn descriptor_key(card: &Value, member: &Value, swarm: &str, now: f64) -> OResul
     };
     match verify(now) {
         Ok(_) => {}
+        // `verify` checked the member's lease at `now` before it reached the descriptor's age.
         Err(e) if e.code == "installation_descriptor_expired" => {
-            let signed = card["statement"]["issued_at"]
+            match card["statement"]["issued_at"]
                 .as_f64()
-                .filter(|t| t.is_finite() && *t <= now);
-            let leased = member["lease_expires_at"]
-                .as_f64()
-                .is_some_and(|end| now < end);
-            match signed {
-                Some(at) if leased => {
+                .filter(|t| t.is_finite() && *t <= now)
+            {
+                Some(at) => {
                     verify(at).map_err(|e| refused(&e.code))?;
                 }
-                _ => return Err(refused(&e.code)),
+                None => return Err(refused(&e.code)),
             }
         }
         Err(e) => return Err(refused(&e.code)),
