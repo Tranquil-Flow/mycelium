@@ -1475,28 +1475,50 @@ export function createHero(canvas, { stage, state, reduce }) {
     }
     ctx.globalAlpha = save;
   }
+  /** A colony's broad soft glow (20-40 px) at growth `grow`, times `mul`; returns its radius. */
+  function coreGlow(ctx, g, c, grow, mul = 1) {
+    const n = c.node,
+      r = Math.max(20, Math.min(40, c.R0 * 0.2)) * (0.6 + 0.4 * grow),
+      p = g.protect(n.x, n.y);
+    const grad = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, r);
+    grad.addColorStop(0, palette.glow);
+    grad.addColorStop(0.45, palette.glow);
+    grad.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.globalAlpha = (light ? 0.08 : 0.15) * grow * p * mul;
+    ctx.fillStyle = grad;
+    ctx.fillRect(n.x - r, n.y - r, 2 * r, 2 * r); // the gradient is clear at r (no arc on the field)
+    return r;
+  }
+  /** laneGR p1: the core parts each raster canvas holds (colony glow, felt
+   * fill, dip glow fill2), with the growth they were drawn at and their
+   * weight w in it. A cross-fade blends the weights as it blends the pixels
+   * (stepXfade), so the displayed raster's ledger says how much of each part
+   * is on screen; drawIntroCores restores exactly that under the top fade. */
+  const coresIn = new WeakMap();
+  const coresOf = (cv) => coresIn.get(cv) || new Map();
+  function noteCore(cv, part, c, grow) {
+    let m = coresIn.get(cv);
+    if (!m) coresIn.set(cv, (m = new Map()));
+    m.set(part, { c, grow, w: (m.get(part)?.w || 0) + 1 });
+  }
   function drawCores(ctx, g, A, live = null, box = null) {
     // A broad soft glow over the colony centre (20-40 px), never a point soma.
     for (const c of g.colonies) {
       const grow = matGrow(c, A) * (live ?? 1);
       if (grow <= 0) continue;
       const n = c.node,
-        r = Math.max(20, Math.min(40, c.R0 * 0.2)) * (0.6 + 0.4 * grow),
-        p = g.protect(n.x, n.y);
-      const grad = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, r);
-      grad.addColorStop(0, palette.glow);
-      grad.addColorStop(0.45, palette.glow);
-      grad.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.globalAlpha = (light ? 0.08 : 0.15) * grow * p;
-      ctx.fillStyle = grad;
-      ctx.fillRect(n.x - r, n.y - r, 2 * r, 2 * r); // the gradient is clear at r (no arc on the field)
+        r = coreGlow(ctx, g, c, grow);
       colonyFill(ctx, c, hexRgb(palette.glow), (light ? 0.75 : 1) * grow);
       if (c.fill2) colonyFill(ctx, { node: c.node, fill: c.fill2 }, hexRgb(palette.glow), (light ? 0.75 : 1) * grow);
       if (box) {
         const R = Math.max(r, c.fill?.r || 0, c.fill2?.r || 0) + 2;
         grow_(box, [n.x - R, n.y - R, n.x + R, n.y + R]);
       }
-      if (live === null) c.fillDrawn = !!c.fill;
+      if (live === null) {
+        // Drawn into a raster (bake, re-bake, dip measurement): ledger it.
+        c.fillDrawn = !!c.fill;
+        for (const part of [c, c.fill, c.fill2]) if (part) noteCore(ctx.canvas, part, c, grow);
+      }
     }
   }
   const mobile = () => L.mobile;
@@ -1579,6 +1601,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     sx.setTransform(1, 0, 0, 1, 0, 0);
     sx.clearRect(0, 0, canvas.width, canvas.height);
     sx.restore();
+    coresIn.delete(canvas);
     for (const P of g.paths) (P.drawn = P.presented = P.pi = 0), (P.chg = -1);
     growth.pending = g.paths.filter((P) => growable(P, g));
     growth.scan = g.paths.length;
@@ -1682,6 +1705,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     const cx = cv.getContext("2d");
     cx.drawImage(canvas, 0, 0);
     cx.setTransform(sx.getTransform());
+    coresIn.set(cv, new Map(coresOf(canvas)));
     return cv;
   }
   function startXfade(neu) {
@@ -1716,6 +1740,16 @@ export function createHero(canvas, { stage, state, reduce }) {
       sx.drawImage(x.neu, 0, 0);
     }
     sx.restore();
+    // The displayed core ledger follows the same blend (laneGR p1).
+    const mo = coresOf(x.old),
+      mn = coresOf(x.neu);
+    if (f >= 1) coresIn.set(canvas, mn);
+    else {
+      const m = new Map();
+      for (const [part, e] of mo) m.set(part, { ...e, w: (1 - f) * e.w });
+      for (const [part, e] of mn) m.set(part, { ...e, w: (m.get(part)?.w || 0) + f * e.w });
+      coresIn.set(canvas, m);
+    }
     growth.changed = true;
     if (f >= 1) {
       x.old.width = x.old.height = x.neu.width = x.neu.height = 0;
@@ -2134,7 +2168,7 @@ export function createHero(canvas, { stage, state, reduce }) {
       c.dips = { before: first, after: last, added: added.slice() };
       if (added.some((v) => v > 0)) {
         const f = { r: K * 8, stops: ringStops(added, K) };
-        fills.push({ node: n, fill: f });
+        fills.push({ node: n, fill: f, c });
         c.fill2 = f;
       }
       yield;
@@ -2149,10 +2183,12 @@ export function createHero(canvas, { stage, state, reduce }) {
         neu.height = canvas.height;
         neu.getContext("2d").drawImage(growth.xfade.neu, 0, 0);
         neu.getContext("2d").setTransform(sx.getTransform());
+        coresIn.set(neu, new Map(coresOf(growth.xfade.neu)));
       } else neu = snapshot();
       const nx = neu.getContext("2d");
       nx.globalCompositeOperation = "lighter";
       for (const f of fills) colonyFill(nx, f, glowRgb, 1);
+      for (const f of fills) noteCore(neu, f.fill, f.c, 1); // dark only: drawCores' fill2 at grow 1
       startXfade(neu);
     }
   }
@@ -2909,35 +2945,67 @@ export function createHero(canvas, { stage, state, reduce }) {
    * ramp. The building cores escaped that ramp, but once baked into the
    * raster they were faded with it, and the nodes near the top lost them. So
    * once baked, the share of the cores the ramp removed is added back (the
-   * cores masked by the same ramp): the nodes keep what the grow-in showed. */
-  let coreBand = null;
+   * cores masked by the same ramp): the nodes keep what the grow-in showed.
+   * p1 (review GR-01): what is added back is the core parts the displayed
+   * raster holds, at the weight it holds them (coresIn ledger), not the
+   * colonies' current geometry: a dip glow (fill2) assigned by dipsGen is
+   * absent until its cross-fade starts and then follows that fade. Two
+   * cached bands: the settled parts (weight 1) and the parts fading in
+   * (drawn at their relative weights, blitted at the largest weight q, so
+   * one cross-fade reuses one band). */
+  const coreBands = [null, null],
+    partId = new WeakMap();
+  let partN = 0;
+  const idOf = (o) => partId.get(o) ?? (partId.set(o, ++partN), partN);
+  function coreBand(i, ctx, g, parts, q, fade) {
+    let b = coreBands[i];
+    if (!parts.length) {
+      if (b) b.c.width = b.c.height = 0; // a finished fade frees its band
+      coreBands[i] = null;
+      return;
+    }
+    const W = scene.hero.W,
+      key = [growth.epoch, W, fade, d, light, ...parts.map(([o, e]) => `${idOf(o)}:${e.grow.toFixed(3)}:${(e.w / q).toFixed(3)}`)].join("|");
+    if (b?.key !== key) {
+      const c = b?.c || document.createElement("canvas"),
+        bx = c.getContext("2d"),
+        rgb = hexRgb(palette.glow);
+      c.width = Math.ceil(W * d);
+      c.height = Math.ceil(fade * d);
+      bx.setTransform(d, 0, 0, d, 0, 0);
+      bx.globalCompositeOperation = light ? "source-over" : "lighter";
+      for (const [o, e] of parts) {
+        const mul = e.w / q;
+        if (o === e.c) coreGlow(bx, g, e.c, e.grow, mul);
+        else colonyFill(bx, { node: e.c.node, fill: o }, rgb, (light ? 0.75 : 1) * e.grow * mul);
+      }
+      const ramp = bx.createLinearGradient(0, 0, 0, fade);
+      ramp.addColorStop(0, "rgba(0,0,0,1)");
+      ramp.addColorStop(1, "rgba(0,0,0,0)");
+      bx.globalAlpha = 1;
+      bx.globalCompositeOperation = "destination-in";
+      bx.fillStyle = ramp;
+      bx.fillRect(0, 0, W, fade);
+      b = coreBands[i] = { c, key };
+    }
+    ctx.globalAlpha = q;
+    ctx.drawImage(b.c, 0, 0, W, fade);
+  }
   scene.drawIntroCores = (ctx, fade = 0) => {
     const g = scene.geometry || buildOut;
     if (!g.colonies || !g.protect || !(growth.age > 0)) return;
     if (growth.coresDrawn) {
       if (!(fade > 0)) return;
-      const W = scene.hero.W,
-        key = [growth.epoch, W, fade, d, ...g.colonies.map((c) => (c.fill2 ? c.fill2.r : 0))].join("|");
-      if (coreBand?.key !== key) {
-        const c = coreBand?.c || document.createElement("canvas"),
-          bx = c.getContext("2d");
-        c.width = Math.ceil(W * d);
-        c.height = Math.ceil(fade * d);
-        bx.setTransform(d, 0, 0, d, 0, 0);
-        bx.globalCompositeOperation = light ? "source-over" : "lighter";
-        drawCores(bx, g, growth.age, 1);
-        const ramp = bx.createLinearGradient(0, 0, 0, fade);
-        ramp.addColorStop(0, "rgba(0,0,0,1)");
-        ramp.addColorStop(1, "rgba(0,0,0,0)");
-        bx.globalAlpha = 1;
-        bx.globalCompositeOperation = "destination-in";
-        bx.fillStyle = ramp;
-        bx.fillRect(0, 0, W, fade);
-        coreBand = { c, key };
-      }
+      const held = [],
+        fading = [];
+      let q = 0;
+      for (const [o, e] of coresOf(canvas))
+        if (e.w >= 0.999) held.push([o, e]);
+        else if (e.w > 1 / 512) fading.push([o, e]), (q = Math.max(q, e.w));
       ctx.save();
       ctx.globalCompositeOperation = light ? "source-over" : "lighter";
-      ctx.drawImage(coreBand.c, 0, 0, W, fade);
+      coreBand(0, ctx, g, held, 1, fade);
+      coreBand(1, ctx, g, fading, q, fade);
       ctx.restore();
       return;
     }
@@ -3451,7 +3519,7 @@ export function createHero(canvas, { stage, state, reduce }) {
     cancelAnimationFrame(introRaf);
     document.removeEventListener("visibilitychange", onHidden);
     breathBox?.remove();
-    if (coreBand) coreBand.c.width = coreBand.c.height = 0;
+    for (const b of coreBands) if (b) b.c.width = b.c.height = 0;
     for (const r of scene.routes || []) for (const b of r.buckets.values()) for (const t of b.images || []) t.image.width = t.image.height = 0;
     for (const layer of residueCache.keys()) for (const t of layer.images || []) t.image.width = t.image.height = 0;
     for (const layer of residueCache.keys()) layer.images = null;
