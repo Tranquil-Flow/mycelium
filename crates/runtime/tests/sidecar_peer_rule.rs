@@ -104,3 +104,32 @@ fn a_relay_mode_sidecar_accepts_a_routable_peer_and_a_relay_only_peer() {
         });
     }
 }
+
+/// Lane XB patch 2 (REVIEW XB-01, decision D4: only our relay). A relay-mode sidecar dials a
+/// configured peer at the addresses its ConfigurePeer carries; a relay entry there that is not
+/// the relay THIS sidecar registers at (here the hermetic `http://127.0.0.1:1`) would send the
+/// endpoint id to a foreign relay (an n0 relay, say). Refused whole, mixed with an IP address
+/// too; this sidecar's own relay is still accepted.
+#[test]
+fn a_relay_mode_sidecar_refuses_a_peer_naming_a_foreign_relay() {
+    let foreign: iroh::RelayUrl = "https://euw1-1.relay.n0.iroh-canary.iroh.link./"
+        .parse()
+        .unwrap();
+    for mode in [NetworkMode::Production, NetworkMode::ForceRelay] {
+        with_router(mode, |router| {
+            let only = EndpointAddr::new(peer(3).public()).with_relay_url(foreign.clone());
+            assert!(
+                router.configure_peers(vec![(only, 1)]).is_err(),
+                "{mode:?}: a foreign relay-only peer is refused"
+            );
+            let mixed = routable(4).with_relay_url(foreign.clone());
+            assert!(
+                router.configure_peers(vec![(mixed, 1)]).is_err(),
+                "{mode:?}: a routable peer naming a foreign relay is refused whole"
+            );
+            router
+                .configure_peers(vec![(relay_only(5), 1)])
+                .unwrap_or_else(|e| panic!("{mode:?}: our own relay is accepted: {e:?}"));
+        });
+    }
+}

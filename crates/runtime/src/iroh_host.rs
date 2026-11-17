@@ -296,6 +296,17 @@ pub fn relay_reachable(interface: IpAddr, policy: &LanPolicy) -> Result<(), &'st
     drop(host);
     ready
 }
+/// Lane XB patch 2 (REVIEW XB-01, D4: only our relay): every relay entry of a peer address must be
+/// `ours`, the one relay this endpoint registers at; a peer-supplied relay URL that is not (an n0
+/// relay, any other) refuses the whole address before anything is sent, so the endpoint id never
+/// reaches a relay Mycelium does not operate. With no relay of its own nothing may name one.
+pub fn validate_relays(peer: &EndpointAddr, ours: Option<&iroh::RelayUrl>) -> Result<(), Error> {
+    if peer.relay_urls().all(|url| Some(url) == ours) {
+        Ok(())
+    } else {
+        Err(Error::Authentication)
+    }
+}
 /// Whole-address check for a direct-LAN dial: every entry is an allow-listed IP
 /// with a port; a relay or any disallowed entry refuses the entire address.
 pub fn validate_lan_peer(peer: &EndpointAddr, policy: &LanPolicy) -> Result<(), Error> {
@@ -394,6 +405,9 @@ pub struct LoopbackHost<'a> {
     reuse: Option<Box<LanReuse>>,
     /// Across networks: the peer gate; `Some` exactly in [`NetworkMode::CrossNetwork`].
     cross: Option<Arc<CrossGate>>,
+    /// The one relay this host registers at (relay modes and across networks); a peer address
+    /// may name no other relay ([`validate_relays`], lane XB patch 2, D4).
+    relay: Option<iroh::RelayUrl>,
 }
 /// The bound socket (a CLOEXEC duplicate; the transport owns the original)
 /// and identity a direct-LAN endpoint is recycled with, so the address in the
@@ -776,6 +790,10 @@ impl<'a> LoopbackHost<'a> {
             address_task: None,
             path_guards: Mutex::new(Vec::new()),
             reuse,
+            relay: match mode {
+                NetworkMode::Production | NetworkMode::ForceRelay => Some(reach.relay_url()?),
+                _ => cross.as_ref().and_then(|gate| gate.relay().ok().cloned()),
+            },
             cross,
         };
         allowance(clock, deadline)?;
@@ -856,8 +874,14 @@ impl<'a> LoopbackHost<'a> {
                 Some(gate) => validate_lan_peer(peer, gate.policy()),
                 None => Err(Error::Authentication),
             },
-            _ => Ok(()),
+            // Relay modes: any IP address (the oracle's rule), but no relay except this host's.
+            _ => validate_relays(peer, self.relay.as_ref()),
         }
+    }
+    /// The one relay this host registers at: the reach's in the relay modes, the policy's across
+    /// networks; `None` on the LAN and local only.
+    pub fn relay_url(&self) -> Option<&iroh::RelayUrl> {
+        self.relay.as_ref()
     }
     /// The LIVE address as a watch channel (`publish_address_updates`, `sidecar.rs:819-832`):
     /// the bind-time snapshot first, then every change, until the host closes.
