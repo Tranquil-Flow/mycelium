@@ -760,6 +760,11 @@ pub fn status_overlay(status: &mut Value, authority: Option<&Mutex<Authority>>, 
     };
     let pending = lock(&network.pending).clone();
     fields.insert("network".into(), network.status().to_value());
+    // Lane XB2: the reach the next run or work service starts with (same network / relay).
+    fields.insert(
+        "network_reach".into(),
+        crate::packaged_work::reach::status(&network.root, &network.work_network),
+    );
     let Some(authority) = authority else {
         // The authority's state was refused at bind (an unreadable or invalid role file among
         // them, app.py:595-611): no role is claimed for it.

@@ -357,7 +357,9 @@ impl Work {
         // loopback-only run) nothing is sent: compose, reading the interfaces itself, refuses a
         // run with a joined Mac on it by name, as at the base.
         let resolved = resolve();
-        let Some((from, _)) = resolved.choice.0.clone() else {
+        // Lane XB2: across networks the joined Mac is not on this LAN; the relay is the path.
+        let Some((from, _)) = resolved.choice.0.clone().filter(|_| resolved.reach != "relay")
+        else {
             eprintln!("local_network_probe_skipped:{}", resolved.transport);
             return Ok(());
         };
@@ -770,6 +772,12 @@ impl Work {
         // and always here (lane PHY patch 3, PHY2-01): the probe passes before the compile may have
         // read an older state of them.
         let resolved = self.host.network.resolve_run_network("owner_run");
+        // Lane XB3: a run across networks whose relay is unreachable fails closed, by name,
+        // before the local worker starts or anything is dialed (never a fallback relay or n0).
+        if crate::packaged_work::reach::require_relay(&resolved).is_err() {
+            let (code, message) = crate::packaged_work::reach::relay_refusal();
+            return Err(owner_run::OwnerRunError::with(code, Some(&message), None).into());
+        }
         let probed = self.take_preflight(&state.run_id);
         // No single private network here while a joined Mac is in the run: refused by name now,
         // before the local worker starts or anything is dialed (lane LAN round 2, F6).

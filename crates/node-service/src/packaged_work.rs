@@ -27,6 +27,9 @@ use std::{
 };
 use transport::Channel;
 type Result<T> = std::result::Result<T, String>;
+/// Lane XB2 / XA: the user's per-run network reach choice (same network / relay, portmapping).
+#[path = "packaged_work_reach.rs"]
+pub mod reach;
 pub type SessionCell = Arc<Mutex<Option<Session>>>;
 /// Explicit transport policy; no environment-selected interface or public relay fallback. The
 /// addresses it admits are verified before they get here: a member's are signed by that member's
@@ -50,6 +53,14 @@ pub enum WorkNetwork {
     /// The app's rule over another reading of the interfaces, bound under `policy`: a test that
     /// must see when, and how often, a run reads the interfaces.
     Read(InterfaceReader, LanPolicy),
+    /// Lane XB2 (ruling 29 B): this Mac's private LAN address read as [`WorkNetwork::ThisMac`]
+    /// does, under the cross-network policy (`LanPolicy::across_networks`: `reach`'s relay, hole
+    /// punching, a peer's signed address of any unicast class; `portmapping` the user's second
+    /// choice, lane XA). The user's per-run choice ([`reach`]), never a default.
+    Across {
+        reach: runtime::iroh_host::Reach,
+        portmapping: bool,
+    },
 }
 impl std::fmt::Debug for WorkNetwork {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -57,6 +68,11 @@ impl std::fmt::Debug for WorkNetwork {
             Self::Fixed(choice) => f.debug_tuple("Fixed").field(choice).finish(),
             Self::ThisMac => f.write_str("ThisMac"),
             Self::Read(_, policy) => f.debug_tuple("Read").field(policy).finish(),
+            Self::Across { reach, portmapping } => f
+                .debug_struct("Across")
+                .field("reach", reach)
+                .field("portmapping", portmapping)
+                .finish(),
         }
     }
 }
@@ -66,6 +82,16 @@ impl PartialEq for WorkNetwork {
             (Self::Fixed(a), Self::Fixed(b)) => a == b,
             (Self::ThisMac, Self::ThisMac) => true,
             (Self::Read(a, p), Self::Read(b, q)) => Arc::ptr_eq(a, b) && p == q,
+            (
+                Self::Across {
+                    reach: a,
+                    portmapping: p,
+                },
+                Self::Across {
+                    reach: b,
+                    portmapping: q,
+                },
+            ) => p == q && a.relay_url().ok() == b.relay_url().ok(),
             _ => false,
         }
     }
@@ -87,6 +113,8 @@ pub struct Resolved {
     /// [`api::lan_interface::Selection::LocalOnly`] reason). `None` on the LAN, and for a choice
     /// a caller fixed (which is deliberate, never a failed reading).
     pub local_only: Option<&'static str>,
+    /// Lane XB2: the run's reach as status names it: `same_network`, `relay` or `local_only`.
+    pub reach: &'static str,
 }
 impl WorkNetwork {
     /// 127.0.0.1 only, whatever the interfaces (`NetworkMode::LocalOnly`).
@@ -114,30 +142,48 @@ impl WorkNetwork {
         let (selection, policy) = match self {
             Self::Fixed(choice) => {
                 let transport = match &choice.0 {
-                    Some((ip, _)) => format!("lan:{ip}"),
+                    Some((ip, policy)) => format!("{}:{ip}", transport_kind(policy)),
                     None => "local_only:explicit".into(),
                 };
                 return Resolved {
                     choice: choice.clone(),
                     transport,
                     local_only: None,
+                    reach: choice.reach(),
                 };
             }
             Self::ThisMac => (read(), LanPolicy::private_only()),
             Self::Read(reader, policy) => (reader(), policy.clone()),
+            Self::Across { reach, portmapping } => match reach::across_policy(reach, *portmapping) {
+                Some(policy) => (read(), policy),
+                None => (
+                    api::lan_interface::Selection::LocalOnly("relay_invalid"),
+                    LanPolicy::private_only(),
+                ),
+            },
         };
         match selection {
             api::lan_interface::Selection::Lan(ip) => Resolved {
+                transport: format!("{}:{ip}", transport_kind(&policy)),
+                reach: policy.reach(),
                 choice: NetworkChoice(Some((ip, policy))),
-                transport: format!("lan:{ip}"),
                 local_only: None,
             },
             api::lan_interface::Selection::LocalOnly(reason) => Resolved {
                 choice: NetworkChoice::default(),
                 transport: format!("local_only:{reason}"),
                 local_only: Some(reason),
+                reach: "local_only",
             },
         }
+    }
+}
+/// `lan` (the same network) or `relay` (across networks): the log name of a bound transport.
+fn transport_kind(policy: &LanPolicy) -> &'static str {
+    if policy.relay().is_some() {
+        "relay"
+    } else {
+        "lan"
     }
 }
 /// The refusal (code, plain message) of an owner run whose own reading of this Mac's interfaces
@@ -168,6 +214,13 @@ pub fn owner_network_refusal(reason: &str) -> (&'static str, String) {
     )
 }
 impl NetworkChoice {
+    /// Lane XB2: `same_network`, `relay` or `local_only`, as status names this choice.
+    pub fn reach(&self) -> &'static str {
+        match &self.0 {
+            Some((_, policy)) => policy.reach(),
+            None => "local_only",
+        }
+    }
     /// A joined Mac's advertised work address this run's transport may dial: loopback for a
     /// loopback-only run; otherwise an address the policy admits, of the bound address's family
     /// (the run holds ONE socket of that family, which cannot reach the other one).

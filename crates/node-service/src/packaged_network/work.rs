@@ -15,7 +15,9 @@ impl Network {
     /// [`Network::resolve_work_network`] with the reason when this Mac's reading found no single
     /// private network (an owner run refuses a joined Mac by that name).
     pub fn resolve_run_network(&self, role: &str) -> crate::packaged_work::Resolved {
-        let resolved = self.work_network.resolution();
+        // Lane XB2: the user's reach choice (same network / relay) is read at each start too.
+        let resolved =
+            crate::packaged_work::reach::effective(&self.root, &self.work_network).resolution();
         eprintln!("l11_work_network:{} role={role}", resolved.transport);
         resolved
     }
