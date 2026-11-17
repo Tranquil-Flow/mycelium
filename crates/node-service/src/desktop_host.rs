@@ -738,6 +738,21 @@ impl DesktopServices {
                 });
                 reply(&admitted.request_id)
             }
+            // Lane XB patch 2 (XB-05, D1/D2): the window's network choices (this Mac's
+            // portmapping preference; the owner's same/different-networks choice for its next run).
+            ("POST", crate::packaged_work::reach::ACTION) => {
+                let owner = self.authority.as_ref().is_some_and(|authority| {
+                    authority.lock().is_ok_and(|a| !a.target && a.owner_authority().is_some())
+                });
+                let body = body
+                    .as_object()
+                    .ok_or(PublicError::new(400, "invalid_request"))?;
+                let value = self
+                    .network
+                    .reach_action(body, owner)
+                    .map_err(|code| PublicError::new(400, code))?;
+                Self::json(value)
+            }
             ("POST", path) if path.starts_with("/api/") => {
                 use api::desktop::Service as _;
                 let value = self.actions.action(

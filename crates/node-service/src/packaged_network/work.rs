@@ -27,6 +27,15 @@ impl Network {
     pub fn begin_owner_run(&self) -> Result<api::run_exchange::work_network::RunReach, &'static str> {
         self.reach.begin_run(&self.root)
     }
+    /// Lane XB patch 2 (XB-05): the window's `/api/network/reach` action on this Mac's
+    /// preferences (`crate::packaged_work::reach::action`).
+    pub(crate) fn reach_action(
+        &self,
+        body: &serde_json::Map<String, Value>,
+        owner: bool,
+    ) -> Result<Value, &'static str> {
+        crate::packaged_work::reach::action(&self.root, &self.reach, body, owner)
+    }
     /// The owner's run ended: no active choice, no active endpoints.
     pub fn end_owner_run(&self) {
         self.reach.end_run();

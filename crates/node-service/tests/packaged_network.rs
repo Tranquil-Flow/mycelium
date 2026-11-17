@@ -442,3 +442,37 @@ fn the_relay_chat_page_shows_the_windows_refusal_messages() {
     drop(core);
     std::fs::remove_dir_all(&state).unwrap_or_default();
 }
+
+/// Lane XB patch 2 (REVIEW XB-05, decisions D1/D2): the window's network choices are a real
+/// action of the packaged app (`/api/network/reach`, through the page's guarded action path),
+/// stored atomically and read back by `/api/status` (`network_reach`): this Mac's portmapping
+/// preference (default off, any role) and the owner's same/different-networks choice for its
+/// next run (owner only). Any other body is refused `invalid_request`; nothing binds or dials.
+#[test]
+fn the_window_saves_the_network_choices_through_the_packaged_action() {
+    let state = state_root("reach");
+    let (core, mut cleanup) = packaged_core(&state);
+    let reach = || status(&core)["network_reach"].clone();
+    assert_eq!(
+        (reach()["portmapping"].clone(), reach()["next_run"].clone(), reach()["active"].clone()),
+        (json!(false), json!("same_network"), Value::Null),
+        "defaults: {}",
+        reach()
+    );
+    let saved = post(&core, "/api/network/reach", json!({"portmapping": true}));
+    assert_eq!(saved.0, 200, "{}", saved.1);
+    assert_eq!(reach()["portmapping"], true, "{}", reach());
+    let refused = post(&core, "/api/network/reach", json!({"portmapping": "yes"}));
+    assert_eq!((refused.0, refused.1["error"].clone()), (400, json!("invalid_request")));
+    let created = post(&core, "/api/create", json!({"consent": consent()}));
+    assert_eq!(created.0, 200, "create: {}", created.1);
+    let chosen = post(&core, "/api/network/reach", json!({"reach": "relay"}));
+    assert_eq!(chosen.0, 200, "{}", chosen.1);
+    assert_eq!(reach()["next_run"], "relay", "{}", reach());
+    let back = post(&core, "/api/network/reach", json!({"reach": "same_network"}));
+    assert_eq!(back.0, 200, "{}", back.1);
+    assert_eq!(reach()["next_run"], "same_network", "{}", reach());
+    assert_eq!(quit(&mut cleanup), Ok(Poll::Verified));
+    drop(core);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
