@@ -127,6 +127,7 @@ impl WrongKeys {
             for _ in 0..n {
                 endpoints.push(
                     Endpoint::builder(presets::Minimal)
+                        .portmapper_config(iroh::endpoint::PortmapperConfig::Disabled)
                         .relay_mode(RelayMode::Disabled)
                         .clear_address_lookup()
                         .clear_ip_transports()

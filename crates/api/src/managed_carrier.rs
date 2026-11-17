@@ -144,6 +144,7 @@ impl LocalMailboxCarrier {
             rt.block_on(async move {
                 let bind = Endpoint::builder(presets::Minimal)
                     .relay_mode(RelayMode::Disabled).clear_address_lookup().clear_ip_transports()
+                    .portmapper_config(iroh::endpoint::PortmapperConfig::Disabled)
                     .bind_addr(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
                     .map_err(|_| OwnerError("control_carrier_bind_failed"))?
                     .alpns(vec![Channel::NodeControl.alpn().to_vec()]).bind();

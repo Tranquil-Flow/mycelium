@@ -65,6 +65,7 @@ fn host<'a>(rt: &'a tokio::runtime::Runtime, clock: &Mono) -> LoopbackHost<'a> {
 /// A plain iroh endpoint on its own fresh 127.0.0.1 socket and key.
 async fn raw_endpoint() -> (Endpoint, SocketAddr) {
     let endpoint = Endpoint::builder(presets::Minimal)
+        .portmapper_config(iroh::endpoint::PortmapperConfig::Disabled)
         .relay_mode(RelayMode::Disabled)
         .clear_address_lookup()
         .clear_ip_transports()

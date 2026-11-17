@@ -26,12 +26,12 @@
 //! (`LAN_PATH_REFUSED`) as soon as any path's remote address is not admitted;
 //! see `confine`.
 pub use crate::iroh_cleanup::{HostCloseReport, close_endpoint_and_native};
-use crate::iroh_cross::{CrossGate, cross_builder};
+use crate::iroh_cross::{CrossGate, cross_builder, direct_addr_kind};
 use crate::iroh_lan_filter::{Admission, LanTransport, Pin, from_custom, to_custom};
 use budgets::{BudgetId, Entries, MonoInstant};
 use iroh::{
     Endpoint, EndpointAddr, RelayMode, TransportAddr,
-    endpoint::{Connection, presets},
+    endpoint::{Connection, PortmapperConfig, presets},
 };
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
@@ -91,6 +91,8 @@ pub struct LanPolicy {
     hosts: Option<Vec<IpAddr>>,
     /// Lane XB2: `Some` = the cross-network choice ([`LanPolicy::across_networks`]).
     relay: Option<iroh::RelayUrl>,
+    /// Lane XA: the user's portmapping choice (default off).
+    portmapping: bool,
 }
 impl LanPolicy {
     pub fn private_only() -> Self {
@@ -104,6 +106,18 @@ impl LanPolicy {
     pub fn across_networks(mut self, relay: iroh::RelayUrl) -> Self {
         self.relay = Some(relay);
         self
+    }
+    /// Lane XA (ruling 29 A): ask the local router for a port mapping (UPnP / PCP / NAT-PMP) so a
+    /// peer on another network may reach this endpoint directly. A user's choice, DEFAULT OFF:
+    /// its SSDP multicast can raise a firewall prompt on macOS. Only an endpoint across networks
+    /// uses it ([`LanPolicy::across_networks`]); every other builder disables it.
+    pub fn with_portmapping(mut self, on: bool) -> Self {
+        self.portmapping = on;
+        self
+    }
+    /// Lane XA: whether the run asked for portmapping.
+    pub fn portmapping(&self) -> bool {
+        self.portmapping
     }
     /// The relay of the cross-network choice; `None` on the same network.
     pub fn relay(&self) -> Option<&iroh::RelayUrl> {
@@ -244,7 +258,7 @@ pub fn selected_path(connection: &Connection) -> Option<&'static str> {
         .map(|path| if path.is_relay() { "relay" } else { "direct" })
 }
 /// Lane XB3 at a run's start: bind a throwaway endpoint across networks on `interface` under
-/// `policy` (a fresh key, no channel served) and wait at most
+/// `policy` (a fresh key, no portmapping, no channel served) and wait at most
 /// `SidecarReadyAddressWindow` (the oracle's wait for a relay address) for its relay.
 /// `Err(RELAY_UNREACHABLE)` when it cannot be reached; `Ok` at once for a same-network policy.
 pub fn relay_reachable(interface: IpAddr, policy: &LanPolicy) -> Result<(), &'static str> {
@@ -269,7 +283,7 @@ pub fn relay_reachable(interface: IpAddr, policy: &LanPolicy) -> Result<(), &'st
         iroh::SecretKey::generate(),
         &[Channel::Router],
         interface,
-        policy.clone(),
+        policy.clone().with_portmapping(false),
     )
     .map_err(unreachable)?;
     let ready = host.relay_ready(&clock, after(BudgetId::SidecarReadyAddressWindow)?);
@@ -335,7 +349,8 @@ pub(crate) fn relay_builder(
     // `ForceRelay` removes every direct IP transport (`sidecar.rs:846-852 @ f4e366e9`).
     let mut builder = Endpoint::builder(presets::Minimal)
         .clear_address_lookup()
-        .relay_mode(RelayMode::Custom(iroh::RelayMap::from(reach.relay_url()?)));
+        .relay_mode(RelayMode::Custom(iroh::RelayMap::from(reach.relay_url()?)))
+        .portmapper_config(PortmapperConfig::Disabled);
     if mode == NetworkMode::ForceRelay {
         builder = builder.clear_ip_transports();
     }
@@ -386,15 +401,26 @@ struct LanReuse {
     alpns: Vec<Vec<u8>>,
 }
 type Handshake = Result<(Connection, Option<Pin>), Error>;
+/// The builder of a local-only endpoint: 127.0.0.1, no relay, no address lookup.
+pub(crate) fn local_builder() -> Result<iroh::endpoint::Builder, Error> {
+    Endpoint::builder(presets::Minimal)
+        .relay_mode(RelayMode::Disabled)
+        .clear_address_lookup()
+        .clear_ip_transports()
+        .bind_addr(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+        .map(|builder| builder.portmapper_config(PortmapperConfig::Disabled))
+        .map_err(|_| Error::Unavailable)
+}
 /// The builder of a direct-LAN endpoint: no relay, no address lookup and NO
 /// IP transport; the pre-send LAN transport owns the one bound socket (see
 /// `iroh_lan_filter`).
-fn lan_builder(transport: Arc<LanTransport>) -> iroh::endpoint::Builder {
+pub(crate) fn lan_builder(transport: Arc<LanTransport>) -> iroh::endpoint::Builder {
     Endpoint::builder(presets::Minimal)
         .relay_mode(RelayMode::Disabled)
         .clear_address_lookup()
         .clear_ip_transports()
         .add_custom_transport(transport)
+        .portmapper_config(PortmapperConfig::Disabled)
 }
 impl LoopbackHost<'_> {
     fn abort_path_guards(&self) {
@@ -716,12 +742,7 @@ impl<'a> LoopbackHost<'a> {
         let lan_socket = lan_transport.as_ref().map(|t| t.local());
         let endpoint = runtime.block_on(async {
             let mut builder = match mode {
-                NetworkMode::LocalOnly => Endpoint::builder(presets::Minimal)
-                    .relay_mode(RelayMode::Disabled)
-                    .clear_address_lookup()
-                    .clear_ip_transports()
-                    .bind_addr(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
-                    .map_err(|_| Error::Unavailable)?,
+                NetworkMode::LocalOnly => local_builder()?,
                 NetworkMode::DirectLan => {
                     lan_builder(lan_transport.clone().ok_or(Error::Unavailable)?)
                 }
@@ -921,6 +942,37 @@ impl<'a> LoopbackHost<'a> {
             .fold(EndpointAddr::new(endpoint.id()), |addr, socket| {
                 addr.with_ip_addr(socket)
             }))
+    }
+    /// Lane XA status: this host's direct addresses with their kind: `local` (the bound socket),
+    /// `qad` (the public address the relay's QUIC address discovery reported), `portmapped` (any
+    /// other public address while the run asked for portmapping: the router's mapping), else
+    /// `public`. Empty unless bound across networks or locally.
+    pub fn direct_addrs(&self) -> Result<Vec<(SocketAddr, &'static str)>, Error> {
+        use iroh::Watcher;
+        let endpoint = self.endpoint()?;
+        let bound = endpoint.bound_sockets();
+        let Some(gate) = &self.cross else {
+            return Ok(bound.into_iter().map(|s| (s, "local")).collect());
+        };
+        let report = endpoint.net_report().get();
+        let qad: Vec<SocketAddr> = report
+            .iter()
+            .flat_map(|r| {
+                [
+                    r.global_v4.map(SocketAddr::V4),
+                    r.global_v6.map(SocketAddr::V6),
+                ]
+            })
+            .flatten()
+            .collect();
+        Ok(endpoint
+            .addr()
+            .ip_addrs()
+            .map(|addr| {
+                let kind = direct_addr_kind(*addr, &bound, &qad, gate.policy().portmapping());
+                (*addr, kind)
+            })
+            .collect())
     }
     /// TLS authenticates an endpoint, not membership. Pass the connection to
     /// RouterReceiver::new with the independent current allow-list binding.

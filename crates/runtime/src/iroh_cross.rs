@@ -25,7 +25,10 @@
 //!   (`noq-proto n0_nat_traversal`, bounded attempts per round); that is the B8f surface, now
 //!   reachable by an admitted key. An unadmitted key's connection is closed by the gate above.
 use crate::iroh_host::LanPolicy;
-use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMode, endpoint::presets};
+use iroh::{
+    Endpoint, EndpointAddr, EndpointId, RelayMode,
+    endpoint::{PortmapperConfig, presets},
+};
 use std::{
     net::{IpAddr, SocketAddr},
     sync::{
@@ -36,7 +39,8 @@ use std::{
 use transport::Error;
 
 /// The builder of an endpoint across networks: Mycelium's relay (the policy's), no address
-/// lookup, one IP socket on `interface`.
+/// lookup, one IP socket on `interface`, the router asked for a port mapping only when the run
+/// chose it (lane XA, default off).
 pub(crate) fn cross_builder(
     interface: IpAddr,
     policy: &LanPolicy,
@@ -47,9 +51,36 @@ pub(crate) fn cross_builder(
         .relay_mode(RelayMode::Custom(iroh::RelayMap::from(relay.clone())))
         .clear_ip_transports()
         .bind_addr(SocketAddr::new(interface, 0))
+        .map(|builder| {
+            builder.portmapper_config(if policy.portmapping() {
+                PortmapperConfig::default()
+            } else {
+                PortmapperConfig::Disabled
+            })
+        })
         .map_err(|_| Error::Unavailable)
 }
 
+/// Lane XA status: the kind of one of this endpoint's direct addresses. `local` is a bound socket,
+/// `qad` the public address the relay's QUIC address discovery reported; any other public address
+/// is the router's mapping (`portmapped`) when the run asked for portmapping, else `public` (e.g.
+/// iroh's QAD address with the local port).
+pub(crate) fn direct_addr_kind(
+    addr: SocketAddr,
+    bound: &[SocketAddr],
+    qad: &[SocketAddr],
+    portmapping: bool,
+) -> &'static str {
+    if bound.contains(&addr) {
+        "local"
+    } else if qad.contains(&addr) {
+        "qad"
+    } else if portmapping {
+        "portmapped"
+    } else {
+        "public"
+    }
+}
 /// The monotonic clock of a relay probe ([`crate::iroh_host::relay_reachable`]).
 #[derive(Debug)]
 pub(crate) struct ProbeClock(std::time::Instant);

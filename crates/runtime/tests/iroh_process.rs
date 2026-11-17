@@ -196,6 +196,7 @@ fn iroh_child_fixture() {
         // Exact local-only builder in sidecar.rs:834-865 @ f4e366e9.
         let endpoint = Endpoint::builder(presets::Minimal)
             .relay_mode(RelayMode::Disabled).clear_address_lookup().clear_ip_transports()
+            .portmapper_config(iroh::endpoint::PortmapperConfig::Disabled)
             .bind_addr(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)).unwrap()
             .alpns(vec![if mode == "alpn" { Channel::NodeControl } else { Channel::Router }.alpn().to_vec()])
             .bind().await.unwrap();
