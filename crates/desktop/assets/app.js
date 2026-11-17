@@ -717,9 +717,17 @@ for (const trigger of document.querySelectorAll('summary > button.disclosure-btn
   if (anchor) anchor.after(card); else document.getElementById('main')?.append(card);
   function describe(active) {
     if (!active) return '';
-    if (active.reach === 'relay') return `This run: Macs on different networks, through the Mycelium relay (${active.relay_url})${active.portmapping ? ', portmapping on' : ''}.`;
+    if (active.reach === 'relay') return `This run: Macs on different networks, through the Mycelium relay (${active.relay_url})${active.portmapping ? ', portmapping requested (whether the router opened a port cannot be seen in this build)' : ''}.`;
     if (active.reach === 'same_network') return 'This run: Macs on the same network.';
     return 'This run: this Mac only (no network to another Mac).';
+  }
+  // Lane XB patch 3 (REVIEW XB2-04): the path each connection to another Mac uses NOW, as status
+  // samples it (relay or direct), not only the mode the run allows.
+  function livePaths(reach) {
+    const paths = Array.isArray(reach.paths) ? reach.paths : [];
+    if (!paths.length) return reach.active ? 'No connection to another Mac right now.' : '';
+    const kind = (p) => p.path === 'relay' ? 'through the Mycelium relay' : p.path === 'direct' ? 'direct' : 'no path chosen yet';
+    return `Live paths now: ${paths.map((p) => `${kind(p)} (${p.direction === 'in' ? 'from' : 'to'} ${p.remote}…)`).join('; ')}.`;
   }
   function render(status) {
     const reach = status.network_reach; const role = status.installation_role;
@@ -732,7 +740,7 @@ for (const trigger of document.querySelectorAll('summary > button.disclosure-btn
     sameRadio.disabled = acrossRadio.disabled = reachBusy || running;
     mapBox.checked = reach.portmapping === true; mapBox.disabled = reachBusy;
     const error = reach.error ? `${REACH_ERRORS[reach.error] || 'Network problem.'} (${reach.error})` : '';
-    stateLine.textContent = [note, error, describe(reach.active) || (owner ? `Next run: ${reach.next_run === 'relay' ? 'Macs on different networks (through the Mycelium relay)' : 'Macs on the same network'}.` : 'This Mac follows the owner’s choice for each run.')].filter(Boolean).join(' ');
+    stateLine.textContent = [note, error, describe(reach.active) || (owner ? `Next run: ${reach.next_run === 'relay' ? 'Macs on different networks (through the Mycelium relay)' : 'Macs on the same network'}.` : 'This Mac follows the owner’s choice for each run.'), livePaths(reach)].filter(Boolean).join(' ');
   }
   async function poll() {
     try { render(await api('/api/status')); } catch (error) { /* the main poll reports a lost connection */ }

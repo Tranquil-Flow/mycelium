@@ -356,3 +356,33 @@ fn the_page_offers_the_network_choices_in_one_contained_section() {
         );
     }
 }
+
+/// The network section's code (comments stripped), between its two markers.
+fn network_section() -> String {
+    let begin = "// ---- Network reach (lane XB patch 2) ----";
+    let end = "// ---- end network reach ----";
+    script_without_comments(&APP_JS[APP_JS.find(begin).unwrap()..APP_JS.find(end).unwrap()])
+}
+
+/// Lane XB patch 3 (REVIEW XB2-04): the section shows the LIVE path of each connection to another
+/// Mac from `status.network_reach.paths` (relay or direct, sampled when status is read), not only
+/// the configured mode, and names portmapping honestly: requested, its outcome not visible in this
+/// build; it never claims a mapping.
+#[test]
+fn the_network_section_shows_live_paths_and_portmapping_honestly() {
+    let section = network_section();
+    for needed in [
+        ".paths",
+        "Live paths now",
+        "through the Mycelium relay",
+        "direct",
+        "portmapping requested",
+        "cannot be seen in this build",
+    ] {
+        assert!(section.contains(needed), "the section lacks {needed}");
+    }
+    assert!(
+        !section.contains("portmapped"),
+        "the section never claims a mapping"
+    );
+}

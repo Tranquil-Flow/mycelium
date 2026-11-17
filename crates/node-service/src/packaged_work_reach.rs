@@ -189,16 +189,38 @@ pub fn owner_choice(root: &Path, relay: &Reach) -> Result<RunReach, &'static str
 pub fn portmapping(root: &Path) -> Result<bool, &'static str> {
     load(root).map(|choice| choice.portmapping)
 }
-/// `{reach, relay_url, portmapping}` of a bound choice (the ACTIVE endpoint's, for status).
+/// Lane XB patch 3 (REVIEW XB2-04): what status says of a requested portmapping. iroh 1.0.2
+/// exposes a granted mapping only through its `metrics` feature, which this build does not
+/// enable: the request is known, its outcome is not.
+pub const PORTMAPPING_OUTCOME: &str = "requested, outcome not observable in this build";
+/// `{reach, relay_url, portmapping, portmapping_outcome}` of a bound choice (the ACTIVE
+/// endpoint's, for status): `portmapping` is whether this Mac's endpoints REQUESTED a mapping.
 pub fn active_document(choice: &NetworkChoice) -> Value {
     match &choice.0 {
-        Some((_, policy)) => json!({
-            "reach": policy.reach(),
-            "relay_url": policy.relay().map(ToString::to_string),
-            "portmapping": policy.relay().is_some() && policy.portmapping(),
-        }),
-        None => json!({"reach": "local_only", "relay_url": null, "portmapping": false}),
+        Some((_, policy)) => {
+            let requested = policy.relay().is_some() && policy.portmapping();
+            json!({
+                "reach": policy.reach(),
+                "relay_url": policy.relay().map(ToString::to_string),
+                "portmapping": requested,
+                "portmapping_outcome": requested.then_some(PORTMAPPING_OUTCOME),
+            })
+        }
+        None => json!({"reach": "local_only", "relay_url": null, "portmapping": false,
+            "portmapping_outcome": null}),
     }
+}
+/// Lane XB patch 3 (REVIEW XB2-04): every live connection of this Mac to another Mac, sampled
+/// now (`runtime::iroh_paths`): `{remote, direction, reach, path}`, `path` = `relay` / `direct` /
+/// `none` as iroh selected it at this moment.
+pub fn live_paths() -> Value {
+    runtime::iroh_paths::snapshot()
+        .into_iter()
+        .map(|sample| {
+            json!({"remote": sample.remote, "direction": sample.direction,
+                "reach": sample.reach, "path": sample.path})
+        })
+        .collect()
 }
 /// A named refusal of a joined Mac's work start, kept for the run it refused.
 #[derive(Clone, Debug)]
@@ -322,7 +344,8 @@ impl State {
         }
     }
     /// `status.network_reach`: the ACTIVE endpoints' mode (`null` when none is bound), the
-    /// owner's choice for its next run, this Mac's portmapping preference and a named error.
+    /// owner's choice for its next run, this Mac's portmapping preference, a named error and the
+    /// live path of every connection to another Mac (`paths`, sampled now: XB2-04).
     pub fn status(&self, root: &Path) -> Value {
         let stored = load(root);
         let error = held(&self.refusal)
@@ -336,6 +359,7 @@ impl State {
             "portmapping": stored.map(|c| c.portmapping).unwrap_or(false),
             "relay_url": self.relay.relay_url().ok().map(|u| u.to_string()),
             "error": error,
+            "paths": live_paths(),
         })
     }
 }
@@ -638,6 +662,109 @@ mod tests {
             Ok(true),
             "the next run reads it"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Lane XB patch 3 (REVIEW XB2-04): status carries LIVE path evidence, sampled when it is
+    /// read, for every connection to another Mac (`paths`: remote, direction, the run's reach, and
+    /// the path iroh selected now): here a relay-only test double (`relay`; the probe and the
+    /// hotspot run show a real one) and a real same-network connection on loopback, the LAN double
+    /// (`direct`). A connection that ends leaves the list. Portmapping is named honestly: requested,
+    /// its outcome not observable in this build; status never claims a mapping.
+    #[test]
+    fn status_samples_each_live_peer_path_and_names_portmapping_honestly() {
+        use runtime::iroh_host::LoopbackHost;
+        use transport::Channel;
+        let dir = root("paths");
+        let state = State::new(Reach::Shipped);
+        let paths = |state: &State| state.status(&dir)["paths"].clone();
+        let has = |paths: &Value, remote: &str, path: &str| {
+            paths.as_array().is_some_and(|all| {
+                all.iter()
+                    .any(|p| p["remote"] == remote && p["path"] == path)
+            })
+        };
+        let relayed = runtime::iroh_paths::register(
+            "relay-double".into(),
+            "out",
+            "relay",
+            Box::new(|| Some("relay")),
+        );
+        let now = paths(&state);
+        assert!(has(&now, "relay-double", "relay"), "{now}");
+        assert!(
+            now.as_array().unwrap().iter().any(|p| p
+                == &json!({"remote": "relay-double", "direction": "out", "reach": "relay",
+                    "path": "relay"})),
+            "{now}"
+        );
+        drop(relayed);
+        assert!(!has(&paths(&state), "relay-double", "relay"));
+        // The LAN double: two direct-LAN endpoints on loopback under an explicit-peer policy.
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+        let clock = api::managed_carrier::HostClock::default();
+        let loopback = IpAddr::from([127, 0, 0, 1]);
+        let until = |clock: &api::managed_carrier::HostClock| {
+            api::joined_member::work::until(clock, budgets::BudgetId::WorkerStartup).unwrap()
+        };
+        let bind = |key: &iroh::SecretKey| {
+            LoopbackHost::bind_lan(
+                &rt,
+                &clock,
+                until(&clock),
+                key.clone(),
+                &[Channel::Router],
+                loopback,
+                LanPolicy::with_explicit(vec![loopback]).unwrap(),
+            )
+            .unwrap()
+        };
+        let (member_key, owner_key) = (iroh::SecretKey::generate(), iroh::SecretKey::generate());
+        let mut member = bind(&member_key);
+        member.admit_peer_ids(&[owner_key.public()]).unwrap();
+        let address = member.address().unwrap();
+        let mut owner = bind(&owner_key);
+        let short: String = member_key.public().to_string().chars().take(12).collect();
+        std::thread::scope(|scope| {
+            let accepting = scope.spawn(|| loop {
+                match member.accept(&clock, until(&clock)) {
+                    Err(transport::Error::Authentication) => continue,
+                    other => return other.unwrap(),
+                }
+            });
+            let dialled = owner.connect(&address, &clock, until(&clock)).unwrap();
+            let inbound = accepting.join().unwrap();
+            let began = std::time::Instant::now();
+            while !has(&paths(&state), &short, "direct") && began.elapsed().as_secs() < 5 {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            let now = paths(&state);
+            assert!(has(&now, &short, "direct"), "{now}");
+            dialled.close(0u32.into(), b"done");
+            rt.block_on(inbound.closed());
+        });
+        assert!(!has(&paths(&state), &short, "direct"));
+        owner.close(&clock, until(&clock)).unwrap();
+        member.close(&clock, until(&clock)).unwrap();
+        // Portmapping: requested, never claimed.
+        let relay_run = NetworkChoice(Some((
+            loopback,
+            LanPolicy::private_only()
+                .across_networks(mycelium())
+                .with_portmapping(true),
+        )));
+        state.activate(&relay_run);
+        let status = state.status(&dir);
+        assert_eq!(
+            status["active"]["portmapping_outcome"],
+            "requested, outcome not observable in this build",
+            "{status}"
+        );
+        assert!(!status.to_string().contains("portmapped"), "{status}");
         std::fs::remove_dir_all(&dir).ok();
     }
 

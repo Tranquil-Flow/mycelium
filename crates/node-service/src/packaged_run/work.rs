@@ -904,8 +904,6 @@ impl Work {
         }
         let network = resolved.choice;
         lock(&self.resident).network = Some(network.clone());
-        // Lane XB patch 2 (XB-06): status names the run's ACTIVE transport.
-        self.host.network.reach.activate(&network);
         // The first advertised address the run's transport refuses: its refusal is named below.
         let refused_at = std::cell::Cell::new(None);
         let admits = |address: std::net::SocketAddr| {
@@ -921,7 +919,9 @@ impl Work {
                 return Err(StepError::Stopped);
             }
             match self.local(&network) {
-                Ok(()) => {}
+                // Lane XB patch 3 (REVIEW XB2-04): status names the run's transport ACTIVE only
+                // once this Mac's own work endpoints are bound (across networks: with their relay).
+                Ok(()) => self.host.network.reach.activate(&network),
                 Err(StepError::Refused(e)) if e.code == "member_work_renewing" => {
                     env.progress("member_work_renewing");
                 }

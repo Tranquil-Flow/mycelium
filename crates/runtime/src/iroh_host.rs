@@ -1072,6 +1072,7 @@ impl<'a> LoopbackHost<'a> {
             return Err(error);
         }
         self.confine(&connection, pin)?;
+        self.observe_path(&connection, "in");
         Ok(connection)
     }
     /// Keep a completed, admitted connection for the next [`Self::accept`].
@@ -1455,7 +1456,62 @@ impl<'a> LoopbackHost<'a> {
             return Err(late_outcome(error, self.close_late(connection)));
         }
         self.confine(&connection, pin)?;
+        self.observe_path(&connection, "out");
         Ok(connection)
+    }
+    /// Lane XB patch 3 (REVIEW XB2-04): a connection to another Mac (direct LAN, or across
+    /// networks) is registered in [`crate::iroh_paths`] for its lifetime, by a weak handle (status
+    /// samples its selected path whenever it is read), and its path type is logged:
+    /// `l11_path:<relay|direct|none>` when first seen and on every change, `l11_path_closed:<last>`
+    /// when it ends (or this host closes). Each route epoch is one connection, so a run's log has
+    /// one line per epoch at least. Loopback-only hosts are not another Mac's: nothing is kept.
+    fn observe_path(&self, connection: &Connection, direction: &'static str) {
+        let reach = match self.mode {
+            NetworkMode::CrossNetwork => "relay",
+            NetworkMode::DirectLan => "same_network",
+            _ => return,
+        };
+        let Ok(tick) = budget(BudgetId::SidecarReceivePollWait) else {
+            return;
+        };
+        let remote: String = connection.remote_id().to_string().chars().take(12).collect();
+        let weak = connection.weak_handle();
+        let sampled = weak.clone();
+        let registration = crate::iroh_paths::register(
+            remote.clone(),
+            direction,
+            reach,
+            Box::new(move || {
+                sampled
+                    .upgrade()
+                    .filter(|c| c.close_reason().is_none())
+                    .map(|c| crate::iroh_paths::path_kind(&c))
+            }),
+        );
+        let mut log = crate::iroh_paths::PathLog::new(remote, direction, reach, registration);
+        let task = self.runtime.spawn(async move {
+            let closed = weak.closed();
+            tokio::pin!(closed);
+            loop {
+                let Some(now) = weak
+                    .upgrade()
+                    .filter(|c| c.close_reason().is_none())
+                    .map(|c| crate::iroh_paths::path_kind(&c))
+                else {
+                    break;
+                };
+                log.saw(now);
+                tokio::select! {
+                    _ = &mut closed => break,
+                    () = tokio::time::sleep(tick) => {}
+                }
+            }
+            drop(log);
+        });
+        if let Ok(mut guards) = self.path_guards.lock() {
+            guards.retain(|g| !g.is_finished());
+            guards.push(task);
+        }
     }
     /// Closes admission before waiting. A failed/expired close retains endpoint
     /// ownership for an explicit retry; it never grants native cleanup proof.

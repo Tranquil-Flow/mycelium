@@ -378,3 +378,145 @@ fn an_unadmitted_key_is_never_dialled_across_networks_zero_outbound_probes() {
     );
     close(&mut host, &clock);
 }
+
+/// Lane XB patch 3 (REVIEW XB2-04): LIVE path evidence. Every connection a host on another Mac's
+/// network dials or accepts is registered (`runtime::iroh_paths`) for its lifetime and sampled
+/// when status reads it: here two endpoints across networks reach each other over a direct IP
+/// path (the loopback stands for another network, the relay is dead), so BOTH ends report
+/// `direct`, under the run's reach `relay`, with their direction; once the connection is closed
+/// it is no longer reported. (A relayed path needs a live relay: the packaged status test uses a
+/// relay-only double for it, and the probe / hotspot run show the real one.)
+#[test]
+fn a_live_connection_reports_its_selected_path_on_both_ends_until_it_closes() {
+    use runtime::iroh_paths::snapshot;
+    let rt = runtime();
+    let clock = Mono(Instant::now());
+    let (server_key, client_key) = (SecretKey::generate(), SecretKey::generate());
+    let short = |key: &SecretKey| key.public().to_string().chars().take(12).collect::<String>();
+    let mine = |key: &SecretKey| {
+        snapshot()
+            .into_iter()
+            .filter(|sample| sample.remote == short(key))
+            .collect::<Vec<_>>()
+    };
+    let mut server = bind(&rt, &clock, &server_key, across()).unwrap();
+    server.admit_peer_ids(&[client_key.public()]).unwrap();
+    let address = server.address().unwrap();
+    let signed = EndpointAddr::from_parts(
+        address.id,
+        address.ip_addrs().map(|s| iroh::TransportAddr::Ip(*s)),
+    );
+    let mut client = bind(&rt, &clock, &client_key, across()).unwrap();
+    std::thread::scope(|scope| {
+        let accepted = scope.spawn(|| {
+            server
+                .accept(&clock, deadline(&clock, B::SidecarLocalHandshake))
+                .unwrap()
+        });
+        let dialled = client
+            .connect(&signed, &clock, deadline(&clock, B::SidecarLocalHandshake))
+            .unwrap();
+        let inbound = accepted.join().unwrap();
+        // Sampled when read: wait (bounded) for iroh to have selected the path.
+        let began = Instant::now();
+        let (out, into) = loop {
+            let (out, into) = (mine(&server_key), mine(&client_key));
+            let selected = |samples: &[runtime::iroh_paths::PathSample]| {
+                samples.iter().any(|s| s.path != "none")
+            };
+            if (selected(&out) && selected(&into)) || began.elapsed().as_secs() >= 5 {
+                break (out, into);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        assert_eq!(out.len(), 1, "{out:?}");
+        assert_eq!(
+            (out[0].direction, out[0].reach, out[0].path),
+            ("out", "relay", "direct"),
+            "{out:?}"
+        );
+        assert_eq!(into.len(), 1, "{into:?}");
+        assert_eq!(
+            (into[0].direction, into[0].reach, into[0].path),
+            ("in", "relay", "direct"),
+            "{into:?}"
+        );
+        dialled.close(0u32.into(), b"done");
+        rt.block_on(inbound.closed());
+        drop((dialled, inbound));
+    });
+    assert!(mine(&server_key).is_empty(), "{:?}", mine(&server_key));
+    assert!(mine(&client_key).is_empty(), "{:?}", mine(&client_key));
+    close(&mut client, &clock);
+    close(&mut server, &clock);
+}
+
+/// Lane XB patch 3 (REVIEW XB2-04), the LAN double: two direct-LAN endpoints on the same network
+/// (loopback under an explicit-peer policy, as the packaged LAN tests run) report `direct` under
+/// the reach `same_network` while connected, and nothing once closed.
+#[test]
+fn a_live_same_network_connection_reports_a_direct_path() {
+    use runtime::iroh_paths::snapshot;
+    let rt = runtime();
+    let clock = Mono(Instant::now());
+    let lan = || LanPolicy::with_explicit(vec![LOOPBACK]).unwrap();
+    let (member_key, owner_key) = (SecretKey::generate(), SecretKey::generate());
+    let short = |key: &SecretKey| key.public().to_string().chars().take(12).collect::<String>();
+    let mine = |key: &SecretKey| {
+        snapshot()
+            .into_iter()
+            .filter(|sample| sample.remote == short(key))
+            .collect::<Vec<_>>()
+    };
+    let mut member = bind(&rt, &clock, &member_key, lan()).unwrap();
+    assert_eq!(member.mode(), NetworkMode::DirectLan);
+    member.admit_peer_ids(&[owner_key.public()]).unwrap();
+    let address = member.address().unwrap();
+    let mut owner = bind(&rt, &clock, &owner_key, lan()).unwrap();
+    std::thread::scope(|scope| {
+        let accepting = scope.spawn(|| {
+            let window = deadline(&clock, B::WorkerStartup);
+            loop {
+                match member.accept(&clock, window) {
+                    Err(Error::Authentication) => continue,
+                    other => return other.unwrap(),
+                }
+            }
+        });
+        let dialled = owner
+            .connect(&address, &clock, deadline(&clock, B::WorkerStartup))
+            .unwrap();
+        let inbound = accepting.join().unwrap();
+        let began = Instant::now();
+        let (out, into) = loop {
+            let (out, into) = (mine(&member_key), mine(&owner_key));
+            let selected = |samples: &[runtime::iroh_paths::PathSample]| {
+                samples.iter().any(|s| s.path != "none")
+            };
+            if (selected(&out) && selected(&into)) || began.elapsed().as_secs() >= 5 {
+                break (out, into);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        };
+        assert_eq!(
+            out.iter()
+                .map(|s| (s.direction, s.reach, s.path))
+                .collect::<Vec<_>>(),
+            vec![("out", "same_network", "direct")],
+            "{out:?}"
+        );
+        assert_eq!(
+            into.iter()
+                .map(|s| (s.direction, s.reach, s.path))
+                .collect::<Vec<_>>(),
+            vec![("in", "same_network", "direct")],
+            "{into:?}"
+        );
+        dialled.close(0u32.into(), b"done");
+        rt.block_on(inbound.closed());
+        drop((dialled, inbound));
+    });
+    assert!(mine(&member_key).is_empty() && mine(&owner_key).is_empty());
+    close(&mut owner, &clock);
+    close(&mut member, &clock);
+}

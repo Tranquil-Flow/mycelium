@@ -26,6 +26,8 @@ pub(crate) mod iroh_lan_filter;
 #[cfg(feature = "iroh-adapter")]
 pub mod iroh_managed;
 #[cfg(feature = "iroh-adapter")]
+pub mod iroh_paths;
+#[cfg(feature = "iroh-adapter")]
 pub mod iroh_pool;
 #[cfg(feature = "iroh-adapter")]
 pub mod iroh_receive;
