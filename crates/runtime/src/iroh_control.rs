@@ -200,7 +200,12 @@ pub(crate) fn connect_failure(
     let now = std::time::Instant::now();
     let mut repeats = connect_repeats();
     repeats.forget_idle(now);
-    if let Some(line) = repeats.line((target.clone(), code), now, &format!("{code} target={target}"), &fields) {
+    if let Some(line) = repeats.line(
+        (target.clone(), code),
+        now,
+        &format!("{code} target={target}"),
+        &fields,
+    ) {
         eprintln!("{line}");
     }
 }
@@ -216,11 +221,15 @@ pub(crate) fn connect_succeeded(peer: &EndpointAddr) {
     }
 }
 /// The process's control connect failures, per dialled endpoint and code.
-fn connect_repeats() -> std::sync::MutexGuard<'static, crate::repeats::Repeats<(String, &'static str)>> {
-    static REPEATS: std::sync::OnceLock<std::sync::Mutex<crate::repeats::Repeats<(String, &'static str)>>> =
-        std::sync::OnceLock::new();
+fn connect_repeats()
+-> std::sync::MutexGuard<'static, crate::repeats::Repeats<(String, &'static str)>> {
+    static REPEATS: std::sync::OnceLock<
+        std::sync::Mutex<crate::repeats::Repeats<(String, &'static str)>>,
+    > = std::sync::OnceLock::new();
     REPEATS
-        .get_or_init(|| std::sync::Mutex::new(crate::repeats::Repeats::new(crate::repeats::period())))
+        .get_or_init(|| {
+            std::sync::Mutex::new(crate::repeats::Repeats::new(crate::repeats::period()))
+        })
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }

@@ -746,7 +746,9 @@ impl<H: MemberHost> AgentHost for MemberView<'_, H> {
                 Err(code) => waiting("error", Some(&code), None),
             };
         }
-        let acquisition = current.take().unwrap_or_else(|| unreachable!("checked above"));
+        let acquisition = current
+            .take()
+            .unwrap_or_else(|| unreachable!("checked above"));
         let status = acquisition.status();
         let progress =
             json!({"done_bytes": status.downloaded_bytes, "total_bytes": status.total_bytes});

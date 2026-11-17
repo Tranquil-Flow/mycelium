@@ -32,7 +32,7 @@ fn model_output() -> ModelStepOutput {
     };
     let digest = format!("sha256:{}", "ab".repeat(32));
     ModelStepOutput {
-            forced_slice: false,
+        forced_slice: false,
         prepared: PreparedSource {
             model: model.clone(),
             manifest_digest: digest.clone(),

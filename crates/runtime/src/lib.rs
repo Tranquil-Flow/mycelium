@@ -49,9 +49,9 @@ pub mod observe_owner;
 pub mod prefill_watch;
 pub mod published;
 pub mod relay;
-pub mod repeats;
 #[cfg(unix)]
 pub mod relay_process;
+pub mod repeats;
 pub mod rollover;
 pub mod shutdown;
 #[cfg(all(feature = "iroh-adapter", unix))]

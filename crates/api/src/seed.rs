@@ -111,7 +111,10 @@ impl SeedError {
     /// when it named none). Every other error is raised on this side: transport, framing, an
     /// escaped `http.client` class, and the checks of a 2xx answer (whose status is 2xx).
     pub fn answered(&self) -> bool {
-        self.raw.is_none() && self.status.is_some_and(|status| !(200..300).contains(&status))
+        self.raw.is_none()
+            && self
+                .status
+                .is_some_and(|status| !(200..300).contains(&status))
     }
 }
 

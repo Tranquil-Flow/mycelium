@@ -47,7 +47,10 @@ fn carried_over_assets_keep_their_oracle_digests_and_divergences_are_recorded() 
         recorded_set.len(),
         "a file is recorded in more than one section"
     );
-    assert_eq!(actual, recorded_set, "assets/ and the provenance record disagree");
+    assert_eq!(
+        actual, recorded_set,
+        "assets/ and the provenance record disagree"
+    );
 
     for (name, expected) in &unchanged {
         assert_eq!(
@@ -58,7 +61,11 @@ fn carried_over_assets_keep_their_oracle_digests_and_divergences_are_recorded() 
     }
     for name in diverged.keys().chain(added.keys()) {
         let entry = &provenance["diverged"][name];
-        let entry = if entry.is_null() { &provenance["added"][name] } else { entry };
+        let entry = if entry.is_null() {
+            &provenance["added"][name]
+        } else {
+            entry
+        };
         assert_eq!(
             digest(root, name),
             entry["sha256"].as_str().unwrap(),

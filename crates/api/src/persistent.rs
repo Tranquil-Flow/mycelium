@@ -596,7 +596,12 @@ impl<H: Host, B: Backend> PersistentBackend<H, B> {
                 let remembered = crate::peer::load_membership_state(&self.root)
                     .ok()
                     .flatten()
-                    .and_then(|state| state.get("origin").and_then(Value::as_str).map(str::to_owned));
+                    .and_then(|state| {
+                        state
+                            .get("origin")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    });
                 match remembered.filter(|_| crate::join_link::is_bare_code(&body["join"])) {
                     Some(origin) => crate::join_link::link_for_known_origin(&origin, &body["join"])
                         .map_err(|_| err)?,
@@ -1353,10 +1358,16 @@ mod join_state_tests {
         let dir = root("ok");
         let pending = dir.join(JOIN_STATE);
         std::fs::write(&pending, b"{}").unwrap();
-        let answer = (serde_json::json!({"state": "waiting_for_owner"}), Vec::new());
+        let answer = (
+            serde_json::json!({"state": "waiting_for_owner"}),
+            Vec::new(),
+        );
         let kept = settle_submit(Ok(answer), &dir).unwrap();
         assert_eq!(kept.0["state"], "waiting_for_owner");
-        assert!(pending.exists(), "a window that was reached must stay pollable");
+        assert!(
+            pending.exists(),
+            "a window that was reached must stay pollable"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

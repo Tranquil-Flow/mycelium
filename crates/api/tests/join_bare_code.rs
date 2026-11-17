@@ -9,14 +9,24 @@ use serde_json::json;
 fn only_a_code_alone_counts_as_bare() {
     assert!(is_bare_code(&json!("ABCD-EFGH-JKMN")));
     assert!(is_bare_code(&json!("ABCDEFGHJKMN")));
-    assert!(!is_bare_code(&json!("quiet-river-apple-stone ABCD-EFGH-JKMN")), "a named form names its relay");
-    assert!(!is_bare_code(&json!("mycelium-join:eyJwcm90b2NvbCI6IngifQ")), "a link carries its own origin");
-    assert!(!is_bare_code(&json!("ABCD-EFGH-JKM")), "a short code is not a code");
+    assert!(
+        !is_bare_code(&json!("quiet-river-apple-stone ABCD-EFGH-JKMN")),
+        "a named form names its relay"
+    );
+    assert!(
+        !is_bare_code(&json!("mycelium-join:eyJwcm90b2NvbCI6IngifQ")),
+        "a link carries its own origin"
+    );
+    assert!(
+        !is_bare_code(&json!("ABCD-EFGH-JKM")),
+        "a short code is not a code"
+    );
 }
 
 #[test]
 fn a_bare_code_resolves_against_the_known_origin() {
-    let link = link_for_known_origin("https://demo.mycelium.now", &json!("ABCD-EFGH-JKMN")).expect("link");
+    let link =
+        link_for_known_origin("https://demo.mycelium.now", &json!("ABCD-EFGH-JKMN")).expect("link");
     assert_eq!(link.origin, "https://demo.mycelium.now");
     assert_eq!(link.window_id, "ABCD");
     assert_eq!(link.code, "EFGHJKMN");

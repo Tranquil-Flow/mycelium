@@ -120,7 +120,10 @@ mod tests {
         assert!(a.deadline <= Instant::now() + allowance());
         let mut aged = a.clone();
         aged.deadline = Instant::now();
-        assert!(!aged.stands_in(), "past its deadline a flight no longer stands in");
+        assert!(
+            !aged.stands_in(),
+            "past its deadline a flight no longer stands in"
+        );
     }
     fn failure(code: &'static str, origin: Origin) -> Failure {
         Failure {

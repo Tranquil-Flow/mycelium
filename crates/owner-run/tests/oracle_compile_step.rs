@@ -70,7 +70,7 @@ fn state_of(i: &Value) -> RunState {
     };
     let digest: String = p["manifest_digest"].as_str().unwrap().into();
     st.model = Some(ModelStepOutput {
-            forced_slice: false,
+        forced_slice: false,
         prepared: PreparedSource {
             model: model.clone(),
             manifest_digest: digest.clone(),

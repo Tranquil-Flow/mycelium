@@ -70,7 +70,9 @@ impl Gate {
                     released.recv().unwrap_or(());
                 }
             }
-            AtPutBack::Panic => panic!("lane FLK: the renewal thread dies between take and put-back"),
+            AtPutBack::Panic => {
+                panic!("lane FLK: the renewal thread dies between take and put-back")
+            }
             AtPutBack::Pass => {}
         }
     }
@@ -241,9 +243,13 @@ impl ReportsPort for RenewalInFlight<'_> {
         release.send(()).unwrap_or(());
         renewal.join().expect("the renewal pass returned");
         assert!(
-            self.fixture
-                .host
-                .with(|c| c.run.contributor.as_ref().expect("still enrolled").session.is_some()),
+            self.fixture.host.with(|c| c
+                .run
+                .contributor
+                .as_ref()
+                .expect("still enrolled")
+                .session
+                .is_some()),
             "the renewal put its Session back"
         );
         self.announced = Some(match &answer {
@@ -753,7 +759,10 @@ fn a_contributor_renewal_whose_thread_dies_leaves_no_snapshot_in_use() {
     let (mut ports, _state, _env) = composed(&mut f);
     let network = ports.work.run_network();
     let (renewal, _release) = contributor_renewal(&f, AtPutBack::Panic);
-    assert!(renewal.join().is_err(), "the renewal thread died at its put-back");
+    assert!(
+        renewal.join().is_err(),
+        "the renewal thread died at its put-back"
+    );
     let local = ports.work.local(&network);
     let held = local_snapshot_held(&f, &ports);
     let closed = ports.close_work();
@@ -776,7 +785,10 @@ fn a_joined_renewal_whose_thread_dies_leaves_no_snapshot_in_use() {
     let mut f = Fixture::new();
     let (mut ports, _state, _env) = composed(&mut f);
     let (renewal, _release) = member_renewal(&f, AtPutBack::Panic);
-    assert!(renewal.join().is_err(), "the renewal thread died at its put-back");
+    assert!(
+        renewal.join().is_err(),
+        "the renewal thread died at its put-back"
+    );
     let binding = f.member.accept_context().and_then(|c| c.binding);
     let closed = ports.close_work();
     assert!(
@@ -800,7 +812,10 @@ fn a_contributor_renewal_the_seed_refuses_ends_the_snapshot_at_once() {
     let seed = f.host.with(|c| c.authority.seed.clone().unwrap());
     let (node, generation) = f.host.with(|c| {
         let m = c.run.contributor.as_ref().unwrap();
-        (m.node.clone(), m.session.as_ref().unwrap().generation().unwrap())
+        (
+            m.node.clone(),
+            m.session.as_ref().unwrap().generation().unwrap(),
+        )
     });
     seed.coordinator
         .advance_member_generation(&node, generation, "STOPPED")
@@ -809,7 +824,10 @@ fn a_contributor_renewal_the_seed_refuses_ends_the_snapshot_at_once() {
     let held = local_snapshot_held(&f, &ports);
     let local = ports.work.local(&network);
     let closed = ports.close_work();
-    eprintln!("FLK02_REFUSED local={} held={held} close={closed:?}", code(&local));
+    eprintln!(
+        "FLK02_REFUSED local={} held={held} close={closed:?}",
+        code(&local)
+    );
     assert!(
         !held && local.is_err() && code(&local) != "member_work_renewing",
         "after the seed refused the contributor's renewal: the local admission still holds the old \
@@ -883,7 +901,9 @@ fn a_contributor_renewal_past_its_deadline_refuses_the_registration_and_keeps_th
     let after = ports.work.local(&network);
     let closed = ports.close_work();
     assert!(
-        code(&during) == "ok" && code(&overdue) == "member_work_renewing" && held
+        code(&during) == "ok"
+            && code(&overdue) == "member_work_renewing"
+            && held
             && code(&after) == "ok",
         "in flight {}, past its deadline {} (snapshot held {held}), after the late put-back {} \
          (close {closed:?})",
@@ -1055,7 +1075,9 @@ fn a_contributor_renewal_under_a_clock_stepped_past_its_lease_puts_the_session_b
     let after = seed_heard(&f, &node);
     let live = f.host.with(|c| {
         let m = c.run.contributor.as_ref().unwrap();
-        m.session.as_ref().map(|s| (s.generation(), s.lease_expires_at()))
+        m.session
+            .as_ref()
+            .map(|s| (s.generation(), s.lease_expires_at()))
     });
     let state = api::peer::status_membership(&root, live, app_host::now()).0;
     let local = ports.work.local(&network);
@@ -1141,7 +1163,10 @@ fn a_late_contributor_put_back_never_overwrites_a_newer_flight() {
     old.join().expect("the old renewal pass returned");
     let between = f.host.with(|c| {
         let m = c.run.contributor.as_ref().unwrap();
-        (m.session.is_some(), m.flight.as_ref().map(|flight| flight.id))
+        (
+            m.session.is_some(),
+            m.flight.as_ref().map(|flight| flight.id),
+        )
     });
     release_new.send(()).unwrap_or(());
     new.join().expect("the new renewal pass returned");

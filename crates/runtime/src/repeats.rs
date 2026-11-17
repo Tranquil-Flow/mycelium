@@ -111,7 +111,13 @@ impl<K: Eq + Hash + Clone> Repeats<K> {
         })
     }
     /// [`Repeats::ended`] as the text to print, for a key that had failed.
-    pub fn outcome_line(&mut self, key: &K, now: Instant, head: &str, outcome: &str) -> Option<String> {
+    pub fn outcome_line(
+        &mut self,
+        key: &K,
+        now: Instant,
+        head: &str,
+        outcome: &str,
+    ) -> Option<String> {
         self.ended(key, now).map(|o| {
             format!(
                 "{head} outcome={outcome} failures={} over_ms={}",
@@ -159,13 +165,26 @@ mod tests {
                 lines.push((now, line));
             }
             // The same failures as the printed text, with the call's own fields.
-            let fields = format!("member=e50ab3b324 remote=[10.0.0.2:61856] attempt={} operation_ms={}", i + 1, (poll * i).as_millis());
-            if let Some(line) = text.line(3u64, now, "member result poll 3 (prepare_native): control_connect_timeout", &fields) {
+            let fields = format!(
+                "member=e50ab3b324 remote=[10.0.0.2:61856] attempt={} operation_ms={}",
+                i + 1,
+                (poll * i).as_millis()
+            );
+            if let Some(line) = text.line(
+                3u64,
+                now,
+                "member result poll 3 (prepare_native): control_connect_timeout",
+                &fields,
+            ) {
                 texts.push(line);
             }
         }
         assert_eq!(texts.len(), lines.len(), "one text per line");
-        assert!(texts[0].ends_with("attempt=1 operation_ms=0"), "{}", texts[0]);
+        assert!(
+            texts[0].ends_with("attempt=1 operation_ms=0"),
+            "{}",
+            texts[0]
+        );
         let last = texts.last().unwrap();
         assert!(
             last.contains("member=e50ab3b324 remote=[10.0.0.2:61856] attempt=")
@@ -174,9 +193,20 @@ mod tests {
             "a summary keeps the latest failure's fields: {last}"
         );
         let end = text
-            .outcome_line(&3, start + wall, "member result poll 3 (prepare_native)", "member_operation_wall_exceeded")
+            .outcome_line(
+                &3,
+                start + wall,
+                "member result poll 3 (prepare_native)",
+                "member_operation_wall_exceeded",
+            )
             .unwrap();
-        assert!(end.ends_with(&format!("outcome=member_operation_wall_exceeded failures={polls} over_ms={}", wall.as_millis())), "{end}");
+        assert!(
+            end.ends_with(&format!(
+                "outcome=member_operation_wall_exceeded failures={polls} over_ms={}",
+                wall.as_millis()
+            )),
+            "{end}"
+        );
         let outcome = repeats.ended(&"op 3", start + wall);
         let bound = 1 + (wall.as_millis() / period.as_millis()) as usize;
         assert!(
@@ -186,7 +216,10 @@ mod tests {
         );
         assert_eq!(lines.first().map(|l| l.1), Some(Line::First));
         for pair in lines.windows(2) {
-            assert!(pair[1].0 - pair[0].0 >= period, "two lines within one period");
+            assert!(
+                pair[1].0 - pair[0].0 >= period,
+                "two lines within one period"
+            );
         }
         let summarised: u64 = lines
             .iter()
@@ -212,14 +245,21 @@ mod tests {
         let start = Instant::now();
         assert_eq!(repeats.failed(("a", 1), start), Some(Line::First));
         assert_eq!(repeats.failed(("b", 1), start), Some(Line::First));
-        assert_eq!(repeats.failed(("a", 1), start + period), Some(Line::Summary {
-            repeats: 1,
-            failures: 2,
-            over_ms: period.as_millis()
-        }));
+        assert_eq!(
+            repeats.failed(("a", 1), start + period),
+            Some(Line::Summary {
+                repeats: 1,
+                failures: 2,
+                over_ms: period.as_millis()
+            })
+        );
         repeats.forget_idle(start + period);
         let ended = repeats.ended_where(|k| k.1 == 1, start + period);
-        assert_eq!(ended.len(), 1, "b had no failure for a whole period: forgotten");
+        assert_eq!(
+            ended.len(),
+            1,
+            "b had no failure for a whole period: forgotten"
+        );
         assert_eq!(ended[0].0, ("a", 1));
     }
 }

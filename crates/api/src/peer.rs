@@ -740,8 +740,7 @@ pub fn renew_with_origin(
     env: &JoinEnv,
 ) -> Result<Json, crate::renewal::Failure> {
     use crate::renewal::{Failure, Origin};
-    let client =
-        require_current(root, started, session.as_deref()).map_err(Failure::local)?;
+    let client = require_current(root, started, session.as_deref()).map_err(Failure::local)?;
     let Some(session) = session else {
         return Err(Failure::local(peer("peer_membership_missing")));
     };
