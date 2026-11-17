@@ -255,6 +255,11 @@ impl Cleanup for AppCleanup {
     /// it ended or its own close budgets ran out (`RelayClose::poll`). A relay close that failed or
     /// overran those budgets is reported (`relay_stop_failed`, exit 3: REVIEW-laneCHATPAGE-p3-astra
     /// CP3-01); only the run's join running out is the exit-0 `Deadline`.
+    ///
+    /// Lane B, B5/QV (row 44): the workflow Stop runs on its own thread, so one that never returns
+    /// cannot hold the window: it is waited for within the same post-deadline window as the relay's
+    /// close (the relay's own close budgets from the deadline), then reported
+    /// `Unproven("workflow_stop_unreturned")`.
     fn expire(&mut self) -> Result<Poll, CleanupError> {
         match self {
             Self::Service(quit) => {
@@ -263,10 +268,23 @@ impl Cleanup for AppCleanup {
                     .run
                     .as_mut()
                     .map_or(Ok(Poll::Verified), crate::packaged_run::RunClose::expire)?;
-                match (run, quit.relay.poll()) {
-                    (Poll::Pending, _) | (_, None) => Ok(Poll::Pending),
-                    (Poll::Verified, Some(Err(error))) => Err(error),
-                    (Poll::Verified, Some(Ok(()))) => Ok(Poll::Verified),
+                let relay = quit.relay.poll();
+                if run == Poll::Pending {
+                    let bound = quit
+                        .deadline
+                        .zip(crate::packaged_network::RelayClose::allowance().ok());
+                    if bound
+                        .is_none_or(|(deadline, allowance)| Instant::now() >= deadline + allowance)
+                    {
+                        eprintln!("owner run: workflow_stop_unreturned");
+                        return Err(CleanupError::Unproven("workflow_stop_unreturned"));
+                    }
+                    return Ok(Poll::Pending);
+                }
+                match relay {
+                    None => Ok(Poll::Pending),
+                    Some(Err(error)) => Err(error),
+                    Some(Ok(())) => Ok(Poll::Verified),
                 }
             }
             Self::Nothing => Ok(Poll::Verified),

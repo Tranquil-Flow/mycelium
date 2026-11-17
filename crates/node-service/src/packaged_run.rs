@@ -894,37 +894,114 @@ fn refuse_next_close_spawn() {
     CLOSE_SPAWN_REFUSED.with(|refused| refused.set(true));
 }
 /// `workflow.stop()` (app.py:1835-1838), issued once: by the close thread when the run ended, or
-/// at Quit's deadline, whichever comes first. The flag's lock is held across the Stop (taken after
-/// every lifecycle lock is released, it guards nothing else), so `issued` is a receipt; the
-/// shell's thread only tries it ([`WorkStop::try_issue`]) and never waits for the close thread.
+/// at Quit's deadline, whichever comes first (outside the serving step: as Quit begins).
+///
+/// Lane B, B5/QV (ledger row 44): the Stop runs on its own thread (`packaged-workflow-stop`), so
+/// neither the window's thread nor Quit's verdict waits on one that never returns; the shell's
+/// thread only starts it and reads whether it returned ([`WorkStop::returned`]). The close thread
+/// still waits for its return before it closes the runs, as it waited inside the Stop before.
+/// A Stop thread that cannot start issues the Stop on the caller's thread, as before.
 struct WorkStop {
     host: PackagedRun,
-    issued: Mutex<bool>,
+    state: Mutex<StopState>,
+    /// Set once the Stop returned or unwound (`StopEnded`), with its wake-up.
+    ended: Arc<(Mutex<bool>, std::sync::Condvar)>,
+}
+enum StopState {
+    NotIssued,
+    Issuing(JoinHandle<()>),
+    Returned,
+    /// The Stop panicked: a close step that raised (`demo_run_stop_failed`).
+    Panicked,
+}
+/// Marks the Stop ended when it returns AND when it unwinds.
+struct StopEnded(Arc<(Mutex<bool>, std::sync::Condvar)>);
+impl Drop for StopEnded {
+    fn drop(&mut self) {
+        let (ended, wake) = &*self.0;
+        *lock(ended) = true;
+        wake.notify_all();
+    }
 }
 impl WorkStop {
-    fn issue(&self) {
-        let mut issued = lock(&self.issued);
-        if !*issued {
-            self.host.stop_work();
-            *issued = true;
+    fn new(host: PackagedRun) -> Self {
+        Self {
+            host,
+            state: Mutex::new(StopState::NotIssued),
+            ended: Arc::new((Mutex::new(false), std::sync::Condvar::new())),
         }
     }
-    /// [`Self::issue`] without waiting: `false` while the close thread is issuing it.
-    fn try_issue(&self) -> Result<bool, CleanupError> {
-        let mut issued = match self.issued.try_lock() {
-            Ok(issued) => issued,
-            Err(TryLockError::WouldBlock) => return Ok(false),
-            Err(TryLockError::Poisoned(_)) => {
-                // The Stop panicked on the close thread: a close step that raised.
-                eprintln!("owner run: demo_run_stop_failed");
-                return Err(CleanupError::Poll);
+    /// Issue the Stop on its own thread unless it was; never waits for it.
+    fn start(&self) {
+        let mut state = lock(&self.state);
+        if !matches!(*state, StopState::NotIssued) {
+            return;
+        }
+        let (host, ended) = (self.host.clone(), self.ended.clone());
+        *state = match std::thread::Builder::new()
+            .name("packaged-workflow-stop".into())
+            .spawn(move || {
+                let _ended = StopEnded(ended);
+                host.stop_work();
+            }) {
+            Ok(stop) => StopState::Issuing(stop),
+            Err(_) => {
+                eprintln!("owner run: workflow_stop_thread_unavailable");
+                let _ended = StopEnded(self.ended.clone());
+                self.host.stop_work();
+                StopState::Returned
             }
         };
-        if !*issued {
+    }
+    /// Issue the Stop on this thread, at once, unless it was (a close thread that never started).
+    fn issue_here(&self) {
+        let mut state = lock(&self.state);
+        if matches!(*state, StopState::NotIssued) {
+            let _ended = StopEnded(self.ended.clone());
             self.host.stop_work();
-            *issued = true;
+            *state = StopState::Returned;
         }
-        Ok(true)
+    }
+    /// The close thread's wait for the Stop's return (or unwind), on that thread only.
+    fn wait(&self) {
+        let (ended, wake) = &*self.ended;
+        let mut done = lock(ended);
+        while !*done {
+            done = wake.wait(done).unwrap_or_else(|p| p.into_inner());
+        }
+    }
+    /// Whether the Stop was issued and returned; `Err` when it panicked. Never waits.
+    fn returned(&self) -> Result<bool, CleanupError> {
+        let mut state = match self.state.try_lock() {
+            Ok(state) => state,
+            // Issued on the caller's thread right now (no Stop thread could start).
+            Err(TryLockError::WouldBlock) => return Ok(false),
+            Err(TryLockError::Poisoned(p)) => p.into_inner(),
+        };
+        match std::mem::replace(&mut *state, StopState::Returned) {
+            StopState::Issuing(stop) if !stop.is_finished() => {
+                *state = StopState::Issuing(stop);
+                Ok(false)
+            }
+            StopState::Issuing(stop) => {
+                if stop.join().is_ok() {
+                    Ok(true)
+                } else {
+                    eprintln!("owner run: demo_run_stop_failed");
+                    *state = StopState::Panicked;
+                    Err(CleanupError::Poll)
+                }
+            }
+            StopState::NotIssued => {
+                *state = StopState::NotIssued;
+                Ok(false)
+            }
+            StopState::Returned => Ok(true),
+            StopState::Panicked => {
+                *state = StopState::Panicked;
+                Err(CleanupError::Poll)
+            }
+        }
     }
 }
 /// The run's close found the owner's work still owed after its last retry (lane B, B5/QV: a stage
@@ -968,12 +1045,9 @@ impl RunClose {
         }
         let stopped = lock(&installed.runs).stop();
         let serving = stopped.is_some_and(|answer| answer["step"] == "serving");
-        let stop = Arc::new(WorkStop {
-            host: installed.host.clone(),
-            issued: Mutex::new(false),
-        });
+        let stop = Arc::new(WorkStop::new(installed.host.clone()));
         if !serving {
-            stop.issue();
+            stop.start();
         }
         if let Some(renewal) = &installed.renewal {
             renewal.stop();
@@ -997,8 +1071,9 @@ impl RunClose {
                 if !installed.view.join(until) {
                     eprintln!("owner run: owner_run_join_incomplete");
                 }
-                closer.issue();
+                closer.start();
             }
+            closer.wait();
             lock(&installed.runs).close();
             // Lane B, B5/QV (owner ruling 15 Nov, row 57; D8): what a failed close retained is
             // retried once more here (the next close's own retry); still owed, Quit is unproven.
@@ -1020,7 +1095,7 @@ impl RunClose {
                 eprintln!("owner run: demo_run_stop_failed");
                 // The closure that held the deferred Stop never ran: issue it here, at once and
                 // without a join (app.py:1835-1838 runs after a failed close step too).
-                stop.issue();
+                stop.issue_here();
                 Closing::Done(Err(CleanupError::Poll))
             }
         };
@@ -1041,11 +1116,14 @@ impl RunClose {
             self.begin();
         }
         match &self.closing {
-            Closing::Running { stop, .. } => Ok(if stop.try_issue()? {
-                Poll::Verified
-            } else {
-                Poll::Pending
-            }),
+            Closing::Running { stop, .. } => {
+                stop.start();
+                Ok(if stop.returned()? {
+                    Poll::Verified
+                } else {
+                    Poll::Pending
+                })
+            }
             Closing::NotStarted | Closing::Done(_) => Ok(Poll::Verified),
         }
     }
@@ -1066,7 +1144,8 @@ impl RunClose {
                 let issued = if Instant::now() < until {
                     Ok(false)
                 } else {
-                    stop.try_issue()
+                    stop.start();
+                    stop.returned()
                 };
                 match issued {
                     Ok(false) => {
@@ -1087,9 +1166,9 @@ impl RunClose {
                     }
                 }
             }
-            Closing::Running { worker, .. } => {
+            Closing::Running { worker, stop, .. } => {
                 let result = match worker.join() {
-                    Ok(Ok(())) => Ok(()),
+                    Ok(Ok(())) => stop.returned().map(drop),
                     Ok(Err(OWNER_WORK_UNPROVEN)) => {
                         Err(CleanupError::Unproven(OWNER_WORK_UNPROVEN))
                     }
