@@ -711,6 +711,10 @@ fn chat(
         }
         after = page["next"].clone();
         if page["done"] == true {
+            // Lane A patch 2 (A-03): when the page saw the terminal, from the send (the pieces'
+            // times are token arrivals only).
+            let mut page = page;
+            page["gate_terminal_ms"] = json!(ms(posted));
             return (page, pieces);
         }
         if Instant::now() > end {
@@ -1392,9 +1396,11 @@ fn probe_route_chat_against_a_single_process_reference() {
 /// Lane A, release blocker B6 (ledger row 87, owner ruling R2), the gate row: the joined Mac's
 /// command grant is small ([`SMALL_COMMANDS`]); once the run serves, a 256-token answer runs it
 /// out mid-answer. The answer must end FAILED with the named code (not
-/// `chat_generation_failed_timeouterror` after ~5 min, as measured with a 1,000 grant), within
-/// one hop deadline of its last piece; the run leaves service (the next chat is refused); Stop
-/// settles inside its allowance and Quit leaves no child. Model run: not part of lane A (the
+/// `chat_generation_failed_timeouterror` after ~5 min, as measured with a 1,000 grant), its
+/// terminal (as the page saw it) within one hop deadline of its last piece; the ROUTE leaves
+/// service (the page's next chat ends `chat_route_not_qualified`, no token; the owner run itself
+/// serves on until Stop by design, recorded only); Stop settles inside its allowance and Quit
+/// leaves no child. Model run: not part of lane A (the
 /// orchestrator runs it); lane A only proves it compiles (`--no-run`).
 #[test]
 #[ignore = "real Metal + cached Qwen3-0.6B + this Mac's private LAN address; MYCELIUM_TEN_PACKAGED_EXECUTABLE, MYCELIUM_PINNED_PAYLOAD_APP, MYCELIUM_TEN_RUN_DIR, MYCELIUM_BOOTSTRAP_TEST_CONFIG"]
@@ -1450,29 +1456,55 @@ fn a_small_command_grant_ends_the_answer_by_name_on_the_lan() {
                 256,
             );
             let error = last["error"].as_str().unwrap_or_default().to_owned();
-            let ended_ms = pieces.last().map(|p| p.1);
-            let (send_code, send) = chat_call(
+            // Lane A patch 2 (A-03): the terminal's own arrival, against the hop deadline the
+            // owner applies to the step after the last piece (the first token's wait when no
+            // piece came), plus one page poll. A named end must not be a hop deadline late.
+            let last_piece_ms = pieces.last().map_or(0, |p| p.1);
+            let terminal_ms = last["gate_terminal_ms"].as_u64();
+            let hop = if pieces.is_empty() {
+                millis(B::WorkerStartup)
+            } else {
+                millis(B::PyFinalScriptsRunA11RouteBenchmarkTargetTpotMsL398C12)
+            };
+            let bound_ms = (hop + millis(B::OwnerPoll) / 5).as_millis() as u64;
+            let gap_ms = terminal_ms.map(|t| t.saturating_sub(last_piece_ms));
+            // The route out of service, by its real signal: the run serves on (Stop, rollover,
+            // the ceiling or the monitor end it, joined_owner/work.rs), but the route's
+            // qualification is refused, so the page's next chat ends at once
+            // `chat_route_not_qualified` (chat.py:114-121) with no token. The owner run's
+            // lifecycle state is recorded, not asserted.
+            let (next, next_pieces) = chat(
                 &owner.mac,
-                "POST",
-                "/chat/api/send",
-                &json!({"prompt": api::prompt_codec::ORACLE_USER_PROMPT, "max_new_tokens": 4}),
+                &ev,
+                "grant_after_exhaustion",
+                api::prompt_codec::ORACLE_USER_PROMPT,
+                4,
             );
+            let route_out = next["terminal"] == "failed"
+                && next["error"] == "chat_route_not_qualified"
+                && next_pieces.is_empty();
             let run_state = owner.mac.status()["owner_run"]["state"].clone();
             let ok = last["terminal"] == "failed"
                 && error.ends_with("consent_exhausted")
                 && (pieces.len() as u64) < 256
-                && send_code != 200
-                && run_state != "serving";
+                && gap_ms.is_some_and(|gap| gap <= bound_ms)
+                && route_out;
             ev.row(json!({"row": "grant exhaustion (256 tokens, small grant)",
                 "result": if ok { "passed" } else { "failed" }, "grant": SMALL_COMMANDS,
-                "pieces": pieces.len(), "wall_ms": ended_ms, "status_line": {"terminal": last["terminal"],
-                "error": last["error"]}, "next_send": {"code": send_code, "answer": send},
+                "pieces": pieces.len(), "wall_ms": terminal_ms, "last_piece_ms": last_piece_ms,
+                "terminal_gap_ms": gap_ms, "terminal_bound_ms": bound_ms,
+                "status_line": {"terminal": last["terminal"], "error": last["error"]},
+                "next_chat": {"terminal": next["terminal"], "error": next["error"],
+                    "pieces": next_pieces.len()},
                 "run_state": run_state, "workers": workers(&binary)}));
             if !ok {
                 failures.push(format!(
-                    "exhaustion: terminal={} error={error} pieces={} next_send={send_code} run={run_state}",
+                    "exhaustion: terminal={} error={error} pieces={} gap={gap_ms:?}/{bound_ms} ms next_chat={}/{}/{} run={run_state}",
                     last["terminal"],
-                    pieces.len()
+                    pieces.len(),
+                    next["terminal"],
+                    next["error"],
+                    next_pieces.len()
                 ));
             }
             if let Err(e) = stop_row(&owner, &member, &ev, "grant", &binary, &lan) {
