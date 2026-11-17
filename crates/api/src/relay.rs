@@ -265,6 +265,39 @@ struct ProxyShared {
     trust_client_ip: bool,
     handlers: Mutex<Handlers>,
 }
+/// Lane B, B12: the relay's fork boundary. A child forked while a socket is open holds its own copy
+/// of that socket until its exec closes it (std marks it close-on-exec, and macOS has no atomic
+/// `SOCK_CLOEXEC`: `socket()` then `FIOCLEX`). A proxy closed in that window still has its listener
+/// bound in the child, so a relay started right after cannot bind the same port, and a child forked
+/// between `socket()` and `FIOCLEX` keeps it for its whole life. The relay's own child spawn
+/// (the quick tunnel's client) and its proxy listener's bind and close take this boundary, so
+/// neither can land inside the other's window; a caller of this module that forks beside a relay
+/// (and its tests) takes the same boundary around its spawn. v0.1.4 spawns with Python's
+/// `close_fds=True` under the GIL, which has neither window.
+struct ForkBoundary {
+    lock: Mutex<()>,
+    waiting: AtomicUsize,
+}
+static FORKS: ForkBoundary = ForkBoundary {
+    lock: Mutex::new(()),
+    waiting: AtomicUsize::new(0),
+};
+/// Enter the relay's fork boundary (see [`ForkBoundary`]): held across a spawn, or across a socket's
+/// bind or close whose port must not be held by a child.
+pub fn fork_boundary() -> MutexGuard<'static, ()> {
+    FORKS.waiting.fetch_add(1, Ordering::SeqCst);
+    let entered = FORKS
+        .lock
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    FORKS.waiting.fetch_sub(1, Ordering::SeqCst);
+    entered
+}
+/// How many threads wait to enter the fork boundary now (a test observes a close that waits for a
+/// spawn in flight).
+pub fn fork_boundary_waiting() -> usize {
+    FORKS.waiting.load(Ordering::SeqCst)
+}
 /// `SeedRelayProxy`: a loopback HTTP server the public front forwards into.
 pub struct Proxy {
     shared: Arc<ProxyShared>,
