@@ -305,3 +305,33 @@ fn withdraw_matches_the_oracle_route() {
         fs::remove_dir_all(dir).unwrap();
     }
 }
+
+/// Lane A, release blocker B8 (GRT; ledger row 61 F1): the owner's own stage runs under its
+/// local contributor's standing grant (`local-contributor/`), so the app's withdraw action on an
+/// owner withdraws THAT grant too, as v0.1.4's owner withdrew the one grant its own node ran
+/// under. An owner with no grant anywhere is still refused `standing_consent_missing` (oracle).
+#[test]
+fn an_owners_withdraw_reaches_its_contributors_grant() {
+    let oracle = oracle();
+    let policy = oracle["consent_valid"][0]["consent"].clone();
+    let caps = json!({"storage_bytes":1_000_000_000,"max_memory_bytes":4u64*1024*1024*1024,"max_wall_seconds":900,"max_commands":50});
+    let grant = json!({"acknowledged":true,"disclosure_digest":sc::DISCLOSURE_DIGEST,"caps":caps});
+    let dir = root("withdraw-contributor");
+    let contributor = api::owner_ports::contributor_dir(&dir);
+    fs::create_dir_all(&contributor).unwrap();
+    sc::grant(&contributor, &grant, &policy, 1_761_600_000.5, None).unwrap();
+    let host = FakeHost::default();
+    let c = app(&dir, host);
+    let got = outcome(c.action(
+        "/api/consent/standing/withdraw",
+        &body(&json!({"confirm": true})),
+    ));
+    assert_eq!(got["ok"]["state"], "withdrawn", "{got}");
+    assert_eq!(
+        sc::load(&contributor).unwrap().unwrap()["state"],
+        "withdrawn",
+        "the contributor's grant is withdrawn"
+    );
+    assert!(!dir.join(sc::FILE).exists(), "nothing written at the owner's root");
+    fs::remove_dir_all(dir).unwrap();
+}
