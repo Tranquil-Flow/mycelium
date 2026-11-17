@@ -3864,7 +3864,11 @@ fn a_stage_whose_command_grant_runs_out_mid_answer_ends_it_by_name_and_leaves_se
     let reports = left_service_by_name(r, 1);
     // The final step's own error path (not the next loop pass's liveness): the member released
     // its compute at the failed step, reported by name, then ACKed the owner's teardown.
-    assert_eq!(reports[1]["teardown"], "path_cancellation", "{:?}", reports[1]);
+    assert_eq!(
+        reports[1]["teardown"], "path_cancellation",
+        "{:?}",
+        reports[1]
+    );
     assert_eq!(reports[1]["ack_delivered"], true, "{:?}", reports[1]);
 }
 
@@ -3884,7 +3888,11 @@ fn a_first_stage_whose_command_grant_runs_out_mid_answer_ends_it_by_name() {
         r.state()
     );
     let reports = left_service_by_name(r, 0);
-    assert_eq!(reports[0]["teardown"], "path_cancellation", "{:?}", reports[0]);
+    assert_eq!(
+        reports[0]["teardown"], "path_cancellation",
+        "{:?}",
+        reports[0]
+    );
     assert_eq!(reports[0]["ack_delivered"], true, "{:?}", reports[0]);
 }
 

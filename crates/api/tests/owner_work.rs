@@ -2598,10 +2598,7 @@ fn a_spent_command_grant_is_published_as_the_epochs_retirement() {
     );
     assert_eq!(token_ids(&all), [11, 12], "{all:?}");
     assert_eq!(grant.load(Ordering::SeqCst), 0);
-    let state = work.wait_state(
-        |s| !s["epoch_retired"].is_null(),
-        span(B::OwnerPoll) * 6,
-    );
+    let state = work.wait_state(|s| !s["epoch_retired"].is_null(), span(B::OwnerPoll) * 6);
     assert_eq!(state["epoch_retired"], EXHAUSTED, "{state}");
     assert_eq!(state["state"], "api_running", "{state}");
     let (status, ready) = readiness_within(&gateway, span(B::OwnerPoll) * 2);
