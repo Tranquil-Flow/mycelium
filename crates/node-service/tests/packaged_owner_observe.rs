@@ -404,6 +404,79 @@ fn a_second_start_in_one_process_passes_observe_again() {
     std::fs::remove_dir_all(&base).unwrap_or_default();
 }
 
+/// Lane CHATPAGE patch 2, CP-03 (merge-chat2 ten-row gate `20261116T222718Z-gate`, run2 row 3
+/// `two_macs_required`, "1 of 2 Macs reported" after 180 s): the gate's two-run shape, model-free.
+/// Run 1 passes observe (the owner's managed mailbox now exists) and ends; its teardown announces
+/// `stopped` (lane CHATPAGE item 3, demo_chain.py:1381-1390 @ f4e366e9), which the owner's next
+/// action may refresh to `idle`; the joined Mac's card reads that end; the owner's Stop; then the
+/// next Start. The joined Mac must report into run 2 as it
+/// did into run 1: v0.1.4's agent reads the next run's announcement after `stopped` and reports
+/// its descriptor (demo_target.py:437-470), and a standing acceptor with no offer to read never
+/// keeps it from doing so (the owner's `_member_guard`, managed_control.py:909-941, checks the
+/// membership only).
+#[test]
+fn after_a_runs_stopped_announcement_the_joined_mac_reports_into_the_next_run() {
+    let base = state_root("observe-after-stopped");
+    let repository = Repository::start();
+    let sidecar = sidecar_file(&base);
+    let (owner, member) = pair(
+        &base,
+        &repository,
+        RunConfig {
+            sidecar: Some(sidecar),
+            observe_test_double: Some(Arc::new(observe_test_double::HostIdentityTestDouble::over)),
+            ..RunConfig::default()
+        },
+    );
+    let (code, started) = owner.mac.post("/api/demo/start", json!({}));
+    assert_eq!(code, 200, "{started}");
+    let first = until_within(
+        "run 1 ended",
+        observe_patience() + millis(B::Compile),
+        || owner.mac.status()["owner_run"].clone(),
+        |r| matches!(r["state"].as_str(), Some("failed" | "stopped" | "serving")),
+    );
+    assert_eq!(
+        first["steps"][3]["state"], "done",
+        "run 1 passed observe: {first}"
+    );
+    // The gate's Stop (the run already ended here: an idempotent Stop).
+    let (code, stopped) = owner.mac.post("/api/demo/stop", json!({}));
+    println!("CP-03 run 1 Stop: {code} {stopped}");
+    // The joined Mac read the run's end: `stopped`, or `idle` once the owner's next action
+    // refreshed the exchange over it (`owner_ports::ensure_exchange`, over idle/stopped only).
+    let card = until_within(
+        "the joined Mac's card reads run 1's end",
+        millis(B::PyMyceliumA13MacosAppDemoappStandingLoopSelfClosedWaitL1203) * 10,
+        || member.status()["demo_target"].clone(),
+        |c| c["phase"] == "stopped" || c["phase"] == "idle",
+    );
+    println!("CP-03 member card after run 1: {card}");
+    let (code, started) = owner.mac.post("/api/demo/start", json!({}));
+    assert_eq!(code, 200, "{started}");
+    let second = until_within(
+        "run 2 ended",
+        observe_patience() + millis(B::Collect) + millis(B::Compile),
+        || owner.mac.status()["owner_run"].clone(),
+        |r| {
+            r["deployment_id"] != first["deployment_id"]
+                && matches!(r["state"].as_str(), Some("failed" | "stopped" | "serving"))
+        },
+    );
+    println!("CP-03 run 2: {second}");
+    assert_eq!(
+        second["steps"][2]["detail"],
+        "2 of 2 Macs reported",
+        "the joined Mac reported into run 2: {second}; its card: {}",
+        member.status()["demo_target"]
+    );
+    assert_eq!(second["steps"][3]["state"], "done", "{second}");
+    assert_eq!(member.quit(), Ok(Poll::Verified));
+    assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
+    drop(repository);
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+}
+
 /// S4c-a item 2 (REVIEW-lanePH3B-S2 F4): the joined Mac's capability report stays current as the
 /// shipped app keeps it. v0.1.4 @ f4e366e9: every report after the membership exists carries its
 /// generation (`signed_capability_link_report`, peer.py:1118-1139, called by `_measure_and_sign`

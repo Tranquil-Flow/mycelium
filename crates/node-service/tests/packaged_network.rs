@@ -337,3 +337,108 @@ fn the_relay_answers_the_chat_from_the_runs_chat_service() {
     drop(core);
     std::fs::remove_dir_all(&state).unwrap_or_default();
 }
+
+/// Lane CHATPAGE item 1: the window's chat page offers the owner's Stop, but the relay's public
+/// chat page must not, and whatever a page shows or a client crafts, an owner action never
+/// arrives through the relay: the relay knows no `/api/*` route (`relay_route_unknown`, before
+/// any handler), and the chat boundary behind `/chat` answers only its own three routes and its
+/// three page assets (`not_found`, owner check first). The owner's status afterwards shows the
+/// relay still running: none of them acted.
+#[test]
+fn the_relay_refuses_every_owner_action_and_serves_no_owner_control() {
+    let state = state_root("relay-owner-actions");
+    let (core, mut cleanup) = packaged_core(&state);
+    let proxy = free_port();
+    let started = post(&core, "/api/network/start", network_body(proxy));
+    assert_eq!(started.0, 200, "network start: {}", started.1);
+    let created = post(&core, "/api/create", json!({"consent": consent()}));
+    assert_eq!(created.0, 200, "create: {}", created.1);
+    let action = [
+        ("Content-Type", "application/json"),
+        ("X-Mycelium-Action", "1"),
+        ("X-Mycelium-Chat", "1"),
+        ("Origin", ORIGIN),
+    ];
+    for path in [
+        "/api/demo/stop",
+        "/api/demo/start",
+        "/api/stop",
+        "/api/serving/stop",
+        "/api/quit",
+        "/api/network/stop",
+        "/api/status",
+        "/chat/../api/demo/stop",
+    ] {
+        let (code, _, raw) = relay_request(proxy, "POST", path, &action, b"{}");
+        assert_eq!(
+            (code, serde_json::from_slice::<Value>(&raw).unwrap()),
+            (404, json!({"error": {"code": "relay_route_unknown"}})),
+            "{path} reached the owner through the relay"
+        );
+    }
+    for path in ["/chat/api/stop", "/chat/api/demo/stop", "/chat/api/quit"] {
+        let (code, _, raw) = relay_request(proxy, "POST", path, &action, b"{}");
+        assert_eq!(
+            (code, serde_json::from_slice::<Value>(&raw).unwrap()),
+            (404, json!({"error": "not_found"})),
+            "{path} reached an owner action through the relay chat"
+        );
+    }
+    let (code, _, _) = relay_request(proxy, "GET", "/chat/owner.js", &[], b"");
+    assert_eq!(code, 404, "the relay serves the window's owner script");
+    let (code, _, page) = relay_request(proxy, "GET", "/chat", &[], b"");
+    assert_eq!(code, 200);
+    let (code, _, script) = relay_request(proxy, "GET", "/chat/chat.js", &[], b"");
+    assert_eq!(code, 200);
+    let page = String::from_utf8(page).unwrap();
+    let script = String::from_utf8(script).unwrap();
+    for owner in ["Back to Mycelium", "run-stop", "owner.js", "Stop the run"] {
+        assert!(!page.contains(owner), "the relay's chat page shows {owner}");
+    }
+    for owner in ["/api/demo", "X-Mycelium-Action", "run-stop"] {
+        assert!(
+            !script.contains(owner),
+            "the relay's chat script reaches {owner}"
+        );
+    }
+    let network = &status(&core)["network"];
+    assert_eq!(network["state"], "relay_process_running", "{network}");
+    assert_eq!(quit(&mut cleanup), Ok(Poll::Verified));
+    drop(core);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
+
+/// Lane CHATPAGE item 2 (REVIEW-laneCHATS-astra CHATS-01): the relay's `/chat` served the api
+/// crate's pinned v0.1.4 `chat.js`, which has no message for `chat_context_too_long`, so a room
+/// member read the raw code where the window's page explains the context limit. One source of
+/// truth: the relay serves the window's own chat script, byte for byte (`desktop::page::CHAT_JS`),
+/// under the chat CSP, and the relay's page loads it from there.
+#[test]
+fn the_relay_chat_page_shows_the_windows_refusal_messages() {
+    let state = state_root("relay-chat-script");
+    let (core, mut cleanup) = packaged_core(&state);
+    let proxy = free_port();
+    let started = post(&core, "/api/network/start", network_body(proxy));
+    assert_eq!(started.0, 200, "network start: {}", started.1);
+    let (code, head, script) = relay_request(proxy, "GET", "/chat/chat.js", &[], b"");
+    assert_eq!(code, 200, "{head}");
+    assert!(head.contains("content-type: text/javascript"), "{head}");
+    assert!(head.contains("content-security-policy:"), "{head}");
+    assert!(
+        String::from_utf8_lossy(&script).contains("chat_context_too_long:'"),
+        "the relay's chat script has no message for chat_context_too_long: a room member reads the raw code"
+    );
+    assert!(
+        script == desktop::page::CHAT_JS,
+        "the relay's chat script is not the window's (one source of truth)"
+    );
+    let (code, _, page) = relay_request(proxy, "GET", "/chat", &[], b"");
+    assert_eq!(code, 200);
+    assert!(
+        String::from_utf8_lossy(&page).contains(r#"src="/chat/chat.js""#),
+        "the relay's chat page does not load the chat script from /chat/chat.js"
+    );
+    assert_eq!(quit(&mut cleanup), Ok(Poll::Verified));
+    drop(core);
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}

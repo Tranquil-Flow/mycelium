@@ -16,6 +16,7 @@ mod native_probe;
 #[cfg(feature = "tauri-shell")]
 mod native_quit;
 pub mod package;
+pub mod page;
 pub mod platform;
 pub mod resource_probe;
 pub mod services;

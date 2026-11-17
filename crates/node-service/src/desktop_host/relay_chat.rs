@@ -57,6 +57,19 @@ pub(super) fn handler(
         authority,
     }));
     Arc::new(move |method, path, headers, body| {
+        // Lane CHATPAGE item 2 (REVIEW-laneCHATS-astra CHATS-01): the chat page's script is the
+        // window's own (`desktop::page::CHAT_JS`), one source of truth, so a room member reads
+        // the refusal messages the owner reads (the api crate's pinned v0.1.4 copy has none for
+        // `chat_context_too_long` and showed the raw code). The page and its stylesheet stay the
+        // api's v0.1.4 copies: the window's page carries the owner's Back and Stop, never served
+        // here. Owner only, as every other answer of this boundary (chat.py:556-557).
+        if method == "GET" && path == "/chat/chat.js" && boundary.service().is_owner() {
+            return Ok(RichAnswer {
+                status: 200,
+                kind: "text/javascript; charset=utf-8".into(),
+                raw: desktop::page::CHAT_JS.to_vec(),
+            });
+        }
         let reply = boundary
             .handle(
                 api::http::Request {

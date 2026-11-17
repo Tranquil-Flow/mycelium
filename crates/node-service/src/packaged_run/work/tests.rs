@@ -6,6 +6,7 @@ use super::*;
 mod chat_route;
 mod flake;
 mod local_network;
+mod quit_stopped;
 mod regressions;
 mod retire;
 mod serving_q;
@@ -13,6 +14,7 @@ mod serving_r2;
 mod serving_r3;
 mod serving_r3b;
 mod stage_program;
+mod stopped;
 use crate::{
     packaged_network::{JoinSeams, MemberSeams, NetworkConfig, PackagedMember},
     packaged_work::{NetworkChoice, WorkNetwork},

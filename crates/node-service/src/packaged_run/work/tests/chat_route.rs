@@ -1125,3 +1125,284 @@ fn a_dead_member_ends_the_page_chat_with_its_code() {
     assert_eq!(fake.seen(|s| s.deletes), 1);
     p.close();
 }
+
+/// One request to a relay's loopback proxy as the public front forwards it: `(status, body)`.
+/// `None` once nothing listens there any more (the relay closed).
+fn relay_call(
+    port: u16,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &Value,
+) -> Option<(u16, Value)> {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).ok()?;
+    stream.set_read_timeout(Some(patience())).unwrap();
+    let body = serde_json::to_vec(body).unwrap();
+    let mut head = format!(
+        "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Length: {}\r\n",
+        body.len()
+    );
+    for (name, value) in headers {
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
+    head.push_str("\r\n");
+    stream.write_all(head.as_bytes()).ok()?;
+    stream.write_all(&body).ok()?;
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).ok()?;
+    let split = raw.windows(4).position(|w| w == b"\r\n\r\n")?;
+    let status = String::from_utf8_lossy(&raw[..split])
+        .split(' ')
+        .nth(1)?
+        .parse()
+        .ok()?;
+    Some((
+        status,
+        serde_json::from_slice(&raw[split + 4..]).unwrap_or(Value::Null),
+    ))
+}
+/// A room member's chat request through the relay (chat.js `call`, the edge's client address).
+fn room(port: u16, path: &str, body: &Value) -> Option<(u16, Value)> {
+    relay_call(
+        port,
+        "POST",
+        path,
+        &[
+            ("Content-Type", "application/json"),
+            ("X-Mycelium-Chat", "1"),
+            ("Cf-Connecting-Ip", "203.0.113.9"),
+        ],
+        body,
+    )
+}
+
+/// chat.js's events loop for a room member through the relay, until its chat ends or the relay
+/// goes: `(tokens, last page, done)`. The first poll that read a token sends `first` the tokens
+/// read so far and that page's `done` (once).
+fn room_poller(
+    port: u16,
+    id: &Value,
+    first: &mpsc::Sender<(Vec<String>, Value)>,
+) -> (Vec<String>, Value, bool) {
+    let (mut after, mut tokens, mut last) = (json!(0), Vec::new(), Value::Null);
+    let mut receipt = Some(first);
+    loop {
+        let Some((code, events)) = room(
+            port,
+            "/chat/api/events",
+            &json!({"request_id": id, "after": after}),
+        ) else {
+            return (tokens, last, false);
+        };
+        if code != 200 {
+            return (tokens, events, false);
+        }
+        for t in events["tokens"].as_array().unwrap() {
+            tokens.push(t.as_str().unwrap().to_owned());
+        }
+        if !tokens.is_empty()
+            && let Some(first) = receipt.take()
+        {
+            first
+                .send((tokens.clone(), events["done"].clone()))
+                .unwrap_or_default();
+        }
+        after = events["next"].clone();
+        if events["done"] == true {
+            return (tokens, events, true);
+        }
+        last = events;
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Lane CHATPAGE item 4 (REVIEW-laneCHATS-astra CHATS-02): Quit while a room member's chat
+/// streams through the relay and the serving run's route. The relay is the composition's own
+/// (`/api/network/start`, external provider on a loopback proxy port: `bind_public_routes` binds
+/// the run's chat behind it), the member's page polls `/chat/api/events` through it as chat.js
+/// does, the route's stream is held after its first token, and the owner's Stop through the relay
+/// is refused while the run keeps serving. Then the window's real Quit (`packaged::assemble` with
+/// the run closed first, `close_run_first`): it ends `Verified` within the Quit allowance (no
+/// hang), the held chat is cancelled through ONE gateway `DELETE` with `chat_cancelled`, the run
+/// is stopped, the relay no longer listens, the member's poller ends, and the relay's handler
+/// refuses a new send `application_closed` (Quit's gate is closing). Quit begins only once the
+/// member's poller READ the first token through the relay (REVIEW-laneCHATPAGE-astra CP-02).
+#[test]
+fn quit_completes_while_a_relay_chat_streams_through_the_serving_run() {
+    let fake = FakeGateway::start(Fake::ending(&["a"], End::Hold));
+    let page = Page::new(&fake);
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .and_then(|l| l.local_addr())
+        .map(|a| a.port())
+        .unwrap();
+    let (tx, rx) = mpsc::sync_channel(1);
+    page.services.submit(
+        ServiceRequest {
+            method: "POST".into(),
+            target: "/api/network/start".into(),
+            headers: vec![
+                ("x-mycelium-action".into(), "1".into()),
+                ("content-type".into(), "application/json".into()),
+            ],
+            body: serde_json::to_vec(&json!({"relay_acknowledged": true, "max_seconds": 1800,
+                "provider": "external", "public_origin": "https://v02-chatpage.example.org",
+                "proxy_port": port}))
+            .unwrap(),
+        },
+        Box::new(move |reply| tx.send(reply).unwrap_or_default()),
+    );
+    let started = rx
+        .recv_timeout(patience())
+        .expect("the relay start answers");
+    assert_eq!(
+        started.status,
+        200,
+        "{}",
+        String::from_utf8_lossy(&started.body)
+    );
+    page.start();
+    let run_id = page.serving()["run_id"].as_str().unwrap().to_owned();
+    let (code, sent) = room(
+        port,
+        "/chat/api/send",
+        &json!({"prompt": "hi", "max_new_tokens": 8}),
+    )
+    .expect("the relay answers");
+    assert_eq!(code, 200, "{sent}");
+    fake.wait("the route streams its first token", |s| s.tokens_sent == 1);
+    // The member's page keeps polling through the relay until its chat ends or the relay goes.
+    // CP-02 (REVIEW-laneCHATPAGE-astra): the fake's write is not the page's read, so the poller
+    // hands back a receipt of the first token it READ through the relay (`/chat/api/events`), and
+    // Quit begins only after that receipt (bounded); its end has its own bound below.
+    let id = sent["request_id"].clone();
+    let (first_tx, first) = mpsc::channel();
+    let (ended_tx, ended) = mpsc::channel();
+    std::thread::spawn(move || {
+        let outcome = room_poller(port, &id, &first_tx);
+        ended_tx.send(outcome).unwrap_or_default();
+    });
+    let (read, done) = first
+        .recv_timeout(patience())
+        .expect("the member's page read the first token through the relay");
+    assert_eq!(
+        (read.as_slice(), &done),
+        (["a".to_owned()].as_slice(), &json!(false)),
+        "the page's first read through the relay: the held chat is still unfinished"
+    );
+    // The owner's Stop through the relay: refused before any handler, and the run serves on.
+    let refused = relay_call(
+        port,
+        "POST",
+        "/api/demo/stop",
+        &[
+            ("Content-Type", "application/json"),
+            ("X-Mycelium-Action", "1"),
+        ],
+        &json!({}),
+    );
+    assert_eq!(
+        refused,
+        Some((404, json!({"error": {"code": "relay_route_unknown"}})))
+    );
+    assert_eq!(page.status()["state"], "serving", "a relay Stop acted");
+    assert_eq!(fake.seen(|s| s.deletes), 0);
+    // The window's Quit, as the packaged composition assembles it.
+    let Page {
+        services,
+        run,
+        config,
+        f,
+        ..
+    } = page;
+    let relay = services
+        .network()
+        .relay_chat()
+        .expect("the relay's chat handler");
+    let (_core, mut cleanup) = crate::packaged::assemble(
+        services,
+        crate::app_host::ModelSource::hub(f.root.join("model-sources")),
+    );
+    crate::packaged::close_run_first(&mut cleanup, config.clone());
+    let allowance = desktop::lifecycle::quit_allowance().unwrap();
+    let began = Instant::now();
+    use desktop::lifecycle::Cleanup as _;
+    cleanup.bind_clock(began).unwrap();
+    cleanup.begin(allowance).unwrap();
+    let deadline = began + Duration::from_millis(allowance.millis());
+    let verdict = loop {
+        match cleanup.poll() {
+            Ok(Poll::Pending) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(20))
+            }
+            other => break other,
+        }
+    };
+    let took = began.elapsed();
+    eprintln!(
+        "CHATPAGE_QUIT_WHILE_RELAY_CHAT_STREAMS verdict={verdict:?} took_ms={}",
+        took.as_millis()
+    );
+    assert_eq!(verdict, Ok(Poll::Verified), "Quit after {took:?}");
+    assert!(took < Duration::from_millis(allowance.millis()), "{took:?}");
+    let (tokens, last, done) = ended
+        .recv_timeout(patience())
+        .expect("the member's poller ended");
+    assert_eq!(tokens, ["a"], "{last}");
+    if done {
+        assert_eq!(
+            (&last["terminal"], &last["error"]),
+            (&json!("cancelled"), &json!("chat_cancelled")),
+            "{last}"
+        );
+    }
+    assert_eq!(
+        fake.seen(|s| s.deletes),
+        1,
+        "the held chat's route call was cancelled once"
+    );
+    assert!(
+        std::net::TcpStream::connect(("127.0.0.1", port)).is_err(),
+        "Quit left the relay listening"
+    );
+    let stopped = config
+        .observed()
+        .and_then(|view| view.status())
+        .map_or(Value::Null, |s| s.to_value());
+    assert_eq!(stopped["state"], "stopped", "{stopped}");
+    assert_eq!(stopped["run_id"], json!(run_id), "{stopped}");
+    // The relay's handler itself, after Quit: the held chat ended `chat_cancelled`, a new send is
+    // refused by Quit's gate.
+    let call = |path: &str, body: Value| {
+        let answer = relay(
+            "POST",
+            path,
+            &[
+                ("X-Mycelium-Chat".into(), "1".into()),
+                ("Content-Type".into(), "application/json".into()),
+            ],
+            &serde_json::to_vec(&body).unwrap(),
+        )
+        .expect("the relay chat answers");
+        (
+            u16::try_from(answer.status).unwrap(),
+            serde_json::from_slice::<Value>(&answer.raw).unwrap(),
+        )
+    };
+    let (code, events) = call(
+        "/chat/api/events",
+        json!({"request_id": sent["request_id"], "after": 0}),
+    );
+    assert_eq!(code, 200, "{events}");
+    assert_eq!(
+        (&events["done"], &events["terminal"], &events["error"]),
+        (&json!(true), &json!("cancelled"), &json!("chat_cancelled")),
+        "{events}"
+    );
+    assert_eq!(
+        call("/chat/api/send", json!({"prompt": "hi"})),
+        (503, json!({"error": "application_closed"}))
+    );
+    lock(&run.runs).close();
+    drop(f);
+}

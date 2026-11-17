@@ -54,6 +54,17 @@ pub trait ChainPorts: Send {
     fn teardown(&mut self, _failed: bool, _env: &mut dyn StepEnv) -> Result<(), String> {
         Ok(())
     }
+    /// [`ChainPorts::teardown`] with the run's `ctx.state` as the steps left it, for a teardown
+    /// that reads it (v0.1.4 announces `stopped` only when `ctx.state['model']` is set,
+    /// demo_chain.py:1386-1390 @ f4e366e9). Additive: the default is `teardown`.
+    fn teardown_run(
+        &mut self,
+        failed: bool,
+        _state: &RunState,
+        env: &mut dyn StepEnv,
+    ) -> Result<(), String> {
+        self.teardown(failed, env)
+    }
     /// `chain.rollover_due(ctx)`, `ceiling_reached(ctx)`, `monitor(ctx)`: only a serving run asks.
     fn rollover_due(&mut self, _state: &RunState) -> Option<bool> {
         None
@@ -233,7 +244,7 @@ impl<P: ChainPorts> Chain for OwnerChain<P> {
     }
 
     fn teardown(&mut self, failed: bool, env: &mut dyn StepEnv) -> Result<(), String> {
-        self.ports.teardown(failed, env)
+        self.ports.teardown_run(failed, &self.state, env)
     }
     fn rollover_binding(&self) -> Option<Value> {
         self.state.rollover_binding.clone()
@@ -246,5 +257,56 @@ impl<P: ChainPorts> Chain for OwnerChain<P> {
     }
     fn monitor(&mut self) -> MonitorProbe {
         self.ports.monitor(&self.state)
+    }
+}
+
+#[cfg(test)]
+mod teardown_tests {
+    //! `chain.teardown(ctx, failed=)` reads `ctx.state` (demo_chain.py:1386-1390 @ f4e366e9: the
+    //! `stopped` announcement only when `ctx.state['model']` is set), so the chain hands its ports
+    //! the run's state as the steps left it.
+    use super::*;
+    struct Seen(Option<(bool, String, String)>);
+    impl ChainPorts for Seen {
+        fn ports(&mut self) -> Ports<'_> {
+            unreachable!("a teardown runs no step")
+        }
+        fn teardown_run(
+            &mut self,
+            failed: bool,
+            state: &RunState,
+            _: &mut dyn StepEnv,
+        ) -> Result<(), String> {
+            self.0 = Some((failed, state.run_id.clone(), state.deployment_id.clone()));
+            Ok(())
+        }
+    }
+    struct Env;
+    impl StepEnv for Env {
+        fn progress(&mut self, _: &str) {}
+        fn stopped(&self) -> bool {
+            false
+        }
+        fn now(&mut self) -> f64 {
+            0.0
+        }
+        fn wall(&mut self) -> f64 {
+            0.0
+        }
+        fn set_result(&mut self, _: &str, _: Value) {}
+        fn record_exception(&mut self, _: &str, _: &str) {}
+        fn pause(&mut self, _: f64) -> bool {
+            false
+        }
+    }
+    #[test]
+    fn the_chains_teardown_hands_its_ports_the_runs_state() {
+        let mut chain = OwnerChain::new(Seen(None));
+        chain.new_run("run-1", "dep-1", Reason::Start, None, None);
+        assert_eq!(chain.teardown(true, &mut Env), Ok(()));
+        assert_eq!(
+            chain.ports.0,
+            Some((true, "run-1".to_owned(), "dep-1".to_owned()))
+        );
     }
 }
