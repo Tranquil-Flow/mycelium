@@ -325,3 +325,152 @@ fn a_run_names_why_the_two_macs_cannot_meet() {
     assert!(message.contains("17.5.7.8"), "{message}");
     assert!(lan.allows(at("192.168.1.40:61700")));
 }
+/// The joined Mac of the network tests: a packaged member whose work transport reads
+/// 127.0.0.1 as "this Mac's interface" (nothing leaves the host) and whose relay is a dead
+/// loopback port.
+#[cfg(feature = "desktop-shell")]
+struct ReachMember {
+    p: fixture::Joined,
+    authority: Arc<Mutex<node_service::packaged_run::Authority>>,
+    network: Arc<node_service::packaged_network::Network>,
+    member: Arc<node_service::packaged_network::PackagedMember>,
+    agent: api::member_agent::MemberAgent<node_service::packaged_network::PackagedMember>,
+}
+#[cfg(feature = "desktop-shell")]
+impl ReachMember {
+    fn new() -> Self {
+        use node_service::{
+            packaged_network::{MemberSeams, Network, NetworkConfig, PackagedMember},
+            packaged_run::Authority,
+            packaged_work::WorkNetwork,
+        };
+        use runtime::iroh_host::{LanPolicy, Reach};
+        let p = fixture::Joined::new();
+        p.announced();
+        api::preferences::private_state::store(
+            &p.member_root.join("installation-role.json"),
+            &json!({"protocol":"mycelium.a13_installation_role.v1","role":"target"}),
+            app_host::cap(),
+        )
+        .unwrap();
+        let mut authority = Authority::load(p.member_root.clone()).unwrap();
+        authority.target = true;
+        authority.running = true;
+        authority.session = Some(p.session.clone());
+        let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
+        let network = Network::new(
+            &p.member_root,
+            NetworkConfig {
+                seams: node_service::packaged_network::JoinSeams {
+                    member_seed: p.seed.options(),
+                    ..Default::default()
+                },
+                work_network: WorkNetwork::Read(
+                    Arc::new(move || api::lan_interface::Selection::Lan(loopback)),
+                    LanPolicy::with_explicit(vec![loopback]).unwrap(),
+                ),
+                relay: Reach::Hermetic("http://127.0.0.1:1".parse().unwrap()),
+                ..Default::default()
+            },
+        );
+        let authority = Arc::new(Mutex::new(authority));
+        let member = PackagedMember::new(
+            authority.clone(),
+            network.clone(),
+            MemberSeams {
+                closed: Box::new(|| false),
+                resource: Box::new(|_| None),
+                acquisition: Box::new(|| None),
+                start_whole_model: Box::new(|_| Err("member_model_download_not_ported".to_string())),
+            },
+        );
+        Self {
+            p,
+            authority,
+            network,
+            member,
+            agent: api::member_agent::MemberAgent::default(),
+        }
+    }
+    fn tick(&mut self) {
+        self.agent.tick(&self.member);
+    }
+    /// `status.network_reach` and the joined Mac's own card, as its window reads them.
+    fn status(&self) -> (serde_json::Value, serde_json::Value) {
+        let mut status = json!({});
+        node_service::packaged_network::status_overlay(
+            &mut status,
+            Some(&self.authority),
+            &self.network,
+        );
+        node_service::packaged_network::member_status(
+            &mut status,
+            Some(&self.authority),
+            &self.network,
+        );
+        (status["network_reach"].clone(), status["demo_target"].clone())
+    }
+    /// The owner's view of this Mac's last report.
+    fn report(&self) -> serde_json::Value {
+        self.p.seed.exchange.reports()[self.p.session.node_id()].clone()
+    }
+    fn close(mut self) {
+        self.agent.close(&self.member);
+        self.network.quit();
+    }
+}
+/// Lane XB patch 2 (decision D1, REVIEW XB-03/04/06): the OWNER chooses each run's network
+/// reach and signs it in the run announcement; the joined Mac binds in exactly that mode, and its
+/// own preference file decides nothing (here it says `relay` with portmapping: ignored). Status
+/// names the ACTIVE work service's mode, not a file. A signed relay that is not this Mac's
+/// configured relay is refused by name before anything binds (D4), on the joined Mac's card and
+/// in its report to the owner (D3: named, never a timeout).
+#[cfg(feature = "desktop-shell")]
+#[test]
+fn a_joined_mac_binds_in_the_mode_the_owner_signed_and_names_a_foreign_relay() {
+    use api::run_exchange::work_network::RunReach;
+    use node_service::packaged_work::reach;
+    let mut m = ReachMember::new();
+    reach::save(
+        &m.p.member_root,
+        reach::ReachChoice {
+            across_networks: true,
+            portmapping: true,
+        },
+    )
+    .unwrap();
+    // The owner signed nothing: the same network, the LAN carrier.
+    m.tick();
+    let (reach_status, _) = m.status();
+    assert_eq!(reach_status["active"]["reach"], "same_network", "{reach_status}");
+    assert_eq!(reach_status["active"]["portmapping"], false, "{reach_status}");
+    assert_eq!(reach_status["error"], serde_json::Value::Null, "{reach_status}");
+    assert!(
+        m.p.seed
+            .work_members
+            .get(
+                &m.p.seed.coordinator,
+                m.p.session.node_id(),
+                m.p.owner.public(),
+                "run-s4cb2",
+                "dep-s4cb2",
+                &|a| a.ip().is_loopback(),
+            )
+            .is_ok(),
+        "the joined Mac's LAN work endpoint is published"
+    );
+    // The owner signs a relay that is not this Mac's: refused by name, nothing bound.
+    m.p.seed.exchange.set_work_network(RunReach::Relay(
+        "https://relay.example.org".parse().unwrap(),
+    ));
+    m.tick();
+    let (reach_status, card) = m.status();
+    assert_eq!(reach_status["error"], "work_network_relay_mismatch", "{reach_status}");
+    assert_eq!(reach_status["active"], serde_json::Value::Null, "{reach_status}");
+    assert_eq!(card["state"], "error", "{card}");
+    assert_eq!(card["detail"], "work_network_relay_mismatch", "{card}");
+    let report = m.report();
+    assert_eq!(report["state"], "error", "{report}");
+    assert_eq!(report["detail"], "work_network_relay_mismatch", "{report}");
+    m.close();
+}

@@ -90,6 +90,12 @@ pub struct NetworkConfig {
     /// [`Network`] itself sets it directly. `None`: every stage prepare refuses
     /// `native_binary_pin_required`.
     pub native_program: Option<api::native_compiler::NativeProgram>,
+    /// Lane XB patch 2 (D4): the one relay this Mac's endpoints register at in a run across
+    /// networks, and the only relay a signed run may name: Mycelium's ([`Reach::Shipped`]); a
+    /// test overrides it with a dead loopback relay so nothing leaves the host.
+    ///
+    /// [`Reach::Shipped`]: runtime::iroh_host::Reach::Shipped
+    pub relay: runtime::iroh_host::Reach,
 }
 impl Default for NetworkConfig {
     /// The app's own: the bundled `native/cloudflared` next to the executable, no seams, 20 s.
@@ -102,6 +108,7 @@ impl Default for NetworkConfig {
             device_memory_bytes: None,
             work_network: crate::packaged_work::WorkNetwork::default(),
             native_program: None,
+            relay: runtime::iroh_host::Reach::Shipped,
         }
     }
 }
@@ -131,6 +138,9 @@ pub struct Network {
     work: Mutex<Option<crate::packaged_work::Service>>,
     work_session: crate::packaged_work::SessionCell,
     work_network: crate::packaged_work::WorkNetwork,
+    /// Lane XB patch 2: this Mac's reach state (its relay, the owner run's choice, the active
+    /// endpoints' mode, a joined Mac's named refusal): `crate::packaged_work::reach`.
+    pub(crate) reach: crate::packaged_work::reach::State,
     /// [`NetworkConfig::native_program`].
     native_program: Option<api::native_compiler::NativeProgram>,
     work_closed: AtomicBool,
@@ -256,6 +266,7 @@ impl Network {
             work: Mutex::default(),
             work_session: Arc::new(Mutex::new(None)),
             work_network: config.work_network,
+            reach: crate::packaged_work::reach::State::new(config.relay),
             native_program: config.native_program,
             work_closed: AtomicBool::new(false),
             serving: std::sync::Arc::new(AtomicBool::new(false)),
@@ -760,10 +771,11 @@ pub fn status_overlay(status: &mut Value, authority: Option<&Mutex<Authority>>, 
     };
     let pending = lock(&network.pending).clone();
     fields.insert("network".into(), network.status().to_value());
-    // Lane XB2: the reach the next run or work service starts with (same network / relay).
+    // Lane XB patch 2 (D1, XB-06): the ACTIVE endpoints' reach, the owner's choice for its
+    // next run, this Mac's portmapping preference and a named error.
     fields.insert(
         "network_reach".into(),
-        crate::packaged_work::reach::status(&network.root, &network.work_network),
+        network.reach.status(&network.root),
     );
     let Some(authority) = authority else {
         // The authority's state was refused at bind (an unreadable or invalid role file among
@@ -1157,9 +1169,11 @@ impl api::member_agent::MemberHost for PackagedMember {
         self.network.close_work();
     }
     fn work_report(&self) -> Result<Option<Value>, String> {
-        lock(&self.network.work)
-            .as_ref()
-            .map_or(Ok(None), crate::packaged_work::Service::report)
+        // Lane XB patch 2 (D3): without a service, a named network refusal is reported.
+        lock(&self.network.work).as_ref().map_or_else(
+            || Ok(self.network.reach.refusal_report()),
+            crate::packaged_work::Service::report,
+        )
     }
     fn work_preview(
         &self,
@@ -1253,6 +1267,8 @@ pub fn member_status(status: &mut Value, authority: Option<&Mutex<Authority>>, n
             card
         }
     };
+    // Lane XB patch 2 (D3): a named network refusal of this Mac's work shows on its card.
+    network.reach.card(&mut status["demo_target"]);
 }
 
 #[cfg(test)]

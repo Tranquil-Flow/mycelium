@@ -271,6 +271,21 @@ pub(super) struct Work {
     /// What the probe reached in the current run (never a target list: see [`LocalNetwork`]).
     local_network: Arc<Mutex<LocalNetwork>>,
 }
+/// Lane XB patch 2 (D3): the named refusal of a run whose joined Mac reported (state `error`,
+/// for THIS run) that it cannot bind the run's signed network reach.
+fn member_reach_refusal(reports: &Value, state: &RunState) -> Option<StepError> {
+    use crate::packaged_work::reach::MEMBER_REFUSALS;
+    let (node, code) = state.participants.iter().find_map(|node| {
+        let report = &reports[node.as_str()];
+        let code = report["detail"].as_str()?;
+        (report["state"] == "error"
+            && report["run_id"].as_str() == Some(state.run_id.as_str())
+            && MEMBER_REFUSALS.contains(&code))
+        .then(|| (node.clone(), code.to_owned()))
+    })?;
+    let (owner_code, message) = crate::packaged_work::reach::member_refusal(&node, &code);
+    Some(owner_run::OwnerRunError::with(owner_code, Some(&message), None).into())
+}
 /// Lane PHY item 2, patch 2 (PHY-02): what one run's probes reached. Targets are never cached:
 /// every pass reads them afresh from this run's current, verified member records
 /// (`Inbox::get` -> `joined::verify`: current enrollment, lease, generation, run and share
@@ -810,6 +825,8 @@ impl Work {
         }
         let network = resolved.choice;
         lock(&self.resident).network = Some(network.clone());
+        // Lane XB patch 2 (XB-06): status names the run's ACTIVE transport.
+        self.host.network.reach.activate(&network);
         // The first advertised address the run's transport refuses: its refusal is named below.
         let refused_at = std::cell::Cell::new(None);
         let admits = |address: std::net::SocketAddr| {
@@ -848,6 +865,11 @@ impl Work {
             match current {
                 Ok(v) => break v,
                 Err(e) if e.code == "member_work_unavailable" => {
+                    // Lane XB patch 2 (D3): a joined Mac that refused this run's signed reach
+                    // by name (its report) fails the run by that name, never by the timeout.
+                    if let Some(refused) = member_reach_refusal(&seed.exchange.reports(), state) {
+                        return Err(refused);
+                    }
                     env.progress("member_work_unavailable");
                 }
                 Err(e) => match refused_at.get() {
@@ -1322,9 +1344,16 @@ impl Chain for Composed {
         ceiling: Option<&Value>,
         binding: Option<&Value>,
     ) {
+        // Lane XB patch 2 (D1): the owner's network reach for THIS run, read once now and
+        // signed in every announcement of the run; a joined Mac binds in exactly that mode. An
+        // invalid choice publishes nothing and refuses the run's first step by name.
+        let reach = self.work.host.network.begin_owner_run();
         if let Some(seed) = self.work.host.with(|c| c.authority.seed.clone()) {
             seed.exchange
                 .set_owner_control(Some(OwnerControl::new(self.work.owner.public())));
+            seed.exchange.set_work_network(
+                reach.unwrap_or(api::run_exchange::work_network::RunReach::SameNetwork),
+            );
         }
         // A fresh `RunContext` for the page's chats too (lane CHAT, owner_run.py:392-399).
         super::chat::new_run(&self.work.host);
@@ -1338,6 +1367,16 @@ impl Chain for Composed {
             .new_run(run, deployment, reason, ceiling, binding);
     }
     fn run_step(&mut self, step: &str, env: &mut dyn StepEnv) -> Result<(), StepError> {
+        // Lane XB patch 2 (D1, D3): a reach this Mac cannot bind (an invalid preference file, a
+        // loopback-fixed transport across networks) refuses the run's steps by name.
+        if let Err(code) = self.work.host.network.owner_run_network() {
+            return Err(owner_run::OwnerRunError::with(
+                code,
+                Some(&crate::packaged_work::reach::owner_refusal_message(code)),
+                None,
+            )
+            .into());
+        }
         // Lane PHY item 2: macOS's Local Network question is asked before the compile is spent,
         // and a pending or denied answer refuses Start's first step and the compile by name.
         // Steps 1-5 (`machine::STEPS`): the joined Macs' work addresses arrive during step 3.
@@ -1361,7 +1400,14 @@ impl Chain for Composed {
         self.inner.run_step(step, env)
     }
     fn teardown(&mut self, failed: bool, env: &mut dyn StepEnv) -> Result<(), String> {
-        self.inner.teardown(failed, env)
+        let outcome = self.inner.teardown(failed, env);
+        // Lane XB patch 2: the run's reach ends with it (status shows no active endpoints).
+        self.work.host.network.end_owner_run();
+        if let Some(seed) = self.work.host.with(|c| c.authority.seed.clone()) {
+            seed.exchange
+                .set_work_network(api::run_exchange::work_network::RunReach::SameNetwork);
+        }
+        outcome
     }
     fn rollover_binding(&self) -> Option<Value> {
         self.inner.rollover_binding()

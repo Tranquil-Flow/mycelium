@@ -363,6 +363,8 @@ pub struct Service {
     /// The loop unwound before its custody handoff, so the exact `work::Work` is gone and no
     /// later close can prove its stage released. Sticky: every close stays an error.
     unprovable: bool,
+    /// Lane XB patch 2: bound across networks (the run's signed mode).
+    across: bool,
 }
 impl Service {
     #[cfg(all(test, feature = "desktop-shell"))]
@@ -460,6 +462,10 @@ impl Service {
         shared.live()?; // refusal precedes sockets, threads, custody and native work
         let (send, ready) = mpsc::sync_channel(1);
         let worker = shared.clone();
+        let across = network
+            .0
+            .as_ref()
+            .is_some_and(|(_, policy)| policy.relay().is_some());
         let cleanup = Arc::new(Mutex::new(None));
         let handed = cleanup.clone();
         let thread = std::thread::Builder::new()
@@ -473,6 +479,7 @@ impl Service {
             thread: Some(thread),
             cleanup,
             unprovable: false,
+            across,
         };
         let (address, endpoint) = ready
             .recv_timeout(duration(B::RouterClose)?)
@@ -515,6 +522,10 @@ impl Service {
             "run_id":a["run_id"],"deployment_id":a["deployment_id"],"state":state,
             "detail":s["last_error"],"model":{"model_id":a["model"]["model_id"],"resolved_commit":a["model"]["resolved_commit"]},
             "progress":null,"descriptor":null,"issued_at":app_host::now()})))
+    }
+    /// Lane XB patch 2 (D1): whether this service's endpoints were bound across networks.
+    pub fn across_networks(&self) -> bool {
+        self.across
     }
     pub fn registration(&self) -> Result<Value> {
         self.shared.live()?;
