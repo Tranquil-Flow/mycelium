@@ -85,10 +85,15 @@ pub struct Operation {
 }
 impl Operation {
     pub fn check(&self) -> Result<()> {
+        self.checkpoint().map_err(|e| e.0.into())
+    }
+    /// [`Operation::check`] as a storage checkpoint (lane A patch 3, A2-01): the operation's own
+    /// code ends a wait on the storage ledger.
+    pub fn checkpoint(&self) -> std::result::Result<(), Error> {
         if self.cancelled.load(Ordering::SeqCst) {
-            Err("member_operation_cancelled".into())
+            Err(Error("member_operation_cancelled"))
         } else if Instant::now() >= self.deadline {
-            Err("member_operation_deadline".into())
+            Err(Error("member_operation_deadline"))
         } else {
             Ok(())
         }
@@ -937,9 +942,10 @@ impl Work {
         if policy.is_none() && socket.is_none_or(|s| !s.ip().is_loopback()) {
             return Err("source_not_loopback".into());
         }
-        // Retain custody BEFORE any fallible carrier work; failures keep debt.
+        // Retain custody BEFORE any fallible carrier work; failures keep debt. The storage
+        // reservation's wait for a busy ledger is this operation's (lane A patch 3, A2-01).
         self.shard = Some(
-            JoinedShard::begin(
+            JoinedShard::begin_checked(
                 &self.root,
                 session
                     .session()
@@ -951,6 +957,7 @@ impl Work {
                 carrier,
                 offer,
                 app_host::now(),
+                &|| operation.checkpoint(),
             )
             .map_err(|e| e.0.to_owned())?,
         );

@@ -159,7 +159,7 @@ impl MemberShard {
         transfer: &Value,
         recipe: &Value,
         digest: &str,
-        _checkpoint: &dyn Fn() -> Result<()>,
+        checkpoint: &dyn Fn() -> Result<()>,
     ) -> Result<Self> {
         let mut record = pins(node, transfer, recipe, digest)?;
         if !segment(run) {
@@ -180,6 +180,7 @@ impl MemberShard {
             run,
             identity,
             transfer["size_bytes"].as_u64().unwrap(),
+            checkpoint,
         )?;
         private_state::store(
             &root.join(RECORD),

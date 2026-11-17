@@ -419,7 +419,10 @@ impl InputArtifact {
             .file_name()
             .and_then(|s| s.to_str())
             .ok_or(Error("compiler_storage_ledger_invalid"))?;
-        reserve_output(runs, run, self.directory_identity, bytes)
+        // Lane A patch 3, A2-01: the compile's Stop bounds the wait for a busy ledger.
+        reserve_output(runs, run, self.directory_identity, bytes, &|| {
+            self.checkpoint()
+        })
     }
 
     /// Real source-byte sharding only; no stage load, quantization or native proof.
@@ -610,16 +613,22 @@ pub mod member_shard;
 pub mod owner_retire;
 pub use owner_retire::{Retirement, retire_dead_runs};
 
+/// Reserve `bytes` of retained output for `run` under the storage ledger's lock. `checkpoint` is
+/// the asking operation's own (receive deadline/cancellation, compile Stop). Lane A patch 3, A2-01
+/// (REVIEW-laneA-p2-astra.md): it bounds the wait for a busy ledger ([`settle_lock`]), and it is
+/// checked again immediately before the reservation is written, so an operation that ended while
+/// it waited never leaves a new `cleanup_required` charge.
 fn reserve_output(
     runs: &Path,
     run: &str,
     directory_identity: (u64, u64),
     bytes: u64,
+    checkpoint: &dyn Fn() -> Result<()>,
 ) -> Result<ShardReservation> {
     let host = runs
         .parent()
         .ok_or(Error("compiler_storage_ledger_invalid"))?;
-    let (_lock, mut ledger) = storage_ledger(runs)?;
+    let (_lock, mut ledger) = storage_ledger_within(runs, None, checkpoint)?;
     let cap = crate::preferences::resource_policy::read(host)
         .map_err(|_| Error("compiler_storage_consent_required"))?
         .and_then(|p| p["storage_bytes"].as_u64())
@@ -670,6 +679,7 @@ fn reserve_output(
     }
     let row = json!({"bytes":bytes,"run_dev":directory_identity.0,
             "run_ino":directory_identity.1,"phase":"cleanup_required"});
+    checkpoint()?;
     entries.insert(run.into(), row.clone());
     store_storage_ledger(runs, &ledger)?;
     Ok(ShardReservation {

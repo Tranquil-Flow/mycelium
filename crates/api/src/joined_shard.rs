@@ -364,17 +364,18 @@ impl JoinedShard {
         carrier: &Identity,
         offer: &Value,
         now: f64,
-        _checkpoint: &dyn Fn() -> Result<()>,
+        checkpoint: &dyn Fn() -> Result<()>,
     ) -> Result<Self> {
         admit(root, session, signer, carrier, offer, now)?;
         let m = &offer["message"];
-        let shard = MemberShard::begin(
+        let shard = MemberShard::begin_checked(
             root,
             text(m, "run")?,
             session.node_id(),
             &m["transfer"],
             &m["recipe"],
             text(&m["recipe"], "node_plan_digest")?,
+            checkpoint,
         )?;
         Ok(Self {
             root: root.into(),
