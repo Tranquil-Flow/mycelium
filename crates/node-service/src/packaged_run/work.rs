@@ -168,6 +168,41 @@ fn stage_memory_limit(state: &RunState, contributor: &Path, node: &str) -> Optio
         (consent, share) => consent.or(share),
     }
 }
+/// The compile's completed run as the slices step's preparation reads it: in a product build
+/// always the compile's own completed input.
+enum Completed<'a> {
+    Artifact(&'a api::compiler_inputs::InputArtifact),
+    /// TEST ONLY: [`COMPLETED_REQUEST`].
+    #[cfg(test)]
+    Request(planner::chain_compile::BuildRequest),
+}
+impl Completed<'_> {
+    fn request(&self) -> &planner::chain_compile::BuildRequest {
+        match self {
+            Self::Artifact(artifact) => artifact.request(),
+            #[cfg(test)]
+            Self::Request(request) => request,
+        }
+    }
+    fn artifact(&self) -> Result<&api::compiler_inputs::InputArtifact, StepError> {
+        match self {
+            Self::Artifact(artifact) => Ok(artifact),
+            #[cfg(test)]
+            Self::Request(_) => Err(refused("test_completed_request_only")),
+        }
+    }
+}
+#[cfg(test)]
+thread_local! {
+    /// TEST ONLY (lane A patch 2, A-04): the completed compile's request for this thread's next
+    /// [`Work::prepare`], in place of a compile only the real model can complete (its native
+    /// challenge). It replaces the compile's completion and nothing else: every check `prepare`
+    /// makes on the request (run identity, the serving context, the stage memory) is the product's,
+    /// and a request that passes them is refused `test_completed_request_only` right after the
+    /// memory check, before any shard document, push or prepare.
+    pub(super) static COMPLETED_REQUEST: std::cell::RefCell<Option<planner::chain_compile::BuildRequest>> =
+        const { std::cell::RefCell::new(None) };
+}
 /// The slices step's memory check over the run's own consent sources (lane A, CAP-4: the
 /// production wiring a test can reach, not a closure each test writes for itself).
 fn check_run_stage_memory(
@@ -699,10 +734,22 @@ impl Work {
     ) -> Result<(), StepError> {
         let (plan, tokenizer) = {
             let compiler = lock(&compiler.0);
-            let artifact = compiler
-                .completed_input(&state.run_id, &state.deployment_id)
-                .map_err(|e| refused(&e.code_or("compiler_not_completed")))?;
-            let request = artifact.request();
+            #[cfg(test)]
+            let completed = match COMPLETED_REQUEST.with(|c| c.borrow_mut().take()) {
+                Some(request) => Completed::Request(request),
+                None => Completed::Artifact(
+                    compiler
+                        .completed_input(&state.run_id, &state.deployment_id)
+                        .map_err(|e| refused(&e.code_or("compiler_not_completed")))?,
+                ),
+            };
+            #[cfg(not(test))]
+            let completed = Completed::Artifact(
+                compiler
+                    .completed_input(&state.run_id, &state.deployment_id)
+                    .map_err(|e| refused(&e.code_or("compiler_not_completed")))?,
+            );
+            let request = completed.request();
             if request.node_ids != state.participants
                 || request.deployment_id != state.deployment_id
             {
@@ -720,6 +767,7 @@ impl Work {
                 .host
                 .with(|c| owner_ports::contributor_dir(&c.authority.root));
             check_run_stage_memory(request, state, &contributor, tokens)?;
+            let artifact = completed.artifact()?;
             // `_step_slices` (`demo_chain.py:838-839`): a whole-snapshot run has no slice to
             // fetch. v0.1.4 binds the snapshot each member already holds
             // (`bind_hf_prepositions`) and passes the step; only a stage-sharded compile has a

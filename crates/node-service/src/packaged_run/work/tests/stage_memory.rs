@@ -189,3 +189,62 @@ fn the_slices_check_reads_the_contributors_grant_and_the_joined_macs_caps() {
         None
     );
 }
+
+/// Lane A patch 2, A-04 (REVIEW-laneA-release-astra.md): the negative boundary through the
+/// production slices preparation, `Work::prepare`, not the helper. Only the compile's completion
+/// is supplied ([`COMPLETED_REQUEST`]: its native challenge needs the real model); the consent
+/// sources are the product's (the owner's contributor grant as the contributor step leaves it, a
+/// joined Mac's signed caps in its record). An insufficient grant is refused by name, naming the
+/// Mac, before anything downstream: no owner work composed, no shard document read, no push, no
+/// prepare. With both consents sufficient the same preparation passes the memory check and stops
+/// only at the seam's end (`test_completed_request_only`), so the refusal above is the check's.
+#[test]
+fn the_slices_preparation_refuses_an_insufficient_grant_by_name_before_any_push() {
+    let f = Fixture::product_contributor();
+    let composed = Composed::new(&f.host, None, None);
+    let prepare = |request: planner::chain_compile::BuildRequest, state: &RunState| {
+        COMPLETED_REQUEST.with(|c| *c.borrow_mut() = Some(request));
+        let result = composed.work.prepare(
+            state,
+            &mut Env { at: Instant::now() },
+            &composed.compiler,
+            None,
+        );
+        COMPLETED_REQUEST.with(|c| c.borrow_mut().take());
+        refusal(result)
+    };
+    let run = |joined_cap: u64| {
+        let mut state = demo_state(Some(joined_cap), None);
+        state.model = Some(super::stopped::chosen_model());
+        state
+    };
+    let request = |context: u64| {
+        let mut request = demo_request([0, 19], [19, 28], context);
+        request.deployment_id = "dep-cap".into();
+        request
+    };
+    let downstream = || lock(&composed.work.resident).work.is_some();
+    // The owner's contributor grant (4 GB) cannot hold layers [0,19) at 4,096 tokens (6.79 GB).
+    let (code, message) = prepare(request(4096), &run(JOINED_CAP))
+        .expect("the contributor's grant is refused at the slices preparation");
+    assert_eq!(code, "stage_memory_consent_below_context", "{message}");
+    assert!(
+        message.contains("Mac owner") && message.contains("4000000000"),
+        "{message}"
+    );
+    assert!(!downstream(), "nothing composed after the refusal");
+    // A joined Mac whose signed caps cannot hold its stage at the serving context.
+    let (code, message) = prepare(request(CONTEXT), &run(2_000_000_000))
+        .expect("the joined Mac's caps are refused at the slices preparation");
+    assert_eq!(code, "stage_memory_consent_below_context", "{message}");
+    assert!(
+        message.contains("Mac joined") && message.contains("2000000000"),
+        "{message}"
+    );
+    assert!(!downstream(), "nothing composed after the refusal");
+    // Control: both consents sufficient, the check passes and the preparation goes on to the
+    // compile's artifact (the seam's end).
+    let (code, _) = prepare(request(CONTEXT), &run(JOINED_CAP)).expect("the seam's end");
+    assert_eq!(code, "test_completed_request_only");
+    assert!(!downstream());
+}
