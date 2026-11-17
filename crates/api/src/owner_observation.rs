@@ -222,21 +222,13 @@ impl<H: ChainHost> PinnedHost<H> {
             return Err(OwnerError("managed_control_run_binding_mismatch"));
         }
         let snapshot = self.member(node)?;
-        crate::installation_descriptor::verify_installation_descriptor(
+        let key = descriptor_key(
             &card,
             &snapshot,
             seed.coordinator.swarm_id(),
-            card["statement"]["run_id"]
-                .as_str()
-                .ok_or(OwnerError("managed_control_run_invalid"))?,
-            card["statement"]["deployment_id"]
-                .as_str()
-                .ok_or(OwnerError("managed_control_deployment_invalid"))?,
             self.wall_seconds(),
-        )
-        .map_err(|_| OwnerError("managed_control_descriptor_unavailable"))?;
+        )?;
         let expected = binding(&snapshot, run, deployment)?;
-        let key = card["verification_key"].clone();
         let result = {
             let closed = locked(&seed.managed_closed)?;
             if *closed {
@@ -319,6 +311,24 @@ impl<H: ChainHost> PinnedHost<H> {
         protocol::strict::object(&reply, protocol::managed::MAX_FRAME_BYTES)
             .map_err(|_| OwnerError("managed_control_json_invalid"))
     }
+}
+/// The verification key a member's reported installation descriptor names, which a managed-control
+/// call to or from that member binds the mailbox to (`guarded`).
+fn descriptor_key(card: &Value, member: &Value, swarm: &str, now: f64) -> OResult<Value> {
+    crate::installation_descriptor::verify_installation_descriptor(
+        card,
+        member,
+        swarm,
+        card["statement"]["run_id"]
+            .as_str()
+            .ok_or(OwnerError("managed_control_run_invalid"))?,
+        card["statement"]["deployment_id"]
+            .as_str()
+            .ok_or(OwnerError("managed_control_deployment_invalid"))?,
+        now,
+    )
+    .map_err(|_| OwnerError("managed_control_descriptor_unavailable"))?;
+    Ok(card["verification_key"].clone())
 }
 fn binding(member: &Value, run: &Value, deployment: &Value) -> OResult<Value> {
     let b = json!({"target_node_id":member["node_id"], "target_endpoint_id":member["endpoint_id"],
@@ -1087,5 +1097,123 @@ impl<H: ChainHost> ObservationBackend for Backend<H> {
             code: Some("NP-L10-observation-rebuild".into()),
             text: "ManagedServingWorkflow source/stop/cleanup is not mounted".into(),
         })
+    }
+}
+
+#[cfg(test)]
+mod descriptor_age_tests {
+    //! B3 (ledger row 111): every managed-control call a member makes (its staging and cleanup
+    //! reads) or the owner makes to it passes `guarded`, which re-verified the member's ONE
+    //! reported installation descriptor with its 300 s life (+30 s skew) on each call. The
+    //! descriptor is signed once per run at collect, so a run whose observe + compile + slices
+    //! outlast it refused every later call `managed_control_descriptor_unavailable` (row 111:
+    //! Mac B's first refusal 20:40:58, 330 s after it reported at 20:35:28; run 2 of the same
+    //! session, 20:53:40 -> 20:59:10, while serving).
+    use super::descriptor_key;
+    use crate::installation_descriptor::{Member, Paths, Source, installation_descriptor};
+    use protocol::identity::Identity;
+    use serde_json::{Value, json};
+
+    const SIGNED_AT: f64 = 1_000.0;
+
+    fn identity(name: &str, byte: u8) -> Identity {
+        Identity::from_secret(name, &[byte; 32]).unwrap()
+    }
+    fn member(signer: &Identity) -> (Member, Value) {
+        let member = Member {
+            node_id: "member-b".into(),
+            endpoint_id: signer.endpoint_id().into(),
+            verification_key_digest: signer.verification_key_digest(),
+            generation: 3,
+            incarnation: "inc-b".into(),
+        };
+        // The live membership record: its lease runs well past the descriptor's life.
+        let current = json!({"node_id": member.node_id, "endpoint_id": member.endpoint_id,
+            "verification_key_digest": member.verification_key_digest, "generation": 3,
+            "incarnation": member.incarnation, "lease_expires_at": SIGNED_AT + 10_000.0});
+        (member, current)
+    }
+    fn card(signer: &Identity, member: &Member) -> Value {
+        installation_descriptor(
+            signer,
+            member,
+            "swarm-1",
+            "run-1",
+            "dep-1",
+            true,
+            &Source::Slice {
+                source_root: "/scratch/slice".into(),
+                manifest_digest: format!("sha256:{}", "ab".repeat(32)),
+            },
+            &Paths {
+                state_root: "/scratch/state".into(),
+                endpoint_secret_file: "/scratch/key".into(),
+                python_executable: "/scratch/host".into(),
+                sidecar_binary: "/scratch/sidecar".into(),
+            },
+            SIGNED_AT,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_current_member_s_calls_still_bind_after_its_run_descriptor_ages_out() {
+        let signer = identity("endpoint-b", 7);
+        let (member, current) = member(&signer);
+        let card = card(&signer, &member);
+        let expires = card["statement"]["expires_at"].as_f64().unwrap();
+        assert_eq!(expires, SIGNED_AT + 300.0, "the descriptor's own life");
+        // Inside its life: the key it names.
+        assert_eq!(
+            descriptor_key(&card, &current, "swarm-1", SIGNED_AT + 10.0).unwrap(),
+            card["verification_key"]
+        );
+        // Row 111: 331 s and 400 s after signing, the member is still current (lease), its
+        // calls are freshly signed, and the run it described is the same run.
+        for age in [331.0, 400.0, 3_600.0] {
+            assert_eq!(
+                descriptor_key(&card, &current, "swarm-1", SIGNED_AT + age).map_err(|e| e.0),
+                Ok(card["verification_key"].clone()),
+                "a descriptor {age} s old"
+            );
+        }
+    }
+
+    #[test]
+    fn an_aged_descriptor_is_still_refused_when_anything_but_its_age_is_wrong() {
+        let signer = identity("endpoint-b", 7);
+        let (member, current) = member(&signer);
+        let late = SIGNED_AT + 400.0;
+        let refused = |card: &Value, current: &Value| {
+            descriptor_key(card, current, "swarm-1", late).map_err(|e| e.0)
+        };
+        let unavailable = Err("managed_control_descriptor_unavailable");
+        // A tampered statement (signature).
+        let mut tampered = card(&signer, &member);
+        tampered["statement"]["facts"]["source_root"] = json!("/tampered");
+        assert_eq!(refused(&tampered, &current), unavailable);
+        // Another key than the membership pins.
+        let other = identity("endpoint-x", 9);
+        let (other_member, _) = member(&other);
+        assert_eq!(refused(&card(&other, &other_member), &current), unavailable);
+        // A membership generation that moved on since the descriptor.
+        let mut renewed = current.clone();
+        renewed["generation"] = json!(4);
+        assert_eq!(refused(&card(&signer, &member), &renewed), unavailable);
+        // Another swarm.
+        assert_eq!(
+            descriptor_key(&card(&signer, &member), &current, "swarm-2", late).map_err(|e| e.0),
+            unavailable
+        );
+        // A lease that ended.
+        let mut lapsed = current.clone();
+        lapsed["lease_expires_at"] = json!(late - 1.0);
+        assert_eq!(refused(&card(&signer, &member), &lapsed), unavailable);
+        // A descriptor from the future stays refused too.
+        assert_eq!(
+            descriptor_key(&card(&signer, &member), &current, "swarm-1", SIGNED_AT - 60.0)
+                .map_err(|e| e.0),
+            unavailable
+        );
     }
 }
