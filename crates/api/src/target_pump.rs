@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Same-incarnation durable signed poll/ACK replay; uncertain native work is never retried.
-//! Unresolved prior journals are refused on reopen: this is not crash-resume recovery.
+//! An unresolved journal of the SAME run is refused on reopen: this is not crash-resume
+//! recovery. One left by an earlier run is never replayed and does not block a new run.
 use crate::managed_carrier::TargetFence;
 use crate::{
     bootstrap_process::{BootstrapProcess, ProcessControl, TrustedBootstrap},
@@ -163,11 +164,19 @@ impl<H: TargetHost> TargetPump<H> {
             .map_err(|e| e.0)?
             .map(Value::Object);
         let sequence = if let Some(prior) = prior {
+            // v0.1.4 keeps this journal per RUN (`target_app.py:256` roots the pump at
+            // `managed/<run_id>/pump`): a later run never loads, replays or refuses on an
+            // earlier run's unresolved outbound/pending, and only the signer-wide sequence
+            // carries over (`control_sequence.py`). Its claim stays with that run's mailbox;
+            // nothing here re-executes it. Reopening the SAME run still refuses, as the
+            // concurrent pump does (`concurrent_pump.py:71-76`).
+            let earlier_run = prior["binding"]["run_id"]
+                .as_str()
+                .is_some_and(|run| scope["run_id"] != run);
             if prior["protocol"] != "mycelium.a13.api_target_control.v1"
                 || prior["authority"] != authority
                 || prior["phase"] != "closed"
-                || !prior["outbound"].is_null()
-                || !prior["pending"].is_null()
+                || (!earlier_run && (!prior["outbound"].is_null() || !prior["pending"].is_null()))
             {
                 return Err("control_restart_requires_reconciliation".into());
             }
