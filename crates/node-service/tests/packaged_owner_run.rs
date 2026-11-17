@@ -295,8 +295,12 @@ fn start_with_no_joined_mac_fails_two_macs_required_with_the_steps() {
     assert_eq!(run["failed_step"], "descriptors", "{run}");
     assert_eq!(run["error_code"], "two_macs_required", "{run}");
     assert_eq!(run["steps"][0]["state"], "done", "{run}");
+    // The packaged host stages by slice whatever the source size (`ModelPorts::slice_staging`,
+    // aa9689a7): its member side has only the slice stage flavour, so v0.1.4's slice-mode text
+    // (demo_chain.py:494) is what the owner sees, not the whole-snapshot one.
     assert_eq!(
-        run["steps"][0]["detail"], "Qwen/Qwen2.5-0.5B-Instruct \u{b7} whole snapshot per Mac",
+        run["steps"][0]["detail"],
+        "Qwen/Qwen2.5-0.5B-Instruct \u{b7} each Mac fetches only its slice",
         "{run}"
     );
     assert_eq!(run["steps"][1]["state"], "done", "{run}");
