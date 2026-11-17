@@ -8,6 +8,7 @@ mod flake;
 mod local_network;
 mod quit_stopped;
 mod reach_action;
+mod reach_watch;
 mod regressions;
 mod retire;
 mod serving_q;

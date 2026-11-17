@@ -274,20 +274,34 @@ pub(super) struct Work {
 /// Lane XB patch 2 (D3): the named refusal of a run whose joined Mac reported (state `error`,
 /// for THIS run) that it cannot bind the run's signed network reach.
 fn member_reach_refusal(reports: &Value, state: &RunState) -> Option<StepError> {
-    member_reach_refusal_in(reports, &state.run_id, &state.deployment_id)
+    member_reach_refusal_in(
+        reports,
+        &state.run_id,
+        &state.deployment_id,
+        &state.participants,
+    )
 }
-/// Lane XB patch 3 (REVIEW XB2-03): [`member_reach_refusal`] over the run's authenticated
-/// reports (the exchange keeps only verified ones), for the run `run_id` / `deployment`: a report
-/// of another run or deployment never counts.
-fn member_reach_refusal_in(reports: &Value, run_id: &str, deployment: &str) -> Option<StepError> {
+/// Lane XB patch 3 (REVIEW XB2-03), scoped in patch 4 (REVIEW XB3-02): [`member_reach_refusal`]
+/// over the run's authenticated reports (the exchange keeps only verified ones). Only the reports
+/// of `participants` (the run's CURRENT member set: the collect step's candidates, then the Macs it
+/// selected) count, and only for exactly this `run_id` AND `deployment` (a report without a
+/// deployment, or of another run or deployment, never counts), as the shared owner steps read
+/// them (`run_reports`, `raise_member_refusal`). Any other Mac that reports into the exchange (a
+/// Mac that came online after collect began, one the collect did not select) has no say over
+/// this run.
+fn member_reach_refusal_in(
+    reports: &Value,
+    run_id: &str,
+    deployment: &str,
+    participants: &[String],
+) -> Option<StepError> {
     use crate::packaged_work::reach::MEMBER_REFUSALS;
-    let (node, code) = reports.as_object()?.iter().find_map(|(node, report)| {
+    let (node, code) = participants.iter().find_map(|node| {
+        let report = &reports[node.as_str()];
         let code = report["detail"].as_str()?;
         (report["state"] == "error"
             && report["run_id"].as_str() == Some(run_id)
-            && report["deployment_id"]
-                .as_str()
-                .is_none_or(|d| d == deployment)
+            && report["deployment_id"].as_str() == Some(deployment)
             && MEMBER_REFUSALS.contains(&code))
         .then(|| (node.clone(), code.to_owned()))
     })?;
@@ -300,10 +314,14 @@ fn member_reach_refusal_in(reports: &Value, run_id: &str, deployment: &str) -> O
 /// run under this watch: every wait checks the run's reports for such a refusal and ends the
 /// step (as a Stop would, at its next check); the step then fails by the joined Mac's name
 /// instead of waiting out its budget. Anything else passes to the run's own environment.
+/// Patch 4 (XB3-02): the watch reads only the run's current participants: the run state's list
+/// when the step starts, then every list the step itself publishes (`participants`: the collect's
+/// candidates on its first pass, the selected Macs when it ends; observe's facts nodes).
 struct ReachWatch<'e> {
     env: &'e mut dyn StepEnv,
     reports: &'e dyn Fn() -> Value,
     run: (String, String),
+    participants: Vec<String>,
     refused: std::cell::RefCell<Option<StepError>>,
 }
 impl ReachWatch<'_> {
@@ -311,10 +329,37 @@ impl ReachWatch<'_> {
         if self.refused.borrow().is_some() {
             return true;
         }
-        let found = member_reach_refusal_in(&(self.reports)(), &self.run.0, &self.run.1);
+        let found = member_reach_refusal_in(
+            &(self.reports)(),
+            &self.run.0,
+            &self.run.1,
+            &self.participants,
+        );
         let refused = found.is_some();
         *self.refused.borrow_mut() = found;
         refused
+    }
+}
+/// Runs one step before compose under a [`ReachWatch`] for the run `run` whose participants are
+/// `participants` when the step starts; a refusal the watch saw replaces the step's outcome.
+fn watched_step(
+    env: &mut dyn StepEnv,
+    reports: &dyn Fn() -> Value,
+    run: (String, String),
+    participants: Vec<String>,
+    step: impl FnOnce(&mut dyn StepEnv) -> Result<(), StepError>,
+) -> Result<(), StepError> {
+    let mut watch = ReachWatch {
+        env,
+        reports,
+        run,
+        participants,
+        refused: std::cell::RefCell::new(None),
+    };
+    let outcome = step(&mut watch);
+    match watch.refused.into_inner() {
+        Some(refused) => Err(refused),
+        None => outcome,
     }
 }
 impl StepEnv for ReachWatch<'_> {
@@ -331,6 +376,16 @@ impl StepEnv for ReachWatch<'_> {
         self.env.wall()
     }
     fn set_result(&mut self, key: &str, value: Value) {
+        // The step's own participant list (`publish_participants`: one row per node) is the
+        // run's current member set from now on.
+        if key == "participants"
+            && let Some(rows) = value.as_array()
+        {
+            self.participants = rows
+                .iter()
+                .filter_map(|row| row["node_id"].as_str().map(str::to_owned))
+                .collect();
+        }
         self.env.set_result(key, value);
     }
     fn record_exception(&mut self, code: &str, class: &str) {
@@ -1477,26 +1532,20 @@ impl Chain for Composed {
         // Lane XB patch 3 (REVIEW XB2-03): a joined Mac's named reach refusal ends the steps
         // before compose at once, by its name.
         let watched = match (step, self.inner.state()) {
-            ("contributor" | "descriptors" | "observe" | "compile", Some(state)) => {
-                Some((state.run_id.clone(), state.deployment_id.clone()))
-            }
+            ("contributor" | "descriptors" | "observe" | "compile", Some(state)) => Some((
+                (state.run_id.clone(), state.deployment_id.clone()),
+                state.participants.clone(),
+            )),
             _ => None,
         };
-        if let (Some(run), Some(seed)) =
+        if let (Some((run, participants)), Some(seed)) =
             (watched, self.work.host.with(|c| c.authority.seed.clone()))
         {
             let reports = move || seed.exchange.reports();
-            let mut watch = ReachWatch {
-                run,
-                env: &mut *env,
-                reports: &reports,
-                refused: std::cell::RefCell::new(None),
-            };
-            let outcome = self.inner.run_step(step, &mut watch);
-            return match watch.refused.into_inner() {
-                Some(refused) => Err(refused),
-                None => outcome,
-            };
+            let inner = &mut self.inner;
+            return watched_step(env, &reports, run, participants, |watch| {
+                inner.run_step(step, watch)
+            });
         }
         if step == "slices" {
             // A preparation refusal is returned as it is (no workflow has run).
