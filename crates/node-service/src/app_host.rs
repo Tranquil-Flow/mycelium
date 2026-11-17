@@ -559,10 +559,13 @@ pub struct PackagedHost {
     /// cannot be read or resumed keeps its code: every authority seam refuses with it and nothing
     /// is written over it.
     authority: Result<Arc<Mutex<Authority>>, &'static str>,
-    /// The code an owner's seed was refused with when it was reopened at bind (lost key, lost or
-    /// unusable TLS identity). v0.1.4's launch raises it and serves nothing (`DemoApp.start` ->
-    /// `authority.start()`, app.py:613-626 @ f4e366e9); here the loaded authority is kept, not
-    /// running, so the page still shows the swarm, and every action answers this code.
+    /// The code an owner's seed was refused with when it was reopened at bind, only for a lost
+    /// identity (`seed_authority_key_missing`, `authority_tls_identity_missing`). v0.1.4's launch
+    /// raises it and serves nothing (`DemoApp.start` -> `authority.start()`, app.py:613-626 @
+    /// f4e366e9); here the loaded authority is kept, not running, so the page still shows the
+    /// swarm, and every action answers this code. It is set once at bind and never cleared: the
+    /// network actions hold the same `authority_result` from bind, and no action can reopen a
+    /// lost identity in this process. Any other reopen failure leaves it `None`.
     seed_refused: Option<&'static str>,
     /// `DemoApp.acquisition` over the state root's model sources. `None`: this host was built
     /// without one, and every acquisition seam keeps the trait default.
@@ -672,14 +675,23 @@ impl PackagedHost {
             let authority = Arc::new(Mutex::new(authority));
             // A seed that cannot be reopened must not cost the app its swarm. Discarding the
             // loaded authority here is what made a restart report no swarm at all: the persisted
-            // record still answers the swarm and its retained membership. The authority is not
-            // running, and its code is kept: every action answers it, as v0.1.4's launch does.
+            // record still answers the swarm and its retained membership. A lost identity (the
+            // bound seed key, the TLS directory: `load_bound_seed_signer`, `_start_runtime`,
+            // authority.py:113-139,508-511 @ f4e366e9) cannot come back in this process: the
+            // authority is not running and every action answers its code, as v0.1.4's launch does.
+            // Any other failure (a busy database) is only logged: Stop then Start tries the seed
+            // again (REVIEW-laneSK-astra SK-01).
             if app_host::resumable(&*authority)
                 && let Err(error) = app_host::open_owner_seed(&*authority)
             {
                 eprintln!("l11_seed_reopen_refused:{}", error.code);
-                app_host::stop_authority(&*authority);
-                seed_refused = Some(error.code);
+                if matches!(
+                    error.code,
+                    "seed_authority_key_missing" | "authority_tls_identity_missing"
+                ) {
+                    app_host::stop_authority(&*authority);
+                    seed_refused = Some(error.code);
+                }
             }
             authority
         });
