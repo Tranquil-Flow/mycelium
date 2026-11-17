@@ -244,7 +244,7 @@ pub fn member_resource(
         json!({"node_id":member.node_id,"start":stage.start,"end":stage.end,"layers":stage.end-stage.start,"stage_source_bytes":stage.stage_bytes,"resident_bytes":resident,"kv_bytes":kv,"load_peak_bytes":peak,"max_rss_bytes":scaled(peak,r.guard_headroom)?,"disk_need_bytes":disk,"max_disk_bytes":scaled(disk,r.disk_headroom)?,"disk_footprint_bytes":footprint,"basis":basis,"memory_bytes":member.memory_bytes,"memory_ceiling_bytes":ceiling}),
     )
 }
-fn require_member(row: &Value, m: &Member) -> Result<()> {
+pub(crate) fn require_member(row: &Value, m: &Member) -> Result<()> {
     let n = |k: &str| {
         row[k]
             .as_u64()

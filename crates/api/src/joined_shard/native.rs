@@ -154,11 +154,16 @@ impl Challenges {
             .outstanding
             .lock()
             .map_err(|_| fail("joined_native_challenge_poisoned"))?;
-        let range = match held.get(&nonce) {
-            Some((owner, range, _)) if owner == node => *range,
+        let (range, tokens) = match held.get(&nonce) {
+            Some((owner, range, tokens)) if owner == node => (*range, *tokens),
             _ => return Err(fail("joined_native_nonce_unknown")),
         };
         verify_resident(coordinator, offer, &nonce, range, envelope)?;
+        // CAP-2: the member's signed prepare must name the capacity the owner asked for; a
+        // stage prepared for another context is never admitted into a route.
+        if envelope["message"]["prepare"]["tokens"].as_u64() != Some(tokens) {
+            return Err(fail("joined_native_capacity_mismatch"));
+        }
         held.remove(&nonce);
         Ok(Admitted {
             offer: offer.clone(),

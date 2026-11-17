@@ -122,8 +122,9 @@ fn check_stage_memory(
         })?;
         if needed > consent {
             let message = format!(
-                "Mac {node} consents to {consent} bytes of memory, but its stage (layers {start}-{}) \
-                 needs {needed} bytes for the model's {context}-token serving context",
+                "Mac {node} holds its stage worker to {consent} bytes of memory (its consent and the \
+                 share the compile announced), but its stage (layers {start}-{}) needs {needed} \
+                 bytes for the model's {context}-token serving context",
                 end - 1
             );
             return Err(owner_run::OwnerRunError::with(
@@ -140,8 +141,12 @@ fn check_stage_memory(
 /// slices step can know it: the owner's own stage, its contributor's standing grant (the
 /// compile's records carry none for the owner: v0.1.4's owner holds no grant); a joined Mac's,
 /// its signed report's caps (`joined_member::planning_caps` = its standing consent).
+///
+/// Lane A, B7 / CAP-1: the member then holds its worker to the SHARE it admitted (its consent
+/// tightened by the compile's announced `max_rss_bytes` for that node), so the check reads the
+/// same effective limit: the smaller of the consent and the share, whichever is known.
 fn stage_memory_limit(state: &RunState, contributor: &Path, node: &str) -> Option<u64> {
-    if state.local_node.as_deref() == Some(node) {
+    let consent = if state.local_node.as_deref() == Some(node) {
         api::preferences::standing_consent::load(contributor)
             .ok()
             .flatten()
@@ -151,6 +156,16 @@ fn stage_memory_limit(state: &RunState, contributor: &Path, node: &str) -> Optio
             .member_records
             .as_ref()
             .and_then(|r| r[node]["caps"]["max_memory_bytes"].as_u64())
+    };
+    let share = state
+        .compile_state
+        .as_ref()
+        .and_then(|c| c["resource_plan"]["members"].as_array())
+        .and_then(|rows| rows.iter().find(|r| r["node_id"].as_str() == Some(node)))
+        .and_then(|r| r["max_rss_bytes"].as_u64());
+    match (consent, share) {
+        (Some(consent), Some(share)) => Some(consent.min(share)),
+        (consent, share) => consent.or(share),
     }
 }
 /// The slices step's memory check over the run's own consent sources (lane A, CAP-4: the
@@ -1284,6 +1299,9 @@ impl Composed {
         let ports = PackagedChainPorts::new(host, double, program.clone());
         let work = ports.work.clone();
         let compiler = SharedCompiler(ports.compiler.0.clone());
+        // Lane A, B7 / CAP-1: the compile plans each member's memory share with the stage
+        // worker's own reservation, the figure the member's worker guard then enforces.
+        lock(&compiler.0).set_stage_reservation(Some(crate::native_selection::planned_reservation));
         Self {
             inner: SharedHostChain::new(ports),
             work,

@@ -551,6 +551,18 @@ pub fn prepare(input: &PrepareInput<'_>) -> Result<PreparedCompile, Refusal> {
         input.owner_node_id,
     )
     .map_err(|e| refuse_error(&e, &label))?;
+    let planned = match input.stage_reservation {
+        Some(reserved) => plan_reservation(
+            planned,
+            reserved,
+            &spec,
+            &m.model_id,
+            m.serving_context_tokens,
+            &members,
+            &label,
+        )?,
+        None => planned,
+    };
     let split = planned["split"].clone();
     let stages = split["stages"].as_array().cloned().unwrap_or_default();
     if stages
@@ -630,6 +642,48 @@ pub fn prepare(input: &PrepareInput<'_>) -> Result<PreparedCompile, Refusal> {
         max_disk,
         max_rss,
     })
+}
+
+/// Lane A, B7 / CAP-1: each planned member's `max_rss_bytes` (the share its worker's guard is
+/// then held to) is raised to the stage worker's own reservation where the modelled figure
+/// (`2 x resident + 1 GiB + kv`, x 1.15) is below it: at 2,356 tokens the native single-step
+/// prefill scratch exceeds it for both demo stages. A share is never lowered. Each raised row is
+/// re-checked against that member's consent cap and RAM ceiling and refused by name, as the
+/// split's own check refuses a modelled share.
+fn plan_reservation(
+    mut planned: Value,
+    reserved: StageReservation,
+    spec: &ModelSpec,
+    model_id: &str,
+    context: u64,
+    members: &[placement::Member],
+    label: &str,
+) -> Result<Value, Refusal> {
+    let total = spec.shape.num_layers as u64;
+    let rows = planned["members"]
+        .as_array_mut()
+        .ok_or_else(|| Refusal::code("model_resources_split_invalid"))?;
+    for row in rows.iter_mut() {
+        let range = [row["start"].as_u64(), row["end"].as_u64()];
+        let [Some(start), Some(end)] = range else {
+            return Err(Refusal::code("model_resources_split_invalid"));
+        };
+        let Some(need) = reserved(model_id, [start, end], total, context) else {
+            continue;
+        };
+        if row["max_rss_bytes"].as_u64().is_some_and(|m| m >= need) {
+            continue;
+        }
+        row["max_rss_bytes"] = json!(need);
+        let member = members
+            .iter()
+            .find(|m| row["node_id"].as_str() == Some(m.node_id.as_str()))
+            .ok_or_else(|| Refusal::code("member_capability_report_required"))?;
+        placement::require_member(row, member)
+            .map_err(|e| messages::annotate(e, label, row, member))
+            .map_err(|e| refuse_error(&e, label))?;
+    }
+    Ok(planned)
 }
 
 impl PreparedCompile {

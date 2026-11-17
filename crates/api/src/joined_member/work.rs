@@ -1099,7 +1099,22 @@ impl Work {
             .ok_or("native_required")?
             .offer()
             .clone();
-        self.admit_share_for(session, &offer, self.require_share)?;
+        let admitted = self.admit_share_for(session, &offer, self.require_share)?;
+        // Lane A, B7 / CAP-1: the admitted share is ENFORCED, not only checked: the worker's guard
+        // (the prepare's `memory`) is the share's `max_rss_bytes`, never the member's whole
+        // consent (v0.1.4 `standing_limits(grant, required=share)` is what the worker runs under,
+        // standing_consent.py:252-259). The compile plans that share with the worker's own
+        // reservation, so an enforced share can hold the worker it announces.
+        if let Some(limits) = admitted {
+            let rss = limits["max_rss_bytes"]
+                .as_u64()
+                .ok_or("member_resources_invalid")?;
+            self.native
+                .as_mut()
+                .ok_or("native_required")?
+                .limit_memory_to(rss)
+                .map_err(|e| e.0.to_owned())?;
+        }
         let member = session.ok_or("not_joined")?;
         let range =
             serde_json::from_value(request["range"].clone()).map_err(|_| "range_invalid")?;
