@@ -334,3 +334,42 @@ fn a_run_start_across_networks_refuses_an_unreachable_relay() {
         Ok(())
     );
 }
+
+/// Lane XB patch 2 (REVIEW XB-10): across networks the host's admitted-key table gates the DIAL
+/// too, not only the accept. A host that admitted its peers' keys (from signed data) refuses to
+/// dial any other key before anything is sent: the stranger's address (a plain UDP socket here)
+/// receives ZERO datagrams (no QUIC Initial, no path probe), and the refusal is counted
+/// (`refused_out`). Without admitted keys the caller verifies the key it dials (the verified-
+/// caller boundary every product caller already meets: endpoint ids from signed documents).
+#[test]
+fn an_unadmitted_key_is_never_dialled_across_networks_zero_outbound_probes() {
+    let rt = runtime();
+    let clock = Mono(Instant::now());
+    let (key, admitted, stranger) = (
+        SecretKey::generate(),
+        SecretKey::generate(),
+        SecretKey::generate(),
+    );
+    let mut host = bind(&rt, &clock, &key, across()).unwrap();
+    host.admit_peer_ids(&[admitted.public()]).unwrap();
+    let witness = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    witness
+        .set_read_timeout(Some(std::time::Duration::from_millis(400)))
+        .unwrap();
+    let stranger_at = EndpointAddr::new(stranger.public()).with_ip_addr(witness.local_addr().unwrap());
+    let before = host.lan_refused_datagrams().unwrap();
+    let dialled = host.connect(&stranger_at, &clock, deadline(&clock, B::SidecarLocalHandshake));
+    assert_eq!(dialled.err(), Some(Error::Authentication), "refused by key");
+    assert_eq!(
+        host.lan_refused_datagrams(),
+        Some(before + 1),
+        "the refused dial is counted"
+    );
+    let mut buf = [0u8; 2048];
+    let received = witness.recv_from(&mut buf);
+    assert!(
+        received.is_err(),
+        "zero outbound probes to the unadmitted key's address: {received:?}"
+    );
+    close(&mut host, &clock);
+}

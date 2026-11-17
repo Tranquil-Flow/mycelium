@@ -1270,7 +1270,14 @@ impl<'a> LoopbackHost<'a> {
     ) -> Result<(EndpointAddr, Option<Pin>), Error> {
         if let Some(gate) = &self.cross {
             // Across networks: the signed addresses plus this host's own relay; a refused
-            // address is counted (`refused_out`) and nothing is sent.
+            // address is counted (`refused_out`) and nothing is sent. With admitted keys set
+            // (signed data), a key outside them is never dialled either (lane XB patch 2,
+            // XB-10): no Initial, no path probe reaches its addresses. Without keys the caller
+            // verifies the key it dials.
+            if gate.admits_key(&peer.id) == Some(false) {
+                gate.refuse_out();
+                return Err(Error::Authentication);
+            }
             if let Err(error) = self.validate_peer(peer) {
                 gate.refuse_out();
                 return Err(error);
