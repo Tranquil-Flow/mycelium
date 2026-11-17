@@ -59,6 +59,21 @@ pub const ARCHIVE_KEEP: usize = 8;
 fn archive_failed<T>(_: T) -> &'static str {
     "control_archive_failed"
 }
+#[cfg(test)]
+std::thread_local! {
+    /// Test-only: runs before each archive fsync with the synced path; an `Err` stands for that
+    /// fsync failing (thread-local, so parallel tests stay isolated).
+    pub(crate) static ARCHIVE_SYNC: std::cell::Cell<Option<fn(&Path) -> std::io::Result<()>>> =
+        const { std::cell::Cell::new(None) };
+}
+/// fsync `path` (an archive file or the archive directory).
+fn archive_sync(path: &Path) -> std::io::Result<()> {
+    #[cfg(test)]
+    if let Some(hook) = ARCHIVE_SYNC.get() {
+        hook(path)?;
+    }
+    File::open(path)?.sync_all()
+}
 /// Keep an earlier run's unresolved journal `prior` whole, durably and privately, before the
 /// live journal is replaced: `archive/<sequence, 20 digits>-<run digest>.json`, 0600 in a 0700
 /// directory. The signer-wide sequence never repeats, so a name is never reused; a retry after a
@@ -125,9 +140,7 @@ pub(crate) fn archive(root: &Path, prior: &Value, limit: u64) -> Result<()> {
         fs::remove_file(dir.join(old)).map_err(archive_failed)?;
     }
     if excess > 0 {
-        File::open(&dir)
-            .and_then(|d| d.sync_all())
-            .map_err(archive_failed)?;
+        archive_sync(&dir).map_err(archive_failed)?;
     }
     Ok(())
 }
@@ -747,6 +760,55 @@ mod archive_tests {
             .unwrap()
             .unwrap();
         assert_eq!(Value::Object(kept), first);
+        fs::remove_dir_all(&root).unwrap();
+    }
+    fn failing_dir_sync(path: &Path) -> std::io::Result<()> {
+        if path.ends_with(ARCHIVE_DIR) {
+            Err(std::io::Error::other(
+                "injected archive directory fsync failure",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+    #[test]
+    fn an_archive_whose_directory_sync_failed_is_refused_until_a_sync_succeeds() {
+        // PR-ASTRA-01 (delta round 1): `private_state::store` can rename the archive into place
+        // and then fail its directory fsync. The retry finds identical bytes, which prove nothing
+        // about durability: every Ok must follow a successful fsync of the archive directory made
+        // by that call, or `start` would replace the live journal on an unproven archive.
+        let root = root("dirsync");
+        let limit = state_limit().unwrap();
+        let prior = journal(9, "run-a");
+        ARCHIVE_SYNC.set(Some(failing_dir_sync));
+        // A first archive whose own directory sync fails publishes the file but refuses.
+        assert_eq!(
+            archive(&root, &prior, limit),
+            Err("control_archive_failed"),
+            "a failed archive directory sync after the rename must refuse"
+        );
+        // The store-renamed-then-failed state: the identical copy is in place, fewer than
+        // ARCHIVE_KEEP entries, and the directory sync fails again on the retry.
+        let names_after = names(&root);
+        assert_eq!(names_after.len(), 1);
+        let path = root.join(ARCHIVE_DIR).join(&names_after[0]);
+        assert_eq!(
+            Value::Object(private_state::load(&path, limit).unwrap().unwrap()),
+            prior
+        );
+        assert_eq!(
+            archive(&root, &prior, limit),
+            Err("control_archive_failed"),
+            "an identical copy must not stand in for a durable one"
+        );
+        // Once the directory sync succeeds the retry is accepted, the copy unchanged.
+        ARCHIVE_SYNC.set(None);
+        assert_eq!(archive(&root, &prior, limit), Ok(()));
+        assert_eq!(names(&root), names_after);
+        assert_eq!(
+            Value::Object(private_state::load(&path, limit).unwrap().unwrap()),
+            prior
+        );
         fs::remove_dir_all(&root).unwrap();
     }
     #[test]
