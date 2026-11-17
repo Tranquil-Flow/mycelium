@@ -280,13 +280,8 @@ pub fn reconnect_peer(
         // `endpoint_seed_identity_mismatch`
         return Err(value_error());
     }
-    // `peer.stop()`: no live member; a renewal still on the wire never puts its Session back.
-    cell.with(|c| {
-        c.session = None;
-        c.session_view = None;
-        c.member_flight = None;
-        c.running = false;
-    });
+    // `peer.stop()` under the peer's lock: a renewal on the wire lands first (review B-02).
+    crate::joined_member::quiesce_membership(cell)?;
     crate::peer::repin_owner_seed_url(&root, &new)?;
     store(&root.join(CARD_FILE), card)?;
     crate::joined_member::start_membership(cell, options)?;

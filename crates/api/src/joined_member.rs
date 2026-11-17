@@ -736,6 +736,7 @@ pub fn resume_membership(cell: &impl Cell, options: &SeedOptions) -> Result<(), 
 /// again and clears its `recovery_error` (lane C review C-01). A refusal is the action's own: the
 /// Mac stays not running and keeps the error its launch recorded.
 pub fn start_membership(cell: &impl Cell, options: &SeedOptions) -> Result<(), PublicError> {
+    quiesce_membership(cell)?;
     let root = cell.with(|c| c.root.clone());
     let (signer, _, _) = identity(&root)?;
     let random_hex = |n: usize| random(n).map(|b| hex(&b)).unwrap_or_default();
@@ -758,6 +759,37 @@ pub fn start_membership(cell: &impl Cell, options: &SeedOptions) -> Result<(), P
             cell.with(|c| c.running = false);
             Err(failed.error)
         }
+    }
+}
+/// The membership lifecycle fence of a joined target (lane B review B-02): v0.1.4 holds the peer's
+/// lock across a whole renewal (heartbeat, error translation, disposition; `RemoteMacMember.renew`,
+/// peer.py:1037-1060 @ f4e366e9) and across a whole reconnect or start (endpoint_recovery.py:91-114,
+/// peer.py:327-380). Here a renewal pass holds its flight from the Session's take to its put-back
+/// (`app_host::renew_member`), so a stop that will resume the membership waits for that flight
+/// to land, then, in the same acquisition, stops the member (no Session, no flight, not
+/// running): no renewal can start again until the resume installs the new Session, and no older
+/// pass can record a disposition after it. Bounded by a renewal's own allowance
+/// (`renewal::allowance`, its request budget); past it the stop is refused by name and nothing
+/// changed.
+pub fn quiesce_membership(cell: &impl Cell) -> Result<(), PublicError> {
+    let until = std::time::Instant::now() + crate::renewal::allowance();
+    loop {
+        let quiet = cell.with(|c| {
+            if c.member_flight.is_some() {
+                return false;
+            }
+            c.session = None;
+            c.session_view = None;
+            c.running = false;
+            true
+        });
+        if quiet {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= until {
+            return Err(PublicError::new(409, "member_renewal_in_flight"));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
     }
 }
 /// The start refusals that leave a joined Mac started but not running, recorded as
