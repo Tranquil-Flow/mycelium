@@ -59,10 +59,15 @@ fn view<H: ChainHost, R>(
 }
 
 /// The standing grant the compile plans the owner's OWN node with (its `LocalRecord` caps: the
-/// share's memory/storage caps and its worker wall).
+/// share's memory/storage caps and its worker wall). Lane A, B8 (GRT; ledger rows 61 F1 and 63,
+/// owner ruling "1 a"): that node's stage runs under its local contributor's grant
+/// (`owner_ports::contributor_dir`, the grant `NativeShard` holds the worker to), so the compile
+/// reads THAT grant, as it reads a joined Mac's from its report; it read the owner's parent root,
+/// found none and planned the proposal's figures. Read only: a stored grant is honoured as it
+/// is, never rewritten.
 fn local_grant(root: &Path) -> Result<Option<GrantCaps>, PortError> {
-    let grant =
-        standing_consent::load(root).map_err(|_| failed("compiler_resource_policy_denied"))?;
+    let grant = standing_consent::load(&crate::owner_ports::contributor_dir(root))
+        .map_err(|_| failed("compiler_resource_policy_denied"))?;
     Ok(grant.map(|g| GrantCaps {
         storage_bytes: g["caps"]["storage_bytes"].as_u64(),
         max_memory_bytes: g["caps"]["max_memory_bytes"].as_u64(),
