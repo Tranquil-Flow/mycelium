@@ -1245,8 +1245,15 @@ impl<'a> LoopbackHost<'a> {
     /// watches, handshakes in flight and the address watch end with the old
     /// endpoint (re-request `address_watch`). A failed close keeps the old
     /// endpoint for an explicit retry of this call or of `close`; a failed
-    /// rebind leaves the host closed. `Unavailable` in every other mode.
+    /// rebind leaves the host closed. Across networks: a no-op that keeps the endpoint (its
+    /// address is the endpoint id, the bound socket and the relay, all unchanged; keeping it keeps
+    /// iroh's per-peer paths, so the next epoch reuses a punched path: lane XB4).
+    /// `Unavailable` in every other mode.
     pub fn recycle_lan(&mut self, clock: &impl Clock, deadline: MonoInstant) -> Result<(), Error> {
+        if self.cross.is_some() {
+            self.endpoint()?;
+            return allowance(clock, deadline).map(|_| ());
+        }
         let next = match (&self.lan, &self.reuse, &self.endpoint) {
             (Some(lan), Some(_), Some(_)) => lan.successor(std::time::Instant::now())?,
             // Not direct LAN, or already closed: never rebind a released host.
@@ -1376,6 +1383,10 @@ impl<'a> LoopbackHost<'a> {
 #[cfg(test)]
 #[path = "iroh_relay_tests.rs"]
 mod relay_tests;
+
+#[cfg(test)]
+#[path = "iroh_cross_tests.rs"]
+mod cross_tests;
 
 #[cfg(test)]
 mod late_close_tests {
