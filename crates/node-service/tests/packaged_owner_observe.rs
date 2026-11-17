@@ -24,6 +24,7 @@
 mod macs;
 #[path = "support/packaged_repository.rs"]
 mod repository;
+use api::resources::{Observation, Observer};
 use budgets::BudgetId as B;
 use desktop::lifecycle::{Cleanup, Poll};
 use macs::{
@@ -46,14 +47,18 @@ use std::{
 
 /// One packaged Mac over the loopback repository with its network and run seams.
 fn launch(state: &Path, repository: &Repository, network: NetworkConfig, run: RunConfig) -> Mac {
-    let (core, mut cleanup) = packaged::core_with_run(
-        state,
-        repository.transport(),
-        Arc::new(Permissive),
-        network,
-        run,
-    )
-    .unwrap();
+    launch_observed(state, repository, network, run, Arc::new(Permissive))
+}
+/// [`launch`] with this Mac's power / thermal / network readings from `observer`.
+fn launch_observed(
+    state: &Path,
+    repository: &Repository,
+    network: NetworkConfig,
+    run: RunConfig,
+    observer: Arc<dyn Observer>,
+) -> Mac {
+    let (core, mut cleanup) =
+        packaged::core_with_run(state, repository.transport(), observer, network, run).unwrap();
     cleanup.bind_clock(Instant::now()).unwrap();
     Mac {
         core,
@@ -127,6 +132,16 @@ fn pair_on(
     run: RunConfig,
     owner_work: WorkNetwork,
 ) -> (Owner, Mac) {
+    pair_observed(base, repository, run, owner_work, Arc::new(Permissive))
+}
+/// [`pair_on`] with the joined Mac's readings from `member_observer`.
+fn pair_observed(
+    base: &Path,
+    repository: &Repository,
+    run: RunConfig,
+    owner_work: WorkNetwork,
+    member_observer: Arc<dyn Observer>,
+) -> (Owner, Mac) {
     let sidecar = sidecar_file(base);
     let state = private_dir(base, "owner");
     let before = listening();
@@ -178,7 +193,7 @@ fn pair_on(
         proxy,
         seams,
     };
-    let member = launch(
+    let member = launch_observed(
         &private_dir(base, "member"),
         repository,
         NetworkConfig {
@@ -188,6 +203,7 @@ fn pair_on(
             ..NetworkConfig::default()
         },
         RunConfig::default(),
+        member_observer,
     );
     let waiting = member.post("/api/join/window", join_body(&member, &owner.link, 600));
     assert_eq!(waiting.0, 200, "join: {}", waiting.1);
@@ -561,6 +577,155 @@ fn after_a_member_relaunch_the_run_passes_the_capability_report_check_without_a_
     let report = member.status()["join_flow"]["last_report"].clone();
     assert_eq!(report["purpose"], "periodic", "{report}");
     assert_eq!(report["state"], "delivered", "{report}");
+    assert_eq!(member.quit(), Ok(Poll::Verified));
+    assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
+    drop(repository);
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+}
+
+/// The joined Mac's readings: `Permissive`'s until the test puts it on battery (its saved policy is
+/// `ac_only`, so its own resource gate then refuses).
+#[derive(Default)]
+struct Switchable(std::sync::atomic::AtomicBool);
+impl Observer for Switchable {
+    fn observe(&self) -> Observation {
+        let mut observed = Permissive.observe();
+        if self.0.load(std::sync::atomic::Ordering::SeqCst) {
+            observed.power = "battery".into();
+        }
+        observed
+    }
+}
+
+/// PR-ASTRA-02 (REVIEW-lanePR-astra: a finished joined-Mac worker blocks every later owner Start).
+/// ONE joined app process, ONE member agent and ONE worker slot across two owner runs:
+///
+/// * run A: after the joined Mac answered hello, the owner requests its stage cleanup and its own
+///   hello pump then ends BY ITSELF on a terminal step error (its standing consent is withdrawn, so
+///   the pump's next authority check refuses `offer_transfer_not_authorized`; the Mac's own
+///   resource gate meanwhile keeps its agent from acting on the cleanup request, so the pump wins
+///   the race the review describes). The pump records the failure, closes its helper, removes its
+///   stage and ACKs the cleanup itself: its thread ends, and its finished worker stays in the
+///   host's slot. The consent and the reading are restored; the owner's cleanup read no longer
+///   shows the ACKed offer and observe retires it, so no cleanup request will ever close it.
+/// * run B: the joined Mac must start its next hello helper. v0.1.4's agent meets
+///   `stage_runtime_active` there, calls `/api/control/stop` (target_app.py:280-284 closes and
+///   detaches the old runtime) and stages again (demo_target.py:495-512 @ f4e366e9); without the
+///   equivalent settlement the joined Mac refuses `stage_runtime_active` and run B fails observe.
+#[test]
+fn a_joined_macs_pump_that_ended_by_itself_does_not_block_the_next_runs_hello() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let base = state_root("observe-settle");
+    let repository = Repository::start();
+    let sidecar = sidecar_file(&base);
+    let reading = Arc::new(Switchable::default());
+    let fired = Arc::new(AtomicBool::new(false));
+    let member_root: Arc<std::sync::Mutex<Option<PathBuf>>> = Arc::default();
+    // Run A's member journal as its pump left it (asserted here, not on the owner's run thread).
+    let ended_a: Arc<std::sync::Mutex<Option<Value>>> = Arc::default();
+    let hook: observe_test_double::StopHook = {
+        let (reading, fired, member_root, seen) = (
+            reading.clone(),
+            fired.clone(),
+            member_root.clone(),
+            ended_a.clone(),
+        );
+        Arc::new(move |stop: observe_test_double::BeforeStop<'_>| {
+            let Some(root) = member_root.lock().unwrap().clone() else {
+                return false;
+            };
+            let journal = root.join("native-bootstrap/state.json");
+            if fired.load(Ordering::SeqCst)
+                || native_state(&journal)["binding"]["target_node_id"] != stop.node
+            {
+                return false;
+            }
+            fired.store(true, Ordering::SeqCst);
+            reading.0.store(true, Ordering::SeqCst);
+            (stop.request_cleanup)().unwrap_or_else(|e| panic!("cleanup request: {}", e.code()));
+            let consent = api::preferences::standing_consent::load(&root)
+                .unwrap()
+                .unwrap();
+            api::preferences::standing_consent::withdraw(&root, api::app_host::now()).unwrap();
+            let ended = until_within(
+                "run A's joined-Mac pump ended by itself",
+                millis(B::Bootstrap),
+                || native_state(&journal),
+                |s| s["phase"] == "closed" || s["phase"] == "cleanup_unproven",
+            );
+            api::preferences::private_state::store(
+                &root.join(api::preferences::standing_consent::FILE),
+                &Value::Object(consent),
+                api::preferences::private_state::private_json_limit().unwrap(),
+            )
+            .unwrap();
+            reading.0.store(false, Ordering::SeqCst);
+            *seen.lock().unwrap() = Some(ended);
+            true
+        })
+    };
+    let (owner, member) = pair_observed(
+        &base,
+        &repository,
+        RunConfig {
+            sidecar: Some(sidecar),
+            observe_test_double: Some(Arc::new(move |backend| {
+                observe_test_double::HostIdentityTestDouble::with_hook(backend, hook.clone())
+            })),
+            ..RunConfig::default()
+        },
+        WorkNetwork::loopback(),
+        reading.clone(),
+    );
+    *member_root.lock().unwrap() = Some(private(&member.state));
+    let mut ended: Vec<Value> = Vec::new();
+    for _ in 0..2 {
+        let (code, started) = owner.mac.post("/api/demo/start", json!({}));
+        assert_eq!(code, 200, "{started}");
+        let previous = ended.last().map(|r| r["deployment_id"].clone());
+        let run = until_within(
+            "the run ended",
+            observe_patience() + millis(B::Compile),
+            || owner.mac.status()["owner_run"].clone(),
+            |r| {
+                Some(r["deployment_id"].clone()) != previous
+                    && matches!(r["state"].as_str(), Some("failed" | "stopped" | "serving"))
+            },
+        );
+        println!("PR-ASTRA-02 run: {run}");
+        ended.push(run);
+    }
+    assert!(
+        fired.load(Ordering::SeqCst),
+        "the hook reached run A's member"
+    );
+    let a_journal = ended_a.lock().unwrap().clone().unwrap_or_default();
+    assert_eq!(
+        a_journal["phase"], "closed",
+        "run A's pump ended by itself and its own close ACKed the cleanup: {a_journal}"
+    );
+    assert_eq!(
+        a_journal["failure"], "offer_transfer_not_authorized",
+        "{a_journal}"
+    );
+    let (a, b) = (&ended[0], &ended[1]);
+    assert_eq!(a["steps"][3]["state"], "done", "run A passed observe: {a}");
+    assert_eq!(
+        b["steps"][2]["detail"], "2 of 2 Macs reported",
+        "the joined Mac reported into run B: {b}"
+    );
+    assert_eq!(
+        b["steps"][3]["state"],
+        "done",
+        "the joined Mac started run B's hello in the same process: {b}; its card: {}",
+        member.status()["demo_target"]
+    );
+    until_within(
+        "run B's joined-Mac helper closed on the owner's cleanup",
+        observe_patience(),
+        || native_state(&private(&member.state).join("native-bootstrap/state.json")),
+        |s| s["phase"] == "closed" && s["binding"]["deployment_id"] == b["deployment_id"],
+    );
     assert_eq!(member.quit(), Ok(Poll::Verified));
     assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
     drop(repository);

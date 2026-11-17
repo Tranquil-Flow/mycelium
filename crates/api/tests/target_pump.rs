@@ -36,14 +36,28 @@ fn member() -> Identity {
     Identity::from_secret("target-endpoint", &[32; 32]).unwrap()
 }
 fn scope() -> Value {
-    json!({"target_node_id":"target","target_endpoint_id":member().endpoint_id(),"target_key_digest":member().verification_key_digest(),"membership_generation":1,"member_incarnation":"incarnation","run_id":"run","deployment_id":"deployment"})
+    scope_for("run", "deployment")
+}
+/// The same member's binding in another owner run (a fresh run/deployment id per Start).
+fn scope_for(run: &str, deployment: &str) -> Value {
+    json!({"target_node_id":"target","target_endpoint_id":member().endpoint_id(),"target_key_digest":member().verification_key_digest(),"membership_generation":1,"member_incarnation":"incarnation","run_id":run,"deployment_id":deployment})
 }
 fn signed(s: Value, who: &Identity) -> Value {
     json!({"protocol":protocol::managed::SIGNED_ENVELOPE_PROTOCOL,"signature":who.sign(&s).unwrap(),"verification_key":who.public_key_record(),"statement":s})
 }
 fn request(kind: &str, seq: u64, extra: Value, who: &Identity, clock: &HostClock) -> Value {
+    request_in(&scope(), kind, seq, extra, who, clock)
+}
+fn request_in(
+    binding: &Value,
+    kind: &str,
+    seq: u64,
+    extra: Value,
+    who: &Identity,
+    clock: &HostClock,
+) -> Value {
     let now = clock.wall_seconds();
-    let mut s = scope();
+    let mut s = binding.clone();
     let ttl = B::ControlTtl.span(Entries::ZERO).unwrap().millis() as f64 / 1000.0;
     for(k,v)in json!({"protocol":kind,"swarm_id":"swarm","sequence":seq,"nonce":nonce(),"request_id":nonce(),"issued_at":now,"expires_at":now+ttl}).as_object().unwrap(){s[k]=v.clone();}
     for (k, v) in extra.as_object().unwrap() {
@@ -66,6 +80,7 @@ struct Host {
     wall_advance: Arc<AtomicU64>,
     cancel_after_reply: Arc<AtomicBool>,
     carrier: Option<Arc<api::managed_carrier::LocalMailboxCarrier>>,
+    scope: Value,
 }
 impl Clock for Host {
     fn monotonic(&self) -> MonoInstant {
@@ -78,7 +93,7 @@ impl Clock for Host {
 impl TargetHost for Host {
     fn check(&self, b: &Value) -> Result<(), &'static str> {
         let check = self.checks.fetch_add(1, Ordering::AcqRel) + 1;
-        if check != self.fail_check_at && *b == scope() && self.current.load(Ordering::Acquire) {
+        if check != self.fail_check_at && *b == self.scope && self.current.load(Ordering::Acquire) {
             Ok(())
         } else {
             Err("managed_control_member_stale")
@@ -440,6 +455,8 @@ struct Fixture {
     host: Host,
     offer: Value,
     archive: Vec<u8>,
+    scope: Value,
+    owns_root: bool,
 }
 impl Fixture {
     fn new() -> Self {
@@ -448,9 +465,22 @@ impl Fixture {
             .unwrap()
             .join(format!("target-pump-{}-{}", std::process::id(), nonce()));
         fs::DirBuilder::new().mode(0o700).create(&root).unwrap();
+        Self::at(root, scope(), "mailbox.sqlite", true)
+    }
+    /// A LATER owner run (fresh run/deployment id, its own mailbox) for the same member Mac,
+    /// whose target pump reuses this Mac's one `native-bootstrap` state root.
+    fn next_run(&self, run: &str, deployment: &str) -> Self {
+        Self::at(
+            self.root.clone(),
+            scope_for(run, deployment),
+            &format!("mailbox-{run}.sqlite"),
+            false,
+        )
+    }
+    fn at(root: PathBuf, scope: Value, mailbox: &str, owns_root: bool) -> Self {
         let clock = HostClock::default();
         let mut m = Mailbox::new(
-            Store::open(&root.join("mailbox.sqlite")).unwrap(),
+            Store::open(&root.join(mailbox)).unwrap(),
             owner(),
             "swarm",
             "owner",
@@ -470,16 +500,19 @@ impl Fixture {
         .unwrap();
         let ttl = B::ControlTtl.span(Entries::ZERO).unwrap();
         m.bind_member(
-            &scope(),
+            &scope,
             &member().public_key_record(),
             clock.wall_seconds() + ttl.millis() as f64 / 1000.0,
         )
         .unwrap();
-        let archive = runtime::observe::bootstrap_archive("run", "deployment");
+        let archive = runtime::observe::bootstrap_archive(
+            scope["run_id"].as_str().unwrap(),
+            scope["deployment_id"].as_str().unwrap(),
+        );
         let offer = m
             .publish_stage(
                 StagePublication {
-                    binding: &scope(),
+                    binding: &scope,
                     id: "offer",
                     archive: &archive,
                     ttl,
@@ -501,12 +534,15 @@ impl Fixture {
             wall_advance: Arc::default(),
             cancel_after_reply: Arc::default(),
             carrier: None,
+            scope: scope.clone(),
         };
         Self {
             root,
             host,
             offer,
             archive,
+            scope,
+            owns_root,
         }
     }
     fn pump(&self) -> TargetPump<Host> {
@@ -532,11 +568,11 @@ impl Fixture {
             v["source_sha"].as_str().unwrap(),
         )
         .unwrap();
-        let stage = BootstrapStage::create(path, &scope(), &self.offer, &self.archive).unwrap();
+        let stage = BootstrapStage::create(path, &self.scope, &self.offer, &self.archive).unwrap();
         TargetPump::start(
             &self.root,
             self.host.clone(),
-            scope(),
+            self.scope.clone(),
             self.offer.clone(),
             stage,
             &p,
@@ -544,10 +580,11 @@ impl Fixture {
         )
     }
     fn enqueue(&self, seq: u64, op: &str) {
-        let e = request(
+        let e = request_in(
+            &self.scope,
             "mycelium.managed_control.owner_command.v1",
             seq,
-            json!({"owner_node_id":"owner","native_command":{"protocol":protocol::native::CONTROL_PROTOCOL,"command_id":op,"run_id":"run","deployment_id":"deployment","command":op,"payload":{}}}),
+            json!({"owner_node_id":"owner","native_command":{"protocol":protocol::native::CONTROL_PROTOCOL,"command_id":op,"run_id":self.scope["run_id"],"deployment_id":self.scope["deployment_id"],"command":op,"payload":{}}}),
             &owner(),
             &self.host.clock,
         );
@@ -573,6 +610,9 @@ impl Fixture {
 }
 impl Drop for Fixture {
     fn drop(&mut self) {
+        if !self.owns_root {
+            return;
+        }
         if let Err(e) = fs::remove_dir_all(&self.root) {
             eprintln!("test root cleanup: {e}");
         }

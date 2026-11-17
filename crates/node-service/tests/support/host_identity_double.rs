@@ -5,6 +5,12 @@
 //! hello helpers, the real hello and stop over the owner's control journal, cleanup and
 //! retirement), except that each hello answer's host and boot identity is replaced by a distinct
 //! one per Mac. It is not physical-host evidence.
+//!
+//! [`HostIdentityTestDouble::with_hook`] adds one more named substitution for a test that needs a
+//! Mac's own helper to end by itself (PR-ASTRA-02): after that Mac answered hello, the test's
+//! [`BeforeStop`] hook runs where the real stop would be sent; it may request the Mac's stage
+//! cleanup on the owner's REAL mailbox and, when it returns true, the real stop is not sent (the
+//! Mac's helper is already gone). Everything else stays real.
 #![allow(dead_code)]
 use api::{
     observation_host::{ObservationBackend, VerifiedObservationHost},
@@ -19,6 +25,29 @@ use runtime::{
     observe_owner::ObserveAdapter,
 };
 use serde_json::{Value, json};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+};
+
+/// What a test's hook may do where a Mac's real stop would be sent, after its hello answered.
+pub struct BeforeStop<'a> {
+    /// The Mac whose hello session this is.
+    pub node: &'a str,
+    /// Request this Mac's stage cleanup on the owner's real managed mailbox (`collect` requests it
+    /// again later; the request is idempotent).
+    pub request_cleanup: &'a mut dyn FnMut() -> Result<(), ObservationError>,
+}
+/// Returns true when the test ended that Mac's helper itself: its real stop is then not sent.
+pub type StopHook = Arc<dyn Fn(BeforeStop<'_>) -> bool + Send + Sync>;
+/// The hook, a second handle on the same real backend (only for the cleanup request) and every
+/// published offer by node.
+#[derive(Clone)]
+struct Hook {
+    hook: StopHook,
+    backend: Arc<Mutex<Backend<PackagedRun>>>,
+    offers: Arc<Mutex<BTreeMap<String, Offer>>>,
+}
 
 /// The real hello sessions (the owner's managed control journal, the real hello and stop to
 /// each Mac's own helper) with each answer's host and boot identity replaced by a distinct
@@ -26,10 +55,13 @@ use serde_json::{Value, json};
 struct DistinctHosts {
     real: Box<dyn HelloSessions>,
     nodes: Vec<String>,
+    hook: Option<Hook>,
 }
 struct DistinctHost<'a> {
     real: Box<dyn HelloSession + 'a>,
     index: usize,
+    node: String,
+    hook: Option<Hook>,
 }
 impl HelloSession for DistinctHost<'_> {
     fn send_hello(&mut self, command: &str) -> Result<Value, Option<String>> {
@@ -41,6 +73,25 @@ impl HelloSession for DistinctHost<'_> {
         Ok(response)
     }
     fn close(&mut self) -> Result<(), CloseFailed> {
+        if let Some(hook) = &self.hook {
+            let node = self.node.clone();
+            let mut request_cleanup = || {
+                let offer = hook
+                    .offers
+                    .lock()
+                    .unwrap()
+                    .get(&node)
+                    .cloned()
+                    .ok_or_else(|| ObservationError::new("test_offer_unknown"))?;
+                hook.backend.lock().unwrap().request_stage_cleanup(&offer)
+            };
+            if (hook.hook)(BeforeStop {
+                node: &node,
+                request_cleanup: &mut request_cleanup,
+            }) {
+                return Ok(());
+            }
+        }
         self.real.close()
     }
     fn cleanup_error(&self) -> bool {
@@ -76,11 +127,13 @@ impl HelloSessions for DistinctHosts {
         Ok(Box::new(DistinctHost {
             real: self.real.open(node, timeout)?,
             index,
+            node: node.to_owned(),
+            hook: self.hook.clone(),
         }))
     }
 }
 /// The real backend; only the host identity in its hello answers is replaced.
-struct Hellos(Backend<PackagedRun>);
+struct Hellos(Backend<PackagedRun>, Option<Hook>);
 impl ObservationBackend for Hellos {
     fn is_owner(&self) -> bool {
         self.0.is_owner()
@@ -112,6 +165,7 @@ impl ObservationBackend for Hellos {
                 .iter()
                 .filter_map(|m| m["node_id"].as_str().map(str::to_owned))
                 .collect(),
+            hook: self.1.clone(),
         }))
     }
     fn publish_offer(
@@ -121,7 +175,14 @@ impl ObservationBackend for Hellos {
         deployment: &str,
         archive: &[u8],
     ) -> Result<Offer, ObservationError> {
-        self.0.publish_offer(member, run, deployment, archive)
+        let offer = self.0.publish_offer(member, run, deployment, archive)?;
+        if let (Some(hook), Some(node)) = (&self.1, member["node_id"].as_str()) {
+            hook.offers
+                .lock()
+                .unwrap()
+                .insert(node.to_owned(), offer.clone());
+        }
+        Ok(offer)
     }
     fn retire_offer(&mut self, offer: &Offer) -> Result<Value, ObservationError> {
         self.0.retire_offer(offer)
@@ -148,9 +209,25 @@ type Adapter = ObserveAdapter<VerifiedObservationHost<Hellos>, fn() -> f64, fn()
 pub struct HostIdentityTestDouble(Adapter);
 impl HostIdentityTestDouble {
     pub fn over(backend: Backend<PackagedRun>) -> Box<dyn ObserveDouble> {
+        Self::hooked(backend, None)
+    }
+    /// [`HostIdentityTestDouble::over`] with `hook` run where each Mac's real stop would be sent.
+    pub fn with_hook(backend: Backend<PackagedRun>, hook: StopHook) -> Box<dyn ObserveDouble> {
+        let side = Backend {
+            core: backend.core.clone(),
+            published: BTreeMap::new(),
+        };
+        let hook = Hook {
+            hook,
+            backend: Arc::new(Mutex::new(side)),
+            offers: Arc::default(),
+        };
+        Self::hooked(backend, Some(hook))
+    }
+    fn hooked(backend: Backend<PackagedRun>, hook: Option<Hook>) -> Box<dyn ObserveDouble> {
         Box::new(Self(ObserveAdapter::new(
             VerifiedObservationHost {
-                backend: Hellos(backend),
+                backend: Hellos(backend, hook),
             },
             api::app_host::now as fn() -> f64,
             nonce as fn() -> String,
