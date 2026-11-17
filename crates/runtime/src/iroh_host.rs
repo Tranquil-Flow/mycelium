@@ -1474,7 +1474,12 @@ impl<'a> LoopbackHost<'a> {
         let Ok(tick) = budget(BudgetId::SidecarReceivePollWait) else {
             return;
         };
-        let remote: String = connection.remote_id().to_string().chars().take(12).collect();
+        let remote: String = connection
+            .remote_id()
+            .to_string()
+            .chars()
+            .take(12)
+            .collect();
         let weak = connection.weak_handle();
         let sampled = weak.clone();
         let registration = crate::iroh_paths::register(

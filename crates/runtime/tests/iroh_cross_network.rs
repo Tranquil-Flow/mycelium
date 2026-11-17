@@ -392,7 +392,13 @@ fn a_live_connection_reports_its_selected_path_on_both_ends_until_it_closes() {
     let rt = runtime();
     let clock = Mono(Instant::now());
     let (server_key, client_key) = (SecretKey::generate(), SecretKey::generate());
-    let short = |key: &SecretKey| key.public().to_string().chars().take(12).collect::<String>();
+    let short = |key: &SecretKey| {
+        key.public()
+            .to_string()
+            .chars()
+            .take(12)
+            .collect::<String>()
+    };
     let mine = |key: &SecretKey| {
         snapshot()
             .into_iter()
@@ -461,7 +467,13 @@ fn a_live_same_network_connection_reports_a_direct_path() {
     let clock = Mono(Instant::now());
     let lan = || LanPolicy::with_explicit(vec![LOOPBACK]).unwrap();
     let (member_key, owner_key) = (SecretKey::generate(), SecretKey::generate());
-    let short = |key: &SecretKey| key.public().to_string().chars().take(12).collect::<String>();
+    let short = |key: &SecretKey| {
+        key.public()
+            .to_string()
+            .chars()
+            .take(12)
+            .collect::<String>()
+    };
     let mine = |key: &SecretKey| {
         snapshot()
             .into_iter()

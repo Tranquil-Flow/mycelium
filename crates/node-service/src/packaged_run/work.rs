@@ -1482,10 +1482,9 @@ impl Chain for Composed {
             }
             _ => None,
         };
-        if let (Some(run), Some(seed)) = (
-            watched,
-            self.work.host.with(|c| c.authority.seed.clone()),
-        ) {
+        if let (Some(run), Some(seed)) =
+            (watched, self.work.host.with(|c| c.authority.seed.clone()))
+        {
             let reports = move || seed.exchange.reports();
             let mut watch = ReachWatch {
                 run,

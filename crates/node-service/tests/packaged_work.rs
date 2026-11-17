@@ -339,9 +339,9 @@ struct ReachMember {
 #[cfg(feature = "desktop-shell")]
 impl ReachMember {
     fn new() -> Self {
-        Self::reading(api::lan_interface::Selection::Lan(std::net::IpAddr::from([
-            127, 0, 0, 1,
-        ])))
+        Self::reading(api::lan_interface::Selection::Lan(std::net::IpAddr::from(
+            [127, 0, 0, 1],
+        )))
     }
     /// A joined Mac whose reading of its interfaces answers `selection` every time.
     fn reading(selection: api::lan_interface::Selection) -> Self {
@@ -586,7 +586,10 @@ fn a_signed_relay_run_never_binds_a_loopback_only_service_on_the_joined_mac() {
             "{reason}: {reach_status}"
         );
         assert_eq!(card["state"], "error", "{reason}: {card}");
-        assert_eq!(card["detail"], "work_network_unavailable", "{reason}: {card}");
+        assert_eq!(
+            card["detail"], "work_network_unavailable",
+            "{reason}: {card}"
+        );
         let report = m.report();
         assert_eq!(
             (report["state"].as_str(), report["detail"].as_str()),

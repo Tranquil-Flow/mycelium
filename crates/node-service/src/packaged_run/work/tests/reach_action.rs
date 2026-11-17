@@ -57,7 +57,9 @@ fn two_overlapping_reach_changes_run_one_transaction_after_the_other() {
     let (loaded, first_loaded) = mpsc::channel::<()>();
     network.reach.hold_after_load(Box::new(move || {
         loaded.send(()).unwrap_or_default();
-        answered.recv_timeout(Duration::from_secs(1)).unwrap_or_default();
+        answered
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap_or_default();
     }));
     let first = reach_request(&services, json!({"portmapping": true}));
     first_loaded

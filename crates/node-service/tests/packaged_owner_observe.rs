@@ -749,17 +749,18 @@ fn a_joined_macs_reach_refusal_fails_the_owners_collect_promptly_by_name() {
     let repository = Repository::start();
     let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
     // The owner's work transport may cross networks (a LAN-shaped choice on loopback).
-    let owner_work =
-        WorkNetwork::Fixed(node_service::packaged_work::NetworkChoice(Some((
-            loopback,
-            runtime::iroh_host::LanPolicy::with_explicit(vec![loopback]).unwrap(),
-        ))));
+    let owner_work = WorkNetwork::Fixed(node_service::packaged_work::NetworkChoice(Some((
+        loopback,
+        runtime::iroh_host::LanPolicy::with_explicit(vec![loopback]).unwrap(),
+    ))));
     let run = RunConfig {
         sidecar: Some(sidecar_file(&base)),
         ..RunConfig::default()
     };
     let (owner, member) = pair_on(&base, &repository, run, owner_work);
-    let (code, chosen) = owner.mac.post("/api/network/reach", json!({"reach": "relay"}));
+    let (code, chosen) = owner
+        .mac
+        .post("/api/network/reach", json!({"reach": "relay"}));
     assert_eq!(code, 200, "{chosen}");
     let began = Instant::now();
     let (code, started) = owner.mac.post("/api/demo/start", json!({}));

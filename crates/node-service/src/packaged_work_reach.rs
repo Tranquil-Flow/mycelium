@@ -628,8 +628,10 @@ mod tests {
         let shipped = Reach::Shipped;
         let key = api::run_exchange::work_network::FIELD;
         let field = |value: Value| RunReach::from_value(&json!({ key: value }));
-        let malformed = field(json!({"protocol": api::run_exchange::work_network::PROTOCOL,
-            "reach": "relay"}));
+        let malformed = field(
+            json!({"protocol": api::run_exchange::work_network::PROTOCOL,
+            "reach": "relay"}),
+        );
         let unsupported = field(json!({"protocol": "mycelium.a13_work_network.v2",
             "reach": "relay", "relay_url": "https://relay.mycelium.now/"}));
         assert_eq!(malformed, Err(api::run_exchange::work_network::INVALID));
@@ -775,10 +777,12 @@ mod tests {
         let mut owner = bind(&owner_key);
         let short: String = member_key.public().to_string().chars().take(12).collect();
         std::thread::scope(|scope| {
-            let accepting = scope.spawn(|| loop {
-                match member.accept(&clock, until(&clock)) {
-                    Err(transport::Error::Authentication) => continue,
-                    other => return other.unwrap(),
+            let accepting = scope.spawn(|| {
+                loop {
+                    match member.accept(&clock, until(&clock)) {
+                        Err(transport::Error::Authentication) => continue,
+                        other => return other.unwrap(),
+                    }
                 }
             });
             let dialled = owner.connect(&address, &clock, until(&clock)).unwrap();
