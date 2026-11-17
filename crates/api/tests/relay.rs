@@ -42,7 +42,10 @@ fn scratch(tag: &str) -> PathBuf {
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).expect("mode");
     dir
 }
+/// B12: a port the test binds and frees for a relay to bind next is bound and freed inside the
+/// relay's fork boundary, so no other test's spawn in flight holds a copy of it.
 fn free_port() -> u16 {
+    let _forks = api::relay::fork_boundary();
     TcpListener::bind("127.0.0.1:0")
         .and_then(|l| l.local_addr())
         .map(|a| a.port())
@@ -100,7 +103,10 @@ fn run_scenario(fx: &Value, sc: &Value) -> Vec<String> {
         clock: Arc::new(Mutex::new(1000.0)),
         serving: Arc::new(Mutex::new(0)),
     };
-    let busy = TcpListener::bind("127.0.0.1:0").expect("busy");
+    let busy = {
+        let _forks = api::relay::fork_boundary();
+        TcpListener::bind("127.0.0.1:0").expect("busy")
+    };
     let mut busy = Some(busy);
     let busy_port = busy
         .as_ref()
@@ -232,6 +238,7 @@ fn run_scenario(fx: &Value, sc: &Value) -> Vec<String> {
                     status(r)
                 }
                 "free_busy" => {
+                    let _forks = api::relay::fork_boundary();
                     busy = None;
                     json!({"ok": true})
                 }
@@ -866,6 +873,7 @@ impl SilentTunnel {
         };
         let hold = dir.join("hold");
         for fifo in [&tunnel.started, &hold] {
+            let _forks = api::relay::fork_boundary();
             let made = std::process::Command::new("/usr/bin/mkfifo")
                 .arg("-m")
                 .arg("600")
@@ -910,6 +918,7 @@ impl SilentTunnel {
     /// Every live process running this script (`Command::spawn` returns once the child has
     /// exec'd, so a spawned client is visible here as soon as `start` answered).
     fn running(&self) -> Vec<i32> {
+        let _forks = api::relay::fork_boundary();
         let out = std::process::Command::new("/bin/ps")
             .args(["-axww", "-o", "pid=,command="])
             .output()
@@ -1059,6 +1068,7 @@ impl BundledFake {
         let native = root.join("Mycelium.app/Contents/MacOS/native");
         std::fs::create_dir_all(&native).expect("bundle dirs");
         let hold = root.join("hold");
+        let _forks = api::relay::fork_boundary();
         let made = std::process::Command::new("/usr/bin/mkfifo")
             .arg("-m")
             .arg("600")

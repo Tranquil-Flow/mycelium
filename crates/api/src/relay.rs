@@ -307,7 +307,11 @@ pub struct Proxy {
 impl Proxy {
     /// `SeedRelayProxy(port, trust_client_ip).start()`; an `OSError` is the caller's.
     pub fn start(port: u16, trust_client_ip: bool) -> std::io::Result<Arc<Proxy>> {
-        let listener = TcpListener::bind(("127.0.0.1", port))?;
+        // B12: no relay spawn lands between the listener's `socket()` and its close-on-exec.
+        let listener = {
+            let _forks = fork_boundary();
+            TcpListener::bind(("127.0.0.1", port))?
+        };
         let port = listener.local_addr()?.port();
         let shared = Arc::new(ProxyShared {
             stop: AtomicBool::new(false),
@@ -354,10 +358,13 @@ impl Proxy {
         lock(&self.shared.handlers).swarm = handler;
     }
     /// `SeedRelayProxy.close`: stop accepting, join the accept thread (in-flight connections finish).
+    /// B12: the listener is closed inside the fork boundary, so a relay spawn in flight (which holds
+    /// a copy of it until its exec) has exec'd first and no later one can copy it.
     pub fn close(&self) {
         if self.shared.stop.swap(true, Ordering::SeqCst) {
             return;
         }
+        let _forks = fork_boundary();
         // unblock `accept`
         TcpStream::connect(("127.0.0.1", self.port))
             .map(drop)
@@ -1187,7 +1194,12 @@ impl Relay {
         command
             .stdout(write_end.try_clone().map_err(|_| "relay_start_failed")?)
             .stderr(write_end);
-        let child = command.spawn().map_err(|_| "relay_start_failed")?;
+        let child = {
+            // B12: the client is forked inside the relay's fork boundary.
+            let _forks = fork_boundary();
+            command.spawn()
+        }
+        .map_err(|_| "relay_start_failed")?;
         drop(command);
         let weak = self.inner.clone();
         let (ended, reader_ended) = mpsc::channel();
