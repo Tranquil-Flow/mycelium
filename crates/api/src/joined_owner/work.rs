@@ -2016,14 +2016,23 @@ impl Worker {
                 }
             },
         };
+        // Lane A patch 2, A-02: published once (`Flow.retired` is set only here).
+        if self.shared.lock().retired.is_some() {
+            return;
+        }
         let code = {
             let Ok(mut o) = epoch.handle().state.lock() else {
                 return;
             };
             let idle = o.request_id.is_none()
                 || (published && o.request_id == current && o.teardown_finished);
-            if o.epoch_failure.is_some() || !idle {
+            if !idle {
                 None
+            } else if let Some(code) = o.epoch_failure {
+                // An epoch failure the carrier itself established (B6: a stage's spent command
+                // grant, `joined_route_member_consent_exhausted`; a refused start) is published
+                // under its own name once the request has settled; the close below is idempotent.
+                Some(code)
             } else if o.retired() {
                 Some("route_dropped")
             } else if member_ended || !self.ended.is_empty() {
