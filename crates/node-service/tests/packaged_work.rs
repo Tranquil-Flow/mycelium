@@ -87,7 +87,7 @@ fn packaged_standing_pass_publishes_real_work_endpoint_from_renewed_membership()
     );
     drop(link);
     agent.close(&member);
-    network.quit();
+    let _ = network.quit();
 }
 #[test]
 fn enrolled_packaged_control_dispatches_without_pair_request_and_closes_all_owned_loops() {
@@ -194,7 +194,7 @@ fn the_app_default_work_transport_follows_this_macs_private_address() {
     std::fs::create_dir(&root).unwrap();
     let network = Network::new(&root, NetworkConfig::default());
     let default = network.work_network().clone();
-    network.quit();
+    let _ = network.quit();
     std::fs::remove_dir_all(&root).unwrap();
     assert_eq!(default, WorkNetwork::ThisMac);
     // A Mac on Wi-Fi with Tailscale up: the Wi-Fi address, never the tailnet or loopback one.
@@ -427,7 +427,7 @@ impl ReachMember {
     }
     fn close(mut self) {
         self.agent.close(&self.member);
-        self.network.quit();
+        let _ = self.network.quit();
     }
 }
 /// Lane XB patch 2 (decision D1, REVIEW XB-03/04/06): the OWNER chooses each run's network
@@ -669,6 +669,6 @@ fn the_owners_portmapping_is_frozen_with_its_run() {
     network.begin_owner_run().unwrap();
     assert!(portmapping(&network), "the next run reads it");
     network.end_owner_run();
-    network.quit();
+    let _ = network.quit();
     std::fs::remove_dir_all(&root).ok();
 }
