@@ -3,14 +3,13 @@
 //! Dispatch must authenticate the original envelope against current authority;
 //! neither this bridge nor closing its endpoint supplies a native Stop receipt.
 use budgets::{BudgetId as B, ClockDomain, Entries, MonoInstant, Span};
-use iroh::{Endpoint, EndpointAddr, RelayMode, endpoint::presets};
+use iroh::EndpointAddr;
 use runtime::{
     iroh_control::{ControlRequest, NodeControlClient},
     iroh_host::LoopbackHost,
     managed_owner::{OwnerError, session::CallFence},
 };
 use std::{
-    net::{Ipv4Addr, SocketAddrV4},
     sync::{Arc, Condvar, Mutex},
     thread::JoinHandle,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -142,9 +141,9 @@ impl LocalMailboxCarrier {
         let worker = std::thread::spawn(move || {
             let rt = runtime()?;
             rt.block_on(async move {
-                let bind = Endpoint::builder(presets::Minimal)
-                    .relay_mode(RelayMode::Disabled).clear_address_lookup().clear_ip_transports()
-                    .bind_addr(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))
+                // The runtime's local-only builder (127.0.0.1, no relay, no address lookup, no
+                // portmapping): product code builds no endpoint elsewhere (lane XB patch 2, XB-09).
+                let bind = runtime::iroh_host::local_builder()
                     .map_err(|_| OwnerError("control_carrier_bind_failed"))?
                     .alpns(vec![Channel::NodeControl.alpn().to_vec()]).bind();
                 // Local socket construction: no relay/discovery and no invented

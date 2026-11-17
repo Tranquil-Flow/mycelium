@@ -325,3 +325,350 @@ fn a_run_names_why_the_two_macs_cannot_meet() {
     assert!(message.contains("17.5.7.8"), "{message}");
     assert!(lan.allows(at("192.168.1.40:61700")));
 }
+/// The joined Mac of the network tests: a packaged member whose work transport reads
+/// 127.0.0.1 as "this Mac's interface" (nothing leaves the host) and whose relay is a dead
+/// loopback port.
+#[cfg(feature = "desktop-shell")]
+struct ReachMember {
+    p: fixture::Joined,
+    authority: Arc<Mutex<node_service::packaged_run::Authority>>,
+    network: Arc<node_service::packaged_network::Network>,
+    member: Arc<node_service::packaged_network::PackagedMember>,
+    agent: api::member_agent::MemberAgent<node_service::packaged_network::PackagedMember>,
+}
+#[cfg(feature = "desktop-shell")]
+impl ReachMember {
+    fn new() -> Self {
+        Self::reading(api::lan_interface::Selection::Lan(std::net::IpAddr::from(
+            [127, 0, 0, 1],
+        )))
+    }
+    /// A joined Mac whose reading of its interfaces answers `selection` every time.
+    fn reading(selection: api::lan_interface::Selection) -> Self {
+        use node_service::{
+            packaged_network::{MemberSeams, Network, NetworkConfig, PackagedMember},
+            packaged_run::Authority,
+            packaged_work::WorkNetwork,
+        };
+        use runtime::iroh_host::{LanPolicy, Reach};
+        let p = fixture::Joined::new();
+        p.announced();
+        api::preferences::private_state::store(
+            &p.member_root.join("installation-role.json"),
+            &json!({"protocol":"mycelium.a13_installation_role.v1","role":"target"}),
+            app_host::cap(),
+        )
+        .unwrap();
+        let mut authority = Authority::load(p.member_root.clone()).unwrap();
+        authority.target = true;
+        authority.running = true;
+        authority.session = Some(p.session.clone());
+        let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
+        let network = Network::new(
+            &p.member_root,
+            NetworkConfig {
+                seams: node_service::packaged_network::JoinSeams {
+                    member_seed: p.seed.options(),
+                    ..Default::default()
+                },
+                work_network: WorkNetwork::Read(
+                    Arc::new(move || selection.clone()),
+                    LanPolicy::with_explicit(vec![loopback]).unwrap(),
+                ),
+                relay: Reach::Hermetic("http://127.0.0.1:1".parse().unwrap()),
+                ..Default::default()
+            },
+        );
+        let authority = Arc::new(Mutex::new(authority));
+        let member = PackagedMember::new(
+            authority.clone(),
+            network.clone(),
+            MemberSeams {
+                closed: Box::new(|| false),
+                resource: Box::new(|_| None),
+                acquisition: Box::new(|| None),
+                start_whole_model: Box::new(
+                    |_| Err("member_model_download_not_ported".to_string()),
+                ),
+            },
+        );
+        Self {
+            p,
+            authority,
+            network,
+            member,
+            agent: api::member_agent::MemberAgent::default(),
+        }
+    }
+    fn tick(&mut self) {
+        self.agent.tick(&self.member);
+    }
+    /// `status.network_reach` and the joined Mac's own card, as its window reads them.
+    fn status(&self) -> (serde_json::Value, serde_json::Value) {
+        let mut status = json!({});
+        node_service::packaged_network::status_overlay(
+            &mut status,
+            Some(&self.authority),
+            &self.network,
+        );
+        node_service::packaged_network::member_status(
+            &mut status,
+            Some(&self.authority),
+            &self.network,
+        );
+        (
+            status["network_reach"].clone(),
+            status["demo_target"].clone(),
+        )
+    }
+    /// The owner's view of this Mac's last report.
+    fn report(&self) -> serde_json::Value {
+        self.p.seed.exchange.reports()[self.p.session.node_id()].clone()
+    }
+    fn close(mut self) {
+        self.agent.close(&self.member);
+        self.network.quit();
+    }
+}
+/// Lane XB patch 2 (decision D1, REVIEW XB-03/04/06): the OWNER chooses each run's network
+/// reach and signs it in the run announcement; the joined Mac binds in exactly that mode, and its
+/// own preference file decides nothing (here it says `relay` with portmapping: ignored). Status
+/// names the ACTIVE work service's mode, not a file. A signed relay that is not this Mac's
+/// configured relay is refused by name before anything binds (D4), on the joined Mac's card and
+/// in its report to the owner (D3: named, never a timeout).
+#[cfg(feature = "desktop-shell")]
+#[test]
+fn a_joined_mac_binds_in_the_mode_the_owner_signed_and_names_a_foreign_relay() {
+    use api::run_exchange::work_network::RunReach;
+    use node_service::packaged_work::reach;
+    let mut m = ReachMember::new();
+    reach::save(
+        &m.p.member_root,
+        reach::ReachChoice {
+            across_networks: true,
+            portmapping: true,
+        },
+    )
+    .unwrap();
+    // The owner signed nothing: the same network, the LAN carrier.
+    m.tick();
+    let (reach_status, _) = m.status();
+    assert_eq!(
+        reach_status["active"]["reach"], "same_network",
+        "{reach_status}"
+    );
+    assert_eq!(
+        reach_status["active"]["portmapping"], false,
+        "{reach_status}"
+    );
+    assert_eq!(
+        reach_status["error"],
+        serde_json::Value::Null,
+        "{reach_status}"
+    );
+    assert!(
+        m.p.seed
+            .work_members
+            .get(
+                &m.p.seed.coordinator,
+                m.p.session.node_id(),
+                m.p.owner.public(),
+                "run-s4cb2",
+                "dep-s4cb2",
+                &|a| a.ip().is_loopback(),
+            )
+            .is_ok(),
+        "the joined Mac's LAN work endpoint is published"
+    );
+    // The owner signs a relay that is not this Mac's: refused by name, nothing bound.
+    m.p.seed.exchange.set_work_network(RunReach::Relay(
+        "https://relay.example.org".parse().unwrap(),
+    ));
+    m.tick();
+    let (reach_status, card) = m.status();
+    assert_eq!(
+        reach_status["error"], "work_network_relay_mismatch",
+        "{reach_status}"
+    );
+    assert_eq!(
+        reach_status["active"],
+        serde_json::Value::Null,
+        "{reach_status}"
+    );
+    assert_eq!(card["state"], "error", "{card}");
+    assert_eq!(card["detail"], "work_network_relay_mismatch", "{card}");
+    let report = m.report();
+    assert_eq!(report["state"], "error", "{report}");
+    assert_eq!(report["detail"], "work_network_relay_mismatch", "{report}");
+    m.close();
+}
+/// Lane XB patch 2 (decision D3, REVIEW XB-02): in a run across networks a joined Mac checks
+/// ITS OWN relay connection (both work endpoints, bounded by the ready-address window) before it
+/// announces ready. With the relay unreachable it publishes no work endpoint and names
+/// `relay_unreachable` on its card and in its report to the owner, so the owner's run fails by
+/// that name instead of timing out on a Mac that looked available.
+#[cfg(feature = "desktop-shell")]
+#[test]
+fn a_joined_mac_whose_relay_is_unreachable_refuses_by_name_before_announcing_ready() {
+    use api::run_exchange::work_network::RunReach;
+    let mut m = ReachMember::new();
+    m.p.seed
+        .exchange
+        .set_work_network(RunReach::Relay("http://127.0.0.1:1".parse().unwrap()));
+    let started = std::time::Instant::now();
+    m.tick();
+    let elapsed = started.elapsed();
+    let (reach_status, card) = m.status();
+    assert_eq!(reach_status["error"], "relay_unreachable", "{reach_status}");
+    assert_eq!(
+        reach_status["active"],
+        serde_json::Value::Null,
+        "{reach_status}"
+    );
+    assert_eq!(card["state"], "error", "{card}");
+    assert_eq!(card["detail"], "relay_unreachable", "{card}");
+    let report = m.report();
+    assert_eq!(
+        (report["state"].as_str(), report["detail"].as_str()),
+        (Some("error"), Some("relay_unreachable")),
+        "{report}"
+    );
+    assert!(
+        m.p.seed
+            .work_members
+            .get(
+                &m.p.seed.coordinator,
+                m.p.session.node_id(),
+                m.p.owner.public(),
+                "run-s4cb2",
+                "dep-s4cb2",
+                &|_| true,
+            )
+            .is_err(),
+        "no work endpoint is announced ready"
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(15),
+        "bounded: {elapsed:?}"
+    );
+    m.close();
+}
+/// Lane XB patch 3 (REVIEW XB2-01, decisions D1/D3): a run the owner signed across networks
+/// never becomes a loopback-only work service on the joined Mac. Whatever reading of its
+/// interfaces leaves this Mac without a usable network (no private address, an ambiguous / VPN
+/// selection, only bridge interfaces), the signed relay mode cannot be bound: the joined Mac
+/// refuses `work_network_unavailable` on its card and in its report to the owner, binds nothing
+/// and publishes no work endpoint (never a silent local-only service).
+#[cfg(feature = "desktop-shell")]
+#[test]
+fn a_signed_relay_run_never_binds_a_loopback_only_service_on_the_joined_mac() {
+    use api::{lan_interface, run_exchange::work_network::RunReach};
+    for reason in [
+        lan_interface::NO_PRIVATE_ADDRESS,
+        lan_interface::AMBIGUOUS_PRIVATE_INTERFACES,
+        lan_interface::ONLY_BRIDGE_INTERFACES,
+        lan_interface::INTERFACES_UNREADABLE,
+    ] {
+        let mut m = ReachMember::reading(lan_interface::Selection::LocalOnly(reason));
+        // Its own relay (the test's dead loopback port): the signed relay is this Mac's.
+        m.p.seed
+            .exchange
+            .set_work_network(RunReach::Relay("http://127.0.0.1:1".parse().unwrap()));
+        m.tick();
+        let (reach_status, card) = m.status();
+        assert_eq!(
+            reach_status["error"], "work_network_unavailable",
+            "{reason}: {reach_status}"
+        );
+        assert_eq!(
+            reach_status["active"],
+            serde_json::Value::Null,
+            "{reason}: {reach_status}"
+        );
+        assert_eq!(card["state"], "error", "{reason}: {card}");
+        assert_eq!(
+            card["detail"], "work_network_unavailable",
+            "{reason}: {card}"
+        );
+        let report = m.report();
+        assert_eq!(
+            (report["state"].as_str(), report["detail"].as_str()),
+            (Some("error"), Some("work_network_unavailable")),
+            "{reason}: {report}"
+        );
+        assert!(
+            m.p.seed
+                .work_members
+                .get(
+                    &m.p.seed.coordinator,
+                    m.p.session.node_id(),
+                    m.p.owner.public(),
+                    "run-s4cb2",
+                    "dep-s4cb2",
+                    &|_| true,
+                )
+                .is_err(),
+            "{reason}: no work endpoint is published"
+        );
+        m.close();
+    }
+}
+/// Lane XB patch 3 (REVIEW XB2-05): the owner's portmapping preference is frozen with its run,
+/// like the run's reach: a change saved while the run is active (during the model or the compile)
+/// applies to the next run, never to endpoints the running run binds later (its compose).
+#[cfg(feature = "desktop-shell")]
+#[test]
+fn the_owners_portmapping_is_frozen_with_its_run() {
+    use node_service::{
+        packaged_network::{Network, NetworkConfig},
+        packaged_work::{WorkNetwork, reach},
+    };
+    use runtime::iroh_host::LanPolicy;
+    let root = std::env::temp_dir().join(format!("xb3-owner-pm-{}", std::process::id()));
+    std::fs::remove_dir_all(&root).ok();
+    std::fs::create_dir_all(&root).unwrap();
+    let root = root.canonicalize().unwrap();
+    let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
+    let network = Network::new(
+        &root,
+        NetworkConfig {
+            work_network: WorkNetwork::Read(
+                Arc::new(move || api::lan_interface::Selection::Lan(loopback)),
+                LanPolicy::with_explicit(vec![loopback]).unwrap(),
+            ),
+            ..Default::default()
+        },
+    );
+    let portmapping = |network: &Network| {
+        let resolved = network.owner_run_network().unwrap().resolution();
+        let (_, policy) = resolved.choice.0.expect("bound across networks");
+        assert!(policy.relay().is_some(), "{policy:?}");
+        policy.portmapping()
+    };
+    reach::save(
+        &root,
+        reach::ReachChoice {
+            across_networks: true,
+            portmapping: false,
+        },
+    )
+    .unwrap();
+    network.begin_owner_run().unwrap();
+    assert!(!portmapping(&network));
+    // Saved during the run: the running run keeps portmapping off.
+    reach::save(
+        &root,
+        reach::ReachChoice {
+            across_networks: true,
+            portmapping: true,
+        },
+    )
+    .unwrap();
+    assert!(!portmapping(&network), "the running run's value is frozen");
+    network.end_owner_run();
+    network.begin_owner_run().unwrap();
+    assert!(portmapping(&network), "the next run reads it");
+    network.end_owner_run();
+    network.quit();
+    std::fs::remove_dir_all(&root).ok();
+}

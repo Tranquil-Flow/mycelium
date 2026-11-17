@@ -125,6 +125,7 @@ fn raw_peer(
     let endpoint = rt
         .block_on(async {
             let mut builder = Endpoint::builder(presets::Minimal)
+                .portmapper_config(iroh::endpoint::PortmapperConfig::Disabled)
                 .relay_mode(RelayMode::Disabled)
                 .clear_address_lookup()
                 .clear_ip_transports()

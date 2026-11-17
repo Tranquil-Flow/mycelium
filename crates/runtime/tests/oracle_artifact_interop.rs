@@ -313,6 +313,7 @@ impl Running for RustSide {
 
 async fn client_endpoint(key: &[u8; 32]) -> Endpoint {
     Endpoint::builder(presets::Minimal)
+        .portmapper_config(iroh::endpoint::PortmapperConfig::Disabled)
         .relay_mode(RelayMode::Disabled)
         .clear_address_lookup()
         .clear_ip_transports()

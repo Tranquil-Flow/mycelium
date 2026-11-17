@@ -460,7 +460,7 @@ fn control_loop_inner(
         // Direct LAN: the transport admits only the announced key; a new pin replaces it. A
         // cleared pin keeps the last key at the transport while no command is admitted.
         if let OwnerTrust::Announced(_) = trust
-            && host.mode() == NetworkMode::DirectLan
+            && NetworkMode::admits_by_key(host.mode())
             && let Ok(owner) = trust.owner()
             && admitted != Some(owner)
         {

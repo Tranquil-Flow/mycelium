@@ -352,6 +352,189 @@ pub(super) struct Work {
     /// What the probe reached in the current run (never a target list: see [`LocalNetwork`]).
     local_network: Arc<Mutex<LocalNetwork>>,
 }
+/// Lane XB patch 2 (D3): the named refusal of a run whose joined Mac reported (state `error`,
+/// for THIS run) that it cannot bind the run's signed network reach.
+fn member_reach_refusal(reports: &Value, state: &RunState) -> Option<StepError> {
+    member_reach_refusal_in(
+        reports,
+        &state.run_id,
+        &state.deployment_id,
+        &state.participants,
+    )
+}
+/// Lane XB patch 3 (REVIEW XB2-03), scoped in patch 4 (REVIEW XB3-02): [`member_reach_refusal`]
+/// over the run's authenticated reports (the exchange keeps only verified ones). Only the reports
+/// of `participants` (the run's CURRENT member set: the collect step's candidates, then the Macs it
+/// selected) count, and only for exactly this `run_id` AND `deployment` (a report without a
+/// deployment, or of another run or deployment, never counts), as the shared owner steps read
+/// them (`run_reports`, `raise_member_refusal`). Any other Mac that reports into the exchange (a
+/// Mac that came online after collect began, one the collect did not select) has no say over
+/// this run.
+fn member_reach_refusal_in(
+    reports: &Value,
+    run_id: &str,
+    deployment: &str,
+    participants: &[String],
+) -> Option<StepError> {
+    use crate::packaged_work::reach::MEMBER_REFUSALS;
+    let (node, code) = participants.iter().find_map(|node| {
+        let report = &reports[node.as_str()];
+        let code = report["detail"].as_str()?;
+        (report["state"] == "error"
+            && report["run_id"].as_str() == Some(run_id)
+            && report["deployment_id"].as_str() == Some(deployment)
+            && MEMBER_REFUSALS.contains(&code))
+        .then(|| (node.clone(), code.to_owned()))
+    })?;
+    let (owner_code, message) = crate::packaged_work::reach::member_refusal(&node, &code);
+    Some(owner_run::OwnerRunError::with(owner_code, Some(&message), None).into())
+}
+/// Lane XB patch 3 (REVIEW XB2-03): the run steps before compose (collect, observe, compile)
+/// wait on the joined Macs' reports for minutes (`Descriptors`). A joined Mac that refused the
+/// run's signed reach by name says so in its report at once (`descriptor: null`), so these steps
+/// run under this watch: every wait checks the run's reports for such a refusal and ends the
+/// step (as a Stop would, at its next check); the step then fails by the joined Mac's name
+/// instead of waiting out its budget. Anything else passes to the run's own environment.
+/// Patch 4 (XB3-02): the watch reads only the run's current participants: the run state's list
+/// when the step starts, then every list the step itself publishes (`participants`: the collect's
+/// candidates on its first pass, the selected Macs when it ends; observe's facts nodes).
+/// Patch 4 (REVIEW XB4-01): during collect the participants are only CANDIDATES. As the shared
+/// collect does for any candidate without a usable card (`demo_chain.py:638-643,688-713`), a
+/// candidate's reach refusal is a reason that drops that candidate; the run goes on with the
+/// Macs that reported and fails (`two_macs_required`, or the candidate's own code) only below two.
+/// The watch therefore ends collect early only when the refusals leave fewer than this many
+/// candidates; after collect (observe, compile) every participant is selected and any refusal
+/// ends the step.
+const COLLECT_REQUIRED_MACS: usize = 2;
+struct ReachWatch<'e> {
+    env: &'e mut dyn StepEnv,
+    reports: &'e dyn Fn() -> Value,
+    run: (String, String),
+    participants: Vec<String>,
+    /// The step is collect (`descriptors`): `participants` are candidates, not a selection.
+    collect: bool,
+    refused: std::cell::RefCell<Option<StepError>>,
+}
+impl ReachWatch<'_> {
+    /// A participant's named refusal of this run, scoped as [`member_reach_refusal_in`] reads.
+    fn named(&self) -> Option<StepError> {
+        member_reach_refusal_in(
+            &(self.reports)(),
+            &self.run.0,
+            &self.run.1,
+            &self.participants,
+        )
+    }
+    fn refused(&self) -> bool {
+        if self.refused.borrow().is_some() {
+            return true;
+        }
+        let found = if self.collect {
+            let reports = (self.reports)();
+            let refusing = self
+                .participants
+                .iter()
+                .filter(|node| {
+                    member_reach_refusal_in(
+                        &reports,
+                        &self.run.0,
+                        &self.run.1,
+                        std::slice::from_ref(*node),
+                    )
+                    .is_some()
+                })
+                .count();
+            (self.participants.len() - refusing < COLLECT_REQUIRED_MACS)
+                .then(|| self.named())
+                .flatten()
+        } else {
+            self.named()
+        };
+        let refused = found.is_some();
+        *self.refused.borrow_mut() = found;
+        refused
+    }
+}
+/// Runs one step before compose under a [`ReachWatch`] for the run `run` whose participants are
+/// `participants` when the step starts; a refusal the watch saw replaces the step's outcome.
+fn watched_step(
+    env: &mut dyn StepEnv,
+    reports: &dyn Fn() -> Value,
+    run: (String, String),
+    participants: Vec<String>,
+    collect: bool,
+    step: impl FnOnce(&mut dyn StepEnv) -> Result<(), StepError>,
+) -> Result<(), StepError> {
+    let mut watch = ReachWatch {
+        env,
+        reports,
+        run,
+        participants,
+        collect,
+        refused: std::cell::RefCell::new(None),
+    };
+    let outcome = step(&mut watch);
+    // Patch 4 (REVIEW XB3-04): a shared step can return a participant's reach refusal itself as
+    // its raw code (observe's `raise_member_refusal` reads the reports after the watch's last
+    // check). That code is reconciled with the same scoped report before it is returned, so the
+    // owner still sees the joined Mac's named refusal. Stop and every other outcome pass as
+    // they are.
+    let raw_reach_refusal = matches!(&outcome, Err(StepError::Refused(raw))
+        if crate::packaged_work::reach::MEMBER_REFUSALS.contains(&raw.code.as_str()));
+    if raw_reach_refusal && watch.refused.borrow().is_none() {
+        // The step already failed on that code: the plain scoped rule names it (in collect too).
+        let named = watch.named();
+        *watch.refused.borrow_mut() = named;
+    }
+    match watch.refused.into_inner() {
+        Some(refused) => Err(refused),
+        None => outcome,
+    }
+}
+impl StepEnv for ReachWatch<'_> {
+    fn progress(&mut self, detail: &str) {
+        self.env.progress(detail);
+    }
+    fn stopped(&self) -> bool {
+        self.env.stopped() || self.refused()
+    }
+    fn now(&mut self) -> f64 {
+        self.env.now()
+    }
+    fn wall(&mut self) -> f64 {
+        self.env.wall()
+    }
+    fn set_result(&mut self, key: &str, value: Value) {
+        // The step's own participant list (`publish_participants`: one row per node) is the
+        // run's current member set from now on.
+        if key == "participants"
+            && let Some(rows) = value.as_array()
+        {
+            self.participants = rows
+                .iter()
+                .filter_map(|row| row["node_id"].as_str().map(str::to_owned))
+                .collect();
+        }
+        self.env.set_result(key, value);
+    }
+    fn record_exception(&mut self, code: &str, class: &str) {
+        self.env.record_exception(code, class);
+    }
+    fn pause(&mut self, seconds: f64) -> bool {
+        self.refused() || self.env.pause(seconds) || self.refused()
+    }
+    fn fenced(
+        &mut self,
+        commit: &mut dyn FnMut() -> Result<(), StepError>,
+        key: &str,
+        value: Value,
+    ) -> Result<(), StepError> {
+        if self.refused() {
+            return Err(StepError::Stopped);
+        }
+        self.env.fenced(commit, key, value)
+    }
+}
 /// Lane PHY item 2, patch 2 (PHY-02): what one run's probes reached. Targets are never cached:
 /// every pass reads them afresh from this run's current, verified member records
 /// (`Inbox::get` -> `joined::verify`: current enrollment, lease, generation, run and share
@@ -438,7 +621,13 @@ impl Work {
         // loopback-only run) nothing is sent: compose, reading the interfaces itself, refuses a
         // run with a joined Mac on it by name, as at the base.
         let resolved = resolve();
-        let Some((from, _)) = resolved.choice.0.clone() else {
+        // Lane XB2: across networks the joined Mac is not on this LAN; the relay is the path.
+        let Some((from, _)) = resolved
+            .choice
+            .0
+            .clone()
+            .filter(|_| resolved.reach != "relay")
+        else {
             eprintln!("local_network_probe_skipped:{}", resolved.transport);
             return Ok(());
         };
@@ -512,9 +701,23 @@ impl Work {
         let Some(network) = resident.network.clone() else {
             return None;
         };
-        let Some((from, _)) = network.0.clone() else {
+        let Some((from, policy)) = network.0.clone() else {
             return None;
         };
+        // Lane XB patch 2 (XB-12): across networks the joined Mac's advertised private address
+        // names nothing on this network: no permission probe, no same-network advice.
+        if policy.relay().is_some() {
+            return Some(
+                owner_run::OwnerRunError::with(
+                    crate::packaged_work::reach::SILENT_VIA_RELAY,
+                    Some(&crate::packaged_work::reach::silent_via_relay_message(
+                        cause,
+                    )),
+                    None,
+                )
+                .into(),
+            );
+        }
         let (Some((run, deployment)), bindings) = (resident.run.clone(), resident.bindings.clone())
         else {
             return None;
@@ -847,6 +1050,12 @@ impl Work {
         // and always here (lane PHY patch 3, PHY2-01): the probe passes before the compile may have
         // read an older state of them.
         let resolved = self.host.network.resolve_run_network("owner_run");
+        // Lane XB3: a run across networks whose relay is unreachable fails closed, by name,
+        // before the local worker starts or anything is dialed (never a fallback relay or n0).
+        if crate::packaged_work::reach::require_relay(&resolved).is_err() {
+            let (code, message) = crate::packaged_work::reach::relay_refusal();
+            return Err(owner_run::OwnerRunError::with(code, Some(&message), None).into());
+        }
         let probed = self.take_preflight(&state.run_id);
         // No single private network here while a joined Mac is in the run: refused by name now,
         // before the local worker starts or anything is dialed (lane LAN round 2, F6).
@@ -856,7 +1065,16 @@ impl Work {
                 .iter()
                 .any(|node| Some(node) != state.local_node.as_ref())
         {
-            let (code, message) = crate::packaged_work::owner_network_refusal(reason);
+            // Lane XB patch 3 (REVIEW XB2-07): a run across networks gets relay-mode advice.
+            let across = matches!(
+                self.host.network.reach.run_choice(),
+                Some(Ok(api::run_exchange::work_network::RunReach::Relay(_)))
+            );
+            let (code, message) = if across {
+                crate::packaged_work::reach::owner_network_refusal_across(reason)
+            } else {
+                crate::packaged_work::owner_network_refusal(reason)
+            };
             return Err(owner_run::OwnerRunError::with(code, Some(&message), None).into());
         }
         // PHY2-01: a network other than the one the probe passes asked on (local-only <-> LAN, or
@@ -890,7 +1108,9 @@ impl Work {
                 return Err(StepError::Stopped);
             }
             match self.local(&network) {
-                Ok(()) => {}
+                // Lane XB patch 3 (REVIEW XB2-04): status names the run's transport ACTIVE only
+                // once this Mac's own work endpoints are bound (across networks: with their relay).
+                Ok(()) => self.host.network.reach.activate(&network),
                 Err(StepError::Refused(e)) if e.code == "member_work_renewing" => {
                     env.progress("member_work_renewing");
                 }
@@ -913,6 +1133,11 @@ impl Work {
             match current {
                 Ok(v) => break v,
                 Err(e) if e.code == "member_work_unavailable" => {
+                    // Lane XB patch 2 (D3): a joined Mac that refused this run's signed reach
+                    // by name (its report) fails the run by that name, never by the timeout.
+                    if let Some(refused) = member_reach_refusal(&seed.exchange.reports(), state) {
+                        return Err(refused);
+                    }
                     env.progress("member_work_unavailable");
                 }
                 Err(e) => match refused_at.get() {
@@ -1390,9 +1615,16 @@ impl Chain for Composed {
         ceiling: Option<&Value>,
         binding: Option<&Value>,
     ) {
+        // Lane XB patch 2 (D1): the owner's network reach for THIS run, read once now and
+        // signed in every announcement of the run; a joined Mac binds in exactly that mode. An
+        // invalid choice publishes nothing and refuses the run's first step by name.
+        let reach = self.work.host.network.begin_owner_run();
         if let Some(seed) = self.work.host.with(|c| c.authority.seed.clone()) {
             seed.exchange
                 .set_owner_control(Some(OwnerControl::new(self.work.owner.public())));
+            seed.exchange.set_work_network(
+                reach.unwrap_or(api::run_exchange::work_network::RunReach::SameNetwork),
+            );
         }
         // A fresh `RunContext` for the page's chats too (lane CHAT, owner_run.py:392-399).
         super::chat::new_run(&self.work.host);
@@ -1406,6 +1638,16 @@ impl Chain for Composed {
             .new_run(run, deployment, reason, ceiling, binding);
     }
     fn run_step(&mut self, step: &str, env: &mut dyn StepEnv) -> Result<(), StepError> {
+        // Lane XB patch 2 (D1, D3): a reach this Mac cannot bind (an invalid preference file, a
+        // loopback-fixed transport across networks) refuses the run's steps by name.
+        if let Err(code) = self.work.host.network.owner_run_network() {
+            return Err(owner_run::OwnerRunError::with(
+                code,
+                Some(&crate::packaged_work::reach::owner_refusal_message(code)),
+                None,
+            )
+            .into());
+        }
         // Lane PHY item 2: macOS's Local Network question is asked before the compile is spent,
         // and a pending or denied answer refuses Start's first step and the compile by name.
         // Steps 1-5 (`machine::STEPS`): the joined Macs' work addresses arrive during step 3.
@@ -1414,6 +1656,29 @@ impl Chain for Composed {
         {
             self.work
                 .local_network(state, matches!(step, "model" | "compile"))?;
+        }
+        // Lane XB patch 3 (REVIEW XB2-03): a joined Mac's named reach refusal ends the steps
+        // before compose at once, by its name.
+        let watched = match (step, self.inner.state()) {
+            ("contributor" | "descriptors" | "observe" | "compile", Some(state)) => Some((
+                (state.run_id.clone(), state.deployment_id.clone()),
+                state.participants.clone(),
+            )),
+            _ => None,
+        };
+        if let (Some((run, participants)), Some(seed)) =
+            (watched, self.work.host.with(|c| c.authority.seed.clone()))
+        {
+            let reports = move || seed.exchange.reports();
+            let inner = &mut self.inner;
+            return watched_step(
+                env,
+                &reports,
+                run,
+                participants,
+                step == "descriptors",
+                |watch| inner.run_step(step, watch),
+            );
         }
         if step == "slices" {
             // A preparation refusal is returned as it is (no workflow has run).
@@ -1429,7 +1694,14 @@ impl Chain for Composed {
         self.inner.run_step(step, env)
     }
     fn teardown(&mut self, failed: bool, env: &mut dyn StepEnv) -> Result<(), String> {
-        self.inner.teardown(failed, env)
+        let outcome = self.inner.teardown(failed, env);
+        // Lane XB patch 2: the run's reach ends with it (status shows no active endpoints).
+        self.work.host.network.end_owner_run();
+        if let Some(seed) = self.work.host.with(|c| c.authority.seed.clone()) {
+            seed.exchange
+                .set_work_network(api::run_exchange::work_network::RunReach::SameNetwork);
+        }
+        outcome
     }
     fn rollover_binding(&self) -> Option<Value> {
         self.inner.rollover_binding()

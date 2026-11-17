@@ -46,6 +46,7 @@ fn frozen_outer_frames_cross_real_authenticated_router_streams() {
     let clock = Time(Instant::now());
     let server = rt.block_on(async {
         Endpoint::builder(presets::Minimal)
+            .portmapper_config(iroh::endpoint::PortmapperConfig::Disabled)
             .relay_mode(RelayMode::Disabled)
             .clear_address_lookup()
             .clear_ip_transports()

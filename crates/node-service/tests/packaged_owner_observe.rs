@@ -117,6 +117,16 @@ fn admit_hello_program(mac: &Mac) {
 /// A packaged owner (relay on a loopback proxy, swarm, prepared model, open code) and a packaged
 /// member joined to it with its own prepared model; both run the admitted hello helper.
 fn pair(base: &Path, repository: &Repository, run: RunConfig) -> (Owner, Mac) {
+    pair_on(base, repository, run, WorkNetwork::loopback())
+}
+/// [`pair`] with the owner's work transport over `owner_work` (the joined Mac's stays on its
+/// loopback).
+fn pair_on(
+    base: &Path,
+    repository: &Repository,
+    run: RunConfig,
+    owner_work: WorkNetwork,
+) -> (Owner, Mac) {
     let sidecar = sidecar_file(base);
     let state = private_dir(base, "owner");
     let before = listening();
@@ -126,7 +136,7 @@ fn pair(base: &Path, repository: &Repository, run: RunConfig) -> (Owner, Mac) {
         &state,
         repository,
         NetworkConfig {
-            work_network: WorkNetwork::loopback(),
+            work_network: owner_work,
             ..NetworkConfig::default()
         },
         run,
@@ -731,6 +741,65 @@ fn after_observe_the_owners_mailbox_refuses_a_stranger_a_foreign_key_and_an_expi
     assert_eq!(mailbox_effects(&owner.mac), before);
 
     assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
+    drop(repository);
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+}
+
+/// Lane XB patch 3 (REVIEW XB2-03): a joined Mac that refuses the run's SIGNED reach by name says
+/// so in its report during collect, long before compose. The owner chooses "Macs on different
+/// networks" in its window; the joined Mac's work transport is fixed to its own loopback, so it
+/// cannot bind the signed relay mode and reports `work_network_unavailable` at once (no relay is
+/// contacted by either Mac: the owner's relay check runs only in compose). The owner's real run
+/// (Start: model, contributor, descriptors) fails at descriptors by the joined Mac's name, with
+/// its plain message, promptly, instead of waiting out `Descriptors` and failing on the raw
+/// member code.
+#[test]
+fn a_joined_macs_reach_refusal_fails_the_owners_collect_promptly_by_name() {
+    let base = state_root("reach-refusal");
+    let repository = Repository::start();
+    let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
+    // The owner's work transport may cross networks (a LAN-shaped choice on loopback).
+    let owner_work = WorkNetwork::Fixed(node_service::packaged_work::NetworkChoice(Some((
+        loopback,
+        runtime::iroh_host::LanPolicy::with_explicit(vec![loopback]).unwrap(),
+    ))));
+    let run = RunConfig {
+        sidecar: Some(sidecar_file(&base)),
+        ..RunConfig::default()
+    };
+    let (owner, member) = pair_on(&base, &repository, run, owner_work);
+    let (code, chosen) = owner
+        .mac
+        .post("/api/network/reach", json!({"reach": "relay"}));
+    assert_eq!(code, 200, "{chosen}");
+    let began = Instant::now();
+    let (code, started) = owner.mac.post("/api/demo/start", json!({}));
+    assert_eq!(code, 200, "{started}");
+    let run = until_within(
+        "the run ended",
+        millis(B::Descriptors) * 2,
+        || owner.mac.status()["owner_run"].clone(),
+        |r| matches!(r["state"].as_str(), Some("failed" | "stopped" | "serving")),
+    );
+    let waited = began.elapsed();
+    println!("XB2-03 reach refusal: {run} after {waited:?}");
+    assert_eq!(run["failed_step"], "descriptors", "{run}");
+    assert_eq!(run["error_code"], "joined_mac_network_refused", "{run}");
+    let message = run["error_message"].as_str().unwrap_or_default().to_owned();
+    assert!(
+        message.contains("work_network_unavailable") && message.contains("joined Mac"),
+        "{run}"
+    );
+    assert!(
+        waited < millis(B::Descriptors) / 4,
+        "prompt: {waited:?} of the {:?} collect budget",
+        millis(B::Descriptors)
+    );
+    assert_eq!(
+        member.status()["network_reach"]["error"],
+        "work_network_unavailable"
+    );
+    drop((owner, member));
     drop(repository);
     std::fs::remove_dir_all(&base).unwrap_or_default();
 }

@@ -260,7 +260,7 @@ pub fn serve(
         .map_err(|_| "route_owner_invalid")?;
     // Direct LAN: only the verified route's owner key is accepted; any other
     // key is refused by the host and unpinned at once (REVIEW-laneB9 F2).
-    if s.host.mode() == NetworkMode::DirectLan
+    if NetworkMode::admits_by_key(s.host.mode())
         && let Err(e) = s.host.admit_peer_ids(&[owner])
     {
         stop(compute, false)?;

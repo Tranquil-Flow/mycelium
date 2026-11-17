@@ -678,3 +678,86 @@ for (const trigger of document.querySelectorAll('summary > button.disclosure-btn
   });
   panel.addEventListener('toggle', () => trigger.setAttribute('aria-expanded', String(panel.open)));
 }
+// ---- Network reach (lane XB patch 2) ----
+// One contained section (status `network_reach`, action '/api/network/reach'). The owner chooses,
+// for each run, whether the Macs are on the same network or on different networks; the joined
+// Macs follow the owner's signed choice by themselves. Portmapping is each Mac's own preference,
+// off by default. Its own status poll; nothing outside this section posts the action.
+(() => {
+  const REACH_ERRORS = {
+    relay_unreachable:'This Mac cannot reach the Mycelium relay, which a run across networks needs. Check this Mac’s internet connection; the owner’s run names this Mac until it can.',
+    work_network_relay_mismatch:'The owner’s run names a relay this Mac does not use. Update Mycelium on both Macs to the same version.',
+    work_network_invalid:'The owner’s run carries a network choice this Mac cannot read. Update Mycelium on both Macs to the same version.',
+    work_network_version_unsupported:'The owner’s run carries a network choice from another version of Mycelium. Update Mycelium on both Macs to the same version.',
+    work_network_unavailable:'This Mac has no network it can use for a run across networks: no private network address, more than one (often a VPN), or none it could read. Connect it to one Wi-Fi or Ethernet network with internet access, turn off any VPN, and start again.',
+    network_reach_invalid:'This Mac’s network setting could not be read. Choose it again below; saving replaces it.',
+    network_reach_run_active:'Stop the current run before changing how the Macs reach each other. The choice applies to the next run.',
+    owner_role_required:'Only the owner chooses how the Macs reach each other; this Mac follows the owner’s choice.',
+  };
+  const ACTIVE_RUN = ['running','serving','stopping','failing'];
+  let reachBusy = false, note = '';
+  const el = (tag, props = {}, ...children) => { const node = Object.assign(document.createElement(tag), props); node.append(...children); return node; };
+  const sameRadio = el('input', {type:'radio', name:'network-reach', value:'same_network', id:'reach-same'});
+  const acrossRadio = el('input', {type:'radio', name:'network-reach', value:'relay', id:'reach-relay'});
+  const mapBox = el('input', {type:'checkbox', id:'reach-portmapping'});
+  const ownerPart = el('fieldset', {id:'reach-owner'},
+    el('legend', {textContent:'For the next run (the joined Macs follow automatically)'}),
+    el('label', {className:'check'}, sameRadio, ' Macs on the same network'),
+    el('p', {className:'detail', textContent:'Both Macs on the same Wi-Fi or Ethernet. Model and stage traffic stay on your network, directly between the Macs; the run’s control messages still pass through the owner’s relay link.'}),
+    el('label', {className:'check'}, acrossRadio, ' Macs on different networks (through the Mycelium relay)'),
+    el('p', {className:'detail', textContent:'For a Mac on another network, for example an iPhone hotspot. Both Macs register at relay.mycelium.now, which helps them find each other and carries their traffic when no direct path opens. Mycelium also tries direct paths across the internet, including to addresses the other Mac reports. The relay sees the Macs’ addresses and how much they send, never the content: it is encrypted end to end between the two Macs. The run’s control messages still pass through the owner’s relay link.'}));
+  const mapPart = el('div', {},
+    el('label', {className:'check'}, mapBox, ' Let this Mac ask its router to open a port (portmapping)'),
+    el('p', {className:'detail', textContent:'Off by default. Used only in runs across networks, where it can give a direct connection instead of the relay. When it is on, macOS may ask whether Mycelium may find devices on your local network. This is this Mac’s own setting; it applies to the next run.'}));
+  const stateLine = el('p', {id:'reach-state', role:'status'});
+  stateLine.setAttribute('aria-live', 'polite');
+  const card = el('section', {id:'network-reach', className:'card', hidden:true},
+    el('p', {className:'eyebrow', textContent:'Network'}),
+    el('h2', {textContent:'How the Macs reach each other'}),
+    ownerPart, mapPart, stateLine);
+  const anchor = document.getElementById('demo-target') || document.getElementById('demo-run');
+  if (anchor) anchor.after(card); else document.getElementById('main')?.append(card);
+  function describe(active) {
+    if (!active) return '';
+    if (active.reach === 'relay') return `This run: Macs on different networks; the Mycelium relay (${active.relay_url}) may carry the traffic when no direct path opens (the live paths say which is used)${active.portmapping ? ', portmapping requested (whether the router opened a port cannot be seen in this build)' : ''}.`;
+    if (active.reach === 'same_network') return 'This run: Macs on the same network.';
+    return 'This run: this Mac only (no network to another Mac).';
+  }
+  // Lane XB patch 3 (REVIEW XB2-04): the path each connection to another Mac uses NOW, as status
+  // samples it (relay or direct), not only the mode the run allows.
+  function livePaths(reach) {
+    const paths = Array.isArray(reach.paths) ? reach.paths : [];
+    if (!paths.length) return reach.active ? 'No connection to another Mac right now.' : '';
+    const kind = (p) => p.path === 'relay' ? 'through the Mycelium relay' : p.path === 'direct' ? 'direct' : 'no path chosen yet';
+    const what = (p) => ({node_control: 'control', artifact_chunk: 'model data', router: 'stage traffic'})[p.channel] || 'connection';
+    return `Live paths of this run now: ${paths.map((p) => `${kind(p)} (${what(p)}, ${p.direction === 'in' ? 'from' : 'to'} ${p.remote}…)`).join('; ')}.`;
+  }
+  function render(status) {
+    const reach = status.network_reach; const role = status.installation_role;
+    card.hidden = !reach || !(role === 'owner' || role === 'target');
+    if (card.hidden) return;
+    const owner = role === 'owner';
+    const running = ACTIVE_RUN.includes(status.owner_run?.state);
+    ownerPart.hidden = !owner;
+    sameRadio.checked = reach.next_run !== 'relay'; acrossRadio.checked = reach.next_run === 'relay';
+    sameRadio.disabled = acrossRadio.disabled = reachBusy || running;
+    mapBox.checked = reach.portmapping === true; mapBox.disabled = reachBusy;
+    const error = reach.error ? `${REACH_ERRORS[reach.error] || 'Network problem.'} (${reach.error})` : '';
+    stateLine.textContent = [note, error, describe(reach.active) || (owner ? `Next run: ${reach.next_run === 'relay' ? 'Macs on different networks (through the Mycelium relay)' : 'Macs on the same network'}.` : 'This Mac follows the owner’s choice for each run.'), livePaths(reach)].filter(Boolean).join(' ');
+  }
+  async function poll() {
+    try { render(await api('/api/status')); } catch (error) { /* the main poll reports a lost connection */ }
+  }
+  async function save(body, done) {
+    if (reachBusy) return;
+    reachBusy = true; note = '';
+    try { await api('/api/network/reach', body); note = done; }
+    catch (error) { note = `Not saved: ${REACH_ERRORS[error.message] || String(error.message).replaceAll('_', ' ')} (${error.message})`; }
+    finally { reachBusy = false; await poll(); }
+  }
+  sameRadio.addEventListener('change', () => void save({reach:'same_network'}, 'Saved: the next run uses Macs on the same network.'));
+  acrossRadio.addEventListener('change', () => void save({reach:'relay'}, 'Saved: the next run reaches Macs on different networks through the Mycelium relay.'));
+  mapBox.addEventListener('change', () => void save({portmapping:mapBox.checked}, mapBox.checked ? 'Portmapping on for this Mac (next run across networks).' : 'Portmapping off for this Mac.'));
+  void poll(); setInterval(() => void poll(), 3000);
+})();
+// ---- end network reach ----

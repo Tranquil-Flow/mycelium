@@ -375,6 +375,7 @@ fn two_socket_peer(rt: &tokio::runtime::Runtime, lan: IpAddr) -> (Endpoint, Sock
     let endpoint = rt
         .block_on(async {
             Endpoint::builder(presets::Minimal)
+                .portmapper_config(iroh::endpoint::PortmapperConfig::Disabled)
                 .relay_mode(RelayMode::Disabled)
                 .clear_address_lookup()
                 .clear_ip_transports()

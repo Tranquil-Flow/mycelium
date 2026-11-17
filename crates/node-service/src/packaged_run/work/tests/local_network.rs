@@ -831,3 +831,115 @@ fn the_slices_step_names_an_unanswered_dial_through_the_composed_wrapper() {
         "teardown did not take the workflow: {closed:?}"
     );
 }
+
+/// Lane XB patch 2 (REVIEW XB-12): across networks the joined Mac's advertised private address
+/// names nothing on this Mac's network. A relay run's step-6 dial without an answer is named
+/// `joined_mac_did_not_answer_via_relay` (relay advice, no same-network advice) and sends ZERO
+/// local-network permission probes; another cause passes unnamed, as on the LAN.
+#[test]
+fn a_relay_runs_unanswered_dial_is_named_via_the_relay_with_zero_local_network_probes() {
+    let f = Fixture::on(lan_on_loopback());
+    let mut ports = PackagedChainPorts::new(&f.host, None, None);
+    let probe = Scripted::new(Answer::Blocked);
+    ports.work.probe = probe.clone();
+    let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
+    let across = runtime::iroh_host::LanPolicy::with_explicit(vec![loopback])
+        .unwrap()
+        .across_networks("http://127.0.0.1:1".parse().unwrap());
+    {
+        let mut resident = lock(&ports.work.resident);
+        resident.network = Some(NetworkChoice(Some((loopback, across))));
+        resident.run = Some(("run-relay".into(), "dep-run-relay".into()));
+    }
+    let named = ports
+        .work
+        .named_dial_failure("control_call_failed:control_connect_timeout");
+    let (code, message) = refusal(Err(named.expect("named via the relay")));
+    assert_eq!(code, "joined_mac_did_not_answer_via_relay");
+    assert!(
+        message.contains("relay") && !message.contains("same Wi-Fi"),
+        "{message}"
+    );
+    assert!(
+        ports
+            .work
+            .named_dial_failure("member_consent_required")
+            .is_none(),
+        "another cause passes unnamed"
+    );
+    assert!(
+        probe.sent().is_empty(),
+        "no local-network probe across networks: {:?}",
+        probe.sent()
+    );
+    drop(f);
+}
+
+/// Lane XB patch 2 (decision D1, the owner's half): the owner's choice is read ONCE when a run
+/// starts (`new_run`) and signed into every announcement of that run; the run binds exactly
+/// that mode (a choice saved meanwhile waits for the next run), status names it, and teardown
+/// withdraws it. A damaged preference refuses the run's first step by name. Nothing is bound
+/// here (no relay is contacted).
+#[test]
+fn the_owner_signs_its_run_choice_once_per_run_and_binds_exactly_it() {
+    use crate::packaged_work::reach;
+    use api::run_exchange::work_network::{FIELD, RunReach};
+    let f = Fixture::on(lan_on_loopback());
+    let mut chain = Composed::new(&f.host, None, None);
+    let owner_root = f.root.join("owner");
+    let seed = f.host.with(|c| c.authority.seed.clone().unwrap());
+    let announced = || seed.exchange.announcement(None).to_value();
+    reach::save(
+        &owner_root,
+        reach::ReachChoice {
+            across_networks: true,
+            portmapping: false,
+        },
+    )
+    .unwrap();
+    chain.new_run("run-xb", "dep-run-xb", owner_run::Reason::Start, None, None);
+    let shipped: iroh::RelayUrl = runtime::iroh_host::MYCELIUM_RELAY_URL.parse().unwrap();
+    assert_eq!(
+        RunReach::from_value(&announced()),
+        Ok(RunReach::Relay(shipped.clone())),
+        "{}",
+        announced()
+    );
+    // Saved meanwhile: the running run keeps its choice.
+    reach::save(&owner_root, reach::ReachChoice::default()).unwrap();
+    let resolved = f.host.network.resolve_run_network("owner_run");
+    assert_eq!(resolved.reach, "relay");
+    assert_eq!(
+        resolved
+            .choice
+            .0
+            .as_ref()
+            .and_then(|(_, p)| p.relay().cloned()),
+        Some(shipped)
+    );
+    let mut env = Env { at: Instant::now() };
+    chain.teardown(false, &mut env).ok();
+    assert!(
+        announced().get(FIELD).is_none(),
+        "withdrawn: {}",
+        announced()
+    );
+    assert_eq!(
+        f.host.network.resolve_run_network("owner_run").reach,
+        "same_network"
+    );
+    // A damaged preference: the next run's steps are refused by name.
+    std::fs::write(owner_root.join(reach::FILE), b"{}").unwrap();
+    chain.new_run(
+        "run-xb2",
+        "dep-run-xb2",
+        owner_run::Reason::Start,
+        None,
+        None,
+    );
+    assert!(announced().get(FIELD).is_none());
+    let (code, message) = refusal(chain.run_step("model", &mut env));
+    assert_eq!(code, reach::INVALID);
+    assert!(message.contains("network setting"), "{message}");
+    chain.teardown(true, &mut env).ok();
+}

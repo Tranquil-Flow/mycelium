@@ -30,7 +30,7 @@ use crate::sidecar_telemetry::{
     unix_time_ms,
 };
 use crate::{
-    iroh_host::{LoopbackHost, validate_local_peer},
+    iroh_host::{LoopbackHost, validate_local_peer, validate_relays},
     iroh_wire::classify_response,
     sidecar_pool::{
         AdmissionOutcome, AttemptResult, CANCEL_CODE, ConfigureOutcome, ConfigureRefusal, Digest,
@@ -214,6 +214,9 @@ struct Shared<C> {
     endpoint: Endpoint,
     /// The oracle's `local_only` peer rule (`validate_peer`, `sidecar.rs:1852`) applies.
     local_only: bool,
+    /// The one relay the host registers at: a configured peer may name no other (lane XB patch
+    /// 2, D4).
+    relay: Option<iroh::RelayUrl>,
     state: Mutex<SidecarState>,
     addresses: Mutex<BTreeMap<EndpointKey, EndpointAddr>>,
     connections: Mutex<BTreeMap<(EndpointKey, u64), Connection>>,
@@ -884,6 +887,7 @@ impl<C: Clock + Send + Sync + 'static> PooledRouter<C> {
             limits,
             endpoint,
             local_only: host.mode().local_only(),
+            relay: host.relay_url().cloned(),
             state: Mutex::new(SidecarState::new(limits.pool)),
             addresses: Mutex::new(BTreeMap::new()),
             connections: Mutex::new(BTreeMap::new()),
@@ -924,6 +928,8 @@ impl<C: Clock + Send + Sync + 'static> PooledRouter<C> {
             if self.shared.local_only {
                 validate_local_peer(address).map_err(|_| PoolError::Address)?;
             }
+            // Lane XB patch 2 (REVIEW XB-01): no peer-supplied relay but this host's own.
+            validate_relays(address, self.shared.relay.as_ref()).map_err(|_| PoolError::Address)?;
         }
         let bindings = ordered
             .iter()

@@ -130,6 +130,8 @@ impl<'a, 'r, C: Clock> NodeControlClient<'a, 'r, C> {
                 let connection=ControlConnection(connection);
                 *opened.borrow_mut()=Some((connection.0.weak_handle(),connection.0.remote_id()));
                 self.host.confine(&connection.0,pin).map_err(|_| ControlError("control_path_refused"))?;
+                // Lane XB patch 4 (REVIEW XB3-03): this dial's live path is evidence too.
+                self.host.observe_path(&connection.0,"out");
                 if connection.0.remote_id().as_bytes()!=&request.fence.endpoint_id { return Err(ControlError("control_peer_mismatch")); }
                 current_authority(authority,request.fence)?;
                 let (mut send,mut recv)=timeout_at(deadline,connection.0.open_bi()).await.map_err(|_| ControlError("control_open_timeout"))?.map_err(|_| ControlError("control_open_failed"))?;

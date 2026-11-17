@@ -355,7 +355,9 @@ pub fn session_limits() -> Result<SessionLimits, SidecarError> {
 // ---- run_sidecar -------------------------------------------------------------------------
 
 pub struct SidecarConfig {
-    /// Relay selection of the network modes (ignored with `local_only`).
+    /// Relay selection of the network modes (ignored with `local_only`): the shipped one is
+    /// Mycelium's relay ([`Reach::Shipped`], lane XB1), overridable (tests use a dead loopback
+    /// port). No mode configures n0's relays, DNS or pkarr.
     pub reach: Reach,
     /// How long the address gate waits for a relay address before `ready` (the oracle's
     /// `READY_ADDRESS_WINDOW`, `ready_address.rs:45`). The registry id is

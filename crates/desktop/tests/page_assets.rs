@@ -359,3 +359,110 @@ fn the_shipped_page_offers_no_one_mac_chat_and_hides_the_model_card() {
         "{prepare}"
     );
 }
+
+/// Lane XB patch 2 (REVIEW XB-05, decisions D1/D2): the packaged window's page carries ONE
+/// contained network section: the owner's per-run choice between "Macs on the same network"
+/// (default) and "Macs on different networks (through the Mycelium relay)", and this Mac's
+/// portmapping preference (default off), both saved through the packaged action
+/// `/api/network/reach`, and the ACTIVE mode and a named error read back from
+/// `status.network_reach`. No dialog gates either choice. The `api` crate's copy stays the
+/// pinned v0.1.4 oracle asset (`crates/api/contracts/assets.json`): it never carries it.
+#[test]
+fn the_page_offers_the_network_choices_in_one_contained_section() {
+    const MIRROR: &str = include_str!("../../api/assets/desktop/app.js");
+    assert!(
+        !MIRROR.contains("/api/network/reach"),
+        "the api crate's oracle copy is unchanged"
+    );
+    for (name, page) in [("desktop", APP_JS)] {
+        let begin = "// ---- Network reach (lane XB patch 2) ----";
+        let end = "// ---- end network reach ----";
+        assert_eq!(page.matches(begin).count(), 1, "{name}: one section");
+        let whole = &page[page.find(begin).unwrap()..page.find(end).expect("closed section")];
+        // The code, not its comments, must carry every piece.
+        let section = &script_without_comments(whole);
+        for needed in [
+            "'/api/network/reach'",
+            "{reach:",
+            "{portmapping:",
+            "Macs on the same network",
+            "Macs on different networks (through the Mycelium relay)",
+            "network_reach",
+            "relay_unreachable",
+            ".active",
+        ] {
+            assert!(
+                section.contains(needed),
+                "{name}: the section lacks {needed}"
+            );
+        }
+        assert!(
+            !script_without_comments(section).contains("window.confirm("),
+            "{name}: no dialog gates a network choice"
+        );
+        assert!(
+            !page[..page.find(begin).unwrap()].contains("/api/network/reach"),
+            "{name}: nothing outside the section posts the action"
+        );
+    }
+}
+
+/// The network section's code (comments stripped), between its two markers.
+fn network_section() -> String {
+    let begin = "// ---- Network reach (lane XB patch 2) ----";
+    let end = "// ---- end network reach ----";
+    script_without_comments(&APP_JS[APP_JS.find(begin).unwrap()..APP_JS.find(end).unwrap()])
+}
+
+/// Lane XB patch 3 (REVIEW XB2-04): the section shows the LIVE path of each connection to another
+/// Mac from `status.network_reach.paths` (relay or direct, sampled when status is read), not only
+/// the configured mode, and names portmapping honestly: requested, its outcome not visible in this
+/// build; it never claims a mapping.
+#[test]
+fn the_network_section_shows_live_paths_and_portmapping_honestly() {
+    let section = network_section();
+    for needed in [
+        ".paths",
+        "Live paths of this run now",
+        "p.channel",
+        "model data",
+        "stage traffic",
+        "through the Mycelium relay",
+        "direct",
+        "portmapping requested",
+        "cannot be seen in this build",
+    ] {
+        assert!(section.contains(needed), "the section lacks {needed}");
+    }
+    assert!(
+        !section.contains("portmapped"),
+        "the section never claims a mapping"
+    );
+}
+
+/// Lane XB patch 3 (REVIEW XB2-07): the section says what crosses which path. Same network: model
+/// and stage traffic stay on the network while the run's control messages still pass through the
+/// owner's relay link (never "nothing goes through the internet"). Different networks: the relay
+/// sees the Macs' addresses (not the content: encrypted end to end) and direct paths are tried,
+/// including to addresses the other Mac reports. A Mac that cannot cross networks gets
+/// network advice (one network, no VPN), not "update Mycelium".
+#[test]
+fn the_network_section_says_what_crosses_which_path() {
+    let section = network_section();
+    for needed in [
+        "Model and stage traffic stay on your network",
+        "control messages still pass through the owner’s relay link",
+        "sees the Macs’ addresses",
+        "never the content",
+        "encrypted end to end",
+        "tries direct paths",
+        "addresses the other Mac reports",
+        "turn off any VPN",
+    ] {
+        assert!(section.contains(needed), "the section lacks {needed}");
+    }
+    assert!(
+        !section.contains("nothing goes through the internet"),
+        "no unqualified privacy promise"
+    );
+}
