@@ -179,7 +179,11 @@ pub fn bound_as_signed(signed: &RunReach, choice: &NetworkChoice) -> Result<(), 
 }
 /// The owner's choice for the run starting now, in its signed form (its relay: this Mac's).
 pub fn owner_choice(root: &Path, relay: &Reach) -> Result<RunReach, &'static str> {
-    if load(root)?.across_networks {
+    run_reach(load(root)?, relay)
+}
+/// The signed reach of a run started under the stored `choice`.
+fn run_reach(choice: ReachChoice, relay: &Reach) -> Result<RunReach, &'static str> {
+    if choice.across_networks {
         Ok(RunReach::Relay(relay.relay_url().map_err(|_| INVALID)?))
     } else {
         Ok(RunReach::SameNetwork)
@@ -236,6 +240,13 @@ pub struct State {
     run: Mutex<Option<Result<(RunReach, bool), &'static str>>>,
     /// Joined Mac: the run whose work it first started, with its portmapping then (XB2-05).
     member_run: Mutex<Option<(String, bool)>>,
+    /// Lane XB patch 4 (REVIEW XB3-01): the one transaction over this Mac's preference file and
+    /// the owner run's snapshot of it. The window's action holds it from its load to its save
+    /// (its run check included) and the runner's [`State::begin_run`] from its read to the
+    /// installed snapshot, so a run starts with a choice that was saved (never a pair torn
+    /// between two saves) and a reach change either lands before the run's snapshot (and is the
+    /// run's) or is refused because the run holds one. Order: this lock, then `run`.
+    preferences: Mutex<()>,
     active: Mutex<Option<Value>>,
     refusal: Mutex<Option<Refusal>>,
     /// Test-only (REVIEW XB2-06): the window action's next run waits here between its load and
@@ -254,6 +265,7 @@ impl State {
             relay,
             run: Mutex::new(None),
             member_run: Mutex::new(None),
+            preferences: Mutex::new(()),
             active: Mutex::new(None),
             refusal: Mutex::new(None),
             #[cfg(test)]
@@ -272,9 +284,12 @@ impl State {
     /// Owner: the choice of the run starting now, read once and kept for the run, with this
     /// Mac's portmapping preference (REVIEW XB2-05: frozen with the run, like the choice; a
     /// change saved meanwhile applies to the next run).
+    /// Patch 4 (REVIEW XB3-01): one read of the preference file gives both values, under the
+    /// preference transaction the window's action holds (see `preferences`).
     pub fn begin_run(&self, root: &Path) -> Result<RunReach, &'static str> {
-        let choice = owner_choice(root, &self.relay)
-            .and_then(|choice| portmapping(root).map(|portmapping| (choice, portmapping)));
+        let _transaction = held(&self.preferences);
+        let choice =
+            load(root).and_then(|stored| Ok((run_reach(stored, &self.relay)?, stored.portmapping)));
         *held(&self.run) = Some(choice.clone());
         *held(&self.active) = None;
         choice.map(|(choice, _)| choice)
@@ -383,15 +398,8 @@ pub fn action(
     body: &Map<String, Value>,
     owner: bool,
 ) -> Result<Value, &'static str> {
+    let transaction = held(&state.preferences);
     let mut stored = load(root).unwrap_or_default();
-    #[cfg(test)]
-    {
-        // Taken first: the hook never runs while the slot's lock is held.
-        let hold = held(&state.after_load).take();
-        if let Some(hold) = hold {
-            hold();
-        }
-    }
     match (body.len(), body.get("reach"), body.get("portmapping")) {
         (1, Some(reach), None) => {
             if !owner {
@@ -409,7 +417,18 @@ pub fn action(
         (1, None, Some(Value::Bool(on))) => stored.portmapping = *on,
         _ => return Err("invalid_request"),
     }
+    #[cfg(test)]
+    {
+        // Taken first: the hook never runs while the slot's lock is held. It runs after the
+        // action's checks, just before its save (REVIEW XB3-01: the run check is part of the
+        // window a runner could otherwise slip into).
+        let hold = held(&state.after_load).take();
+        if let Some(hold) = hold {
+            hold();
+        }
+    }
     save(root, stored)?;
+    drop(transaction);
     Ok(state.status(root))
 }
 /// Lane XB3 at a run's start: a `relay` run whose relay cannot be reached fails closed with
@@ -920,5 +939,79 @@ mod tests {
         assert_eq!(load(&dir), Ok(ReachChoice::default()));
         assert_eq!(state.status(&dir)["error"], Value::Null);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// REVIEW XB3-01: the runner's snapshot (`begin_run`, on Start's run thread, outside the
+    /// window's action mutex) against a reach change in flight. The change is held after its
+    /// checks (no run holds a choice yet), just before its save, while the runner takes the run's
+    /// snapshot on another thread (waited for up to 1 s). Without one transaction the runner reads
+    /// the OLD choice and the change then saves and answers 200 although the run holds the old
+    /// one; with it the runner waits for the save and the run's snapshot is the saved choice.
+    #[test]
+    fn a_run_starting_during_a_reach_change_takes_the_saved_choice() {
+        use std::{sync::Arc, sync::mpsc, time::Duration};
+        let dir = root("xb301");
+        let state = Arc::new(State::new(Reach::Shipped));
+        let (start, started) = mpsc::channel::<()>();
+        let (began, runner_began) = mpsc::channel::<()>();
+        let runner = {
+            let (state, dir) = (state.clone(), dir.clone());
+            std::thread::spawn(move || {
+                started.recv().unwrap();
+                let run = state.begin_run(&dir);
+                began.send(()).unwrap_or_default();
+                run
+            })
+        };
+        let inside = Arc::new(std::sync::Mutex::new(None));
+        {
+            let inside = inside.clone();
+            state.hold_after_load(Box::new(move || {
+                start.send(()).unwrap();
+                let began = runner_began.recv_timeout(Duration::from_secs(1)).is_ok();
+                *inside.lock().unwrap() = Some(began);
+            }));
+        }
+        let body = json!({"reach": "relay"}).as_object().unwrap().clone();
+        let answer = action(&dir, &state, &body, true);
+        let run = runner.join().unwrap();
+        assert!(answer.is_ok(), "{answer:?}");
+        assert_eq!(
+            *inside.lock().unwrap(),
+            Some(false),
+            "the run took its snapshot inside the change's transaction"
+        );
+        assert_eq!(run, Ok(RunReach::Relay(mycelium())));
+        assert_eq!(
+            state.run_binding(),
+            Some(Ok((RunReach::Relay(mycelium()), false)))
+        );
+        assert_eq!(load(&dir).map(ReachChoice::name), Ok("relay"));
+        // Once the run holds its snapshot, a reach change is refused and a portmapping change
+        // is saved for the next run only.
+        assert_eq!(
+            action(
+                &dir,
+                &state,
+                &body_of(json!({"reach": "same_network"})),
+                true
+            ),
+            Err(RUN_ACTIVE)
+        );
+        action(&dir, &state, &body_of(json!({"portmapping": true})), true).unwrap();
+        assert_eq!(
+            state.run_binding(),
+            Some(Ok((RunReach::Relay(mycelium()), false)))
+        );
+        state.end_run();
+        assert_eq!(state.begin_run(&dir), Ok(RunReach::Relay(mycelium())));
+        assert_eq!(
+            state.run_binding(),
+            Some(Ok((RunReach::Relay(mycelium()), true)))
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+    fn body_of(v: Value) -> Map<String, Value> {
+        v.as_object().unwrap().clone()
     }
 }
