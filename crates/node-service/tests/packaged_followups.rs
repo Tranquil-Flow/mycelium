@@ -71,6 +71,70 @@ fn packaged_owner_resume_refuses_a_regular_file_at_the_tls_directory() {
     std::fs::remove_dir_all(&state).unwrap_or_default();
 }
 
+/// A seed that cannot be reopened at launch keeps the swarm (b284277e: the persisted authority is
+/// not discarded, so the page still shows the swarm and its retained membership, as v0.1.4's
+/// `authority.status()` does for a swarm with no coordinator, authority.py:669-674) while every
+/// action answers the reopen's code, as v0.1.4, whose launch raises it and serves nothing
+/// (app.py:613-626, __main__.py:174-209 @ f4e366e9). The application is not running. Once the key
+/// is back, the relaunch serves the same swarm.
+#[test]
+fn packaged_owner_keeps_its_swarm_while_its_seed_cannot_reopen() {
+    let state = created_owner("kept-swarm");
+    let key = private(&state).join("seed-identity.json");
+    let record = std::fs::read(private(&state).join("owner-swarm.json")).unwrap();
+    let aside = state.with_extension("seed-key");
+    std::fs::rename(&key, &aside).unwrap();
+    let owner = launch(&state);
+    let status = owner.status();
+    assert_eq!(
+        (
+            &status["running"],
+            &status["authority"]["swarm_created"],
+            &status["authority"]["membership_state"],
+        ),
+        (&json!(false), &json!(true), &json!("retained")),
+        "{status}"
+    );
+    let code = "seed_authority_key_missing".to_owned();
+    for (path, body) in [
+        ("/api/start", json!({})),
+        ("/api/create", json!({"consent": consent(4_000_000_000)})),
+        ("/api/stop", json!({})),
+        (
+            "/api/network/start",
+            json!({"relay_acknowledged": true, "max_seconds": 1800, "provider": "external",
+                   "public_origin": "https://v02-packaged-owner.example.org", "proxy_port": macs::free_port()}),
+        ),
+    ] {
+        assert_eq!(
+            refusal(&owner.post(path, body)),
+            (409, code.clone()),
+            "{path}"
+        );
+    }
+    assert!(!key.exists(), "a fresh seed key was created");
+    assert_eq!(owner.quit(), Ok(Poll::Verified));
+    std::fs::rename(&aside, &key).unwrap();
+    let owner = launch(&state);
+    let status = owner.status();
+    assert_eq!(
+        (
+            &status["running"],
+            &status["authority"]["swarm_created"],
+            &status["authority"]["membership_state"],
+        ),
+        (&json!(true), &json!(true), &json!("current")),
+        "{status}"
+    );
+    assert_eq!(owner.post("/api/start", json!({})).0, 200);
+    assert_eq!(
+        std::fs::read(private(&state).join("owner-swarm.json")).unwrap(),
+        record
+    );
+    assert_eq!(owner.quit(), Ok(Poll::Verified));
+    std::fs::remove_dir_all(&state).unwrap_or_default();
+}
+
 /// A fresh owner (no swarm, nothing prepared) stops and starts again: `/api/stop` then `/api/start`
 /// answer 200 (app.py:1626-1640; the partial-state guard does not fire, REVIEW-laneS1R M6).
 #[test]
