@@ -357,6 +357,16 @@ fn watched_step(
         refused: std::cell::RefCell::new(None),
     };
     let outcome = step(&mut watch);
+    // Patch 4 (REVIEW XB3-04): a shared step can return a participant's reach refusal itself as
+    // its raw code (observe's `raise_member_refusal` reads the reports after the watch's last
+    // check). That code is reconciled with the same scoped report before it is returned, so the
+    // owner still sees the joined Mac's named refusal. Stop and every other outcome pass as
+    // they are.
+    let raw_reach_refusal = matches!(&outcome, Err(StepError::Refused(raw))
+        if crate::packaged_work::reach::MEMBER_REFUSALS.contains(&raw.code.as_str()));
+    if raw_reach_refusal {
+        watch.refused();
+    }
     match watch.refused.into_inner() {
         Some(refused) => Err(refused),
         None => outcome,

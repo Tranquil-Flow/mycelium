@@ -8,6 +8,7 @@ use super::*;
 use owner_run::steps::compile::{BuildPoll, CompileContext, CompileInputs, CompilePort};
 use owner_run::steps::exchange::{Announcement, ClockSkew, MemberRow, ReportsPort};
 use owner_run::steps::model::{ModelStepOutput, PreparedModel, PreparedSource};
+use owner_run::steps::observe::ObservePort;
 use std::{cell::RefCell, collections::BTreeMap, rc::Rc};
 
 const RUN: &str = "run-xb4";
@@ -23,9 +24,12 @@ const LATE: &str = "joined-mac-late-c";
 type Reports = Rc<RefCell<BTreeMap<String, Value>>>;
 
 /// The run's exchange: every report it holds (keyed by node) and the live joined members.
+/// `arrives` lands in it at the step's first local tick (`tick_local` is the first call of a
+/// progress wait's predicate, right after the wait's Stop check).
 struct Exchange {
     reports: Reports,
     members: Vec<String>,
+    arrives: Option<(String, Value)>,
 }
 impl ReportsPort for Exchange {
     fn forget_reports(&mut self) {}
@@ -54,7 +58,11 @@ impl ReportsPort for Exchange {
     fn clock_skew(&mut self, _: &[String]) -> Result<Option<ClockSkew>, StepError> {
         Ok(None)
     }
-    fn tick_local(&mut self) {}
+    fn tick_local(&mut self) {
+        if let Some((node, report)) = self.arrives.take() {
+            self.reports.borrow_mut().insert(node, report);
+        }
+    }
 }
 
 /// The run's environment: a clock that advances by each pause, never stopped by the owner.
@@ -135,6 +143,7 @@ fn collect(reports: &Reports, members: &[&str]) -> (Result<(), StepError>, RunSt
     let mut exchange = Exchange {
         reports: reports.clone(),
         members: members.iter().map(|m| (*m).to_owned()).collect(),
+        arrives: None,
     };
     let mut state = state();
     let mut env = Env::default();
@@ -288,6 +297,7 @@ fn compile(arrives: (&str, Value)) -> Result<(), StepError> {
     let mut exchange = Exchange {
         reports: reports.clone(),
         members: vec![JOINED.into()],
+        arrives: None,
     };
     let mut port = Compile {
         reports: reports.clone(),
@@ -329,5 +339,112 @@ fn in_compile_only_a_selected_participants_refusal_is_named() {
     assert!(
         !code(&outsider).is_some_and(|c| c.starts_with("joined_mac_")),
         "an unselected Mac's refusal named the compile's failure: {outsider:?}"
+    );
+}
+
+/// The observation context of a run whose facts nodes are the owner and the joined Mac.
+struct Observe;
+impl ObservePort for Observe {
+    fn prepare(
+        &mut self,
+        _: &str,
+        _: &str,
+        _: &[Value],
+    ) -> Result<(), owner_run::chain::PortError> {
+        Ok(())
+    }
+    fn rebuild(
+        &mut self,
+        _: &str,
+        _: &str,
+        _: &[Value],
+    ) -> Result<String, owner_run::chain::PortError> {
+        unreachable!("a Start run never rebuilds")
+    }
+    fn facts_nodes(&mut self) -> Vec<String> {
+        vec![JOINED.into(), OWNER.into()]
+    }
+    fn offers(&mut self) -> Vec<(String, String)> {
+        vec![(JOINED.into(), "offer-b".into())]
+    }
+    fn collect(&mut self) -> Result<(), owner_run::chain::PortError> {
+        unreachable!("the test ends in the bootstrap wait")
+    }
+    fn observed_hosts(&mut self) -> Vec<Option<String>> {
+        unreachable!("the test ends in the bootstrap wait")
+    }
+    fn retire_bootstrap(&mut self) -> Result<(), owner_run::chain::PortError> {
+        unreachable!("the test ends in the bootstrap wait")
+    }
+}
+
+/// REVIEW XB3-04: in observe the selected joined Mac's refusal arrives AFTER the wait's Stop check
+/// and before the step reads the reports (`all_in` -> `raise_member_refusal`), so the shared step
+/// itself returns the joined Mac's raw code with no further check of the watch. The owner still
+/// gets the joined Mac's named refusal, not the raw `work_network_unavailable`.
+#[test]
+fn a_refusal_that_observe_returns_itself_is_still_named() {
+    let reports: Reports = Rc::default();
+    let mut exchange = Exchange {
+        reports: reports.clone(),
+        members: vec![JOINED.into()],
+        arrives: Some((JOINED.into(), refusal(RUN, json!(DEPLOYMENT)))),
+    };
+    let mut state = state();
+    state.participants = vec![JOINED.into(), OWNER.into()];
+    let mut env = Env::default();
+    let read = || Value::Object(reports.borrow().clone().into_iter().collect());
+    let start = state.participants.clone();
+    let outcome = watched_step(
+        &mut env,
+        &read,
+        (RUN.into(), DEPLOYMENT.into()),
+        start,
+        |watch| {
+            owner_run::steps::observe::run_observe_step(
+                watch,
+                &mut exchange,
+                &mut Observe,
+                &mut state,
+                1.0,
+            )
+        },
+    );
+    assert_eq!(
+        code(&outcome).as_deref(),
+        Some("joined_mac_network_refused"),
+        "{outcome:?}"
+    );
+    assert_eq!(env.pauses, 0, "the refusal came from the step's own read");
+}
+
+/// The same raw outcome from a Mac outside the run is not this run's refusal: unchanged. (A
+/// shared step only returns a participant's code; this pins that the re-check is scoped too.)
+#[test]
+fn a_raw_member_code_without_a_participants_report_passes_unchanged() {
+    let reports: Reports = Rc::default();
+    reports
+        .borrow_mut()
+        .insert(LATE.into(), refusal(RUN, json!(DEPLOYMENT)));
+    let mut env = Env::default();
+    let read = || Value::Object(reports.borrow().clone().into_iter().collect());
+    let outcome = watched_step(
+        &mut env,
+        &read,
+        (RUN.into(), DEPLOYMENT.into()),
+        vec![JOINED.into(), OWNER.into()],
+        |_| Err(owner_run::OwnerRunError::new("work_network_unavailable").into()),
+    );
+    assert_eq!(code(&outcome).as_deref(), Some("work_network_unavailable"));
+    let stopped = watched_step(
+        &mut env,
+        &read,
+        (RUN.into(), DEPLOYMENT.into()),
+        vec![LATE.into()],
+        |_| Err(StepError::Stopped),
+    );
+    assert!(
+        matches!(stopped, Err(StepError::Stopped)),
+        "a genuine Stop stays a Stop: {stopped:?}"
     );
 }
