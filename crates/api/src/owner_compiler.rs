@@ -190,6 +190,9 @@ pub struct Compiler<H: ChainHost> {
     cancel: Arc<std::sync::atomic::AtomicBool>,
     identity: Option<(String, String)>,
     native_program: crate::native_compiler::ProgramSelection,
+    /// The stage worker's own reservation the compile plans each member's share with (lane A,
+    /// B7 / CAP-1); the packaged composition supplies it, `None` keeps the modelled plan.
+    stage_reservation: Option<planner::chain_compile::StageReservation>,
 }
 impl<H: ChainHost> Compiler<H> {
     pub fn new(core: H::Weak, observation: Observation<H>) -> Self {
@@ -210,7 +213,21 @@ impl<H: ChainHost> Compiler<H> {
             cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             identity: None,
             native_program: crate::native_compiler::ProgramSelection::Environment,
+            stage_reservation: None,
         }
+    }
+    /// Lane A (B7 / CAP-1): plan every member's memory share with the stage worker's own
+    /// reservation (the packaged composition passes `native_selection`'s), so the share the member
+    /// then enforces on its worker can hold that worker.
+    pub fn set_stage_reservation(
+        &mut self,
+        reservation: Option<planner::chain_compile::StageReservation>,
+    ) {
+        self.stage_reservation = reservation;
+    }
+    /// The reservation [`Compiler::set_stage_reservation`] installed.
+    pub fn stage_reservation(&self) -> Option<planner::chain_compile::StageReservation> {
+        self.stage_reservation
     }
     /// Packaged composition supplies the identity captured by startup admission.
     /// None disables the producer explicitly. It never enables environment lookup.
@@ -459,6 +476,7 @@ impl<H: ChainHost> Compiler<H> {
             current_members,
             keys: json!({"gossip":[seed.coordinator.signer().public_key_record()], "load_proof":keys}),
             epoch: 0,
+            stage_reservation: self.stage_reservation,
         };
         self.retain_prepared_source(source, &inputs, &observations)?;
         Ok(inputs)
@@ -824,6 +842,7 @@ pub fn public_compile<H: ChainHost>(
         epoch: input.epoch,
         now: input.now,
         policy: &policy,
+        stage_reservation: input.stage_reservation,
     })
     .map_err(|_| refusal())?;
     compiler.retire_bootstrap().map_err(|_| refusal())?;

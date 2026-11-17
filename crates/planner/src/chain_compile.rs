@@ -254,7 +254,17 @@ pub struct PrepareInput<'a> {
     /// `time.time()` (wall clock, seconds).
     pub now: f64,
     pub policy: &'a ChainPolicy,
+    /// The memory the stage worker itself reserves for a layer range (lane A, B7 / CAP-1); `None`
+    /// keeps the oracle's modelled plan (every oracle-parity replay).
+    pub stage_reservation: Option<StageReservation>,
 }
+
+/// The stage worker's own memory reservation (lane A, B7 / CAP-1): `(model_id, [start, end),
+/// total_layers, context_tokens)` -> the bytes the worker's native admission holds against its
+/// prepare's `memory` (`node-service` `native_selection::stage_reservation`), or `None` when the
+/// host has no native figure for that model. The planner holds no native formula; the packaged
+/// host supplies it, so the compile announces a share the member's guard can actually enforce.
+pub type StageReservation = fn(&str, [u64; 2], u64, u64) -> Option<u64>;
 
 /// What the route builder (`scripts/build_qwen_live_route.build`) is called with, in the planner's terms.
 #[derive(Debug, Clone)]

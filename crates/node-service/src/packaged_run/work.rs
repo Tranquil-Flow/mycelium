@@ -136,6 +136,37 @@ fn check_stage_memory(
     }
     Ok(())
 }
+/// The memory a stage's prepare will hold its worker to (`NativeShard::memory_limit`), as the
+/// slices step can know it: the owner's own stage, its contributor's standing grant (the
+/// compile's records carry none for the owner: v0.1.4's owner holds no grant); a joined Mac's,
+/// its signed report's caps (`joined_member::planning_caps` = its standing consent).
+fn stage_memory_limit(state: &RunState, contributor: &Path, node: &str) -> Option<u64> {
+    if state.local_node.as_deref() == Some(node) {
+        api::preferences::standing_consent::load(contributor)
+            .ok()
+            .flatten()
+            .and_then(|g| g["caps"]["max_memory_bytes"].as_u64())
+    } else {
+        state
+            .member_records
+            .as_ref()
+            .and_then(|r| r[node]["caps"]["max_memory_bytes"].as_u64())
+    }
+}
+/// The slices step's memory check over the run's own consent sources (lane A, CAP-4: the
+/// production wiring a test can reach, not a closure each test writes for itself).
+fn check_run_stage_memory(
+    request: &planner::chain_compile::BuildRequest,
+    state: &RunState,
+    contributor: &Path,
+    tokens: usize,
+) -> Result<(), StepError> {
+    check_stage_memory(
+        request,
+        &|node| stage_memory_limit(state, contributor, node),
+        tokens,
+    )
+}
 /// Retry the owners a failed close retained: first the member Work (its repeated teardown
 /// retries the exact unproven member links), and only once every member stage is proven,
 /// the local Service whose control loop those links reach. Unresolved owners stay retained.
@@ -670,27 +701,10 @@ impl Work {
                 serde_json::from_str(stage_contract::native_proof::QWEN3_PACKED_ORACLE)
                     .map_err(|_| refused("native_reference_invalid"))?;
             let tokens = stage_tokens(request, &oracle)?;
-            // The memory each stage's prepare holds its worker to (`NativeShard::memory_limit`):
-            // the owner's own stage, its contributor's standing grant (the compile's records
-            // carry none for the owner: v0.1.4's owner holds no grant); a joined Mac's, its signed
-            // report's caps (`joined_member::planning_caps` = its standing consent).
             let contributor = self
                 .host
                 .with(|c| owner_ports::contributor_dir(&c.authority.root));
-            let consent = |node: &str| {
-                if state.local_node.as_deref() == Some(node) {
-                    api::preferences::standing_consent::load(&contributor)
-                        .ok()
-                        .flatten()
-                        .and_then(|g| g["caps"]["max_memory_bytes"].as_u64())
-                } else {
-                    state
-                        .member_records
-                        .as_ref()
-                        .and_then(|r| r[node]["caps"]["max_memory_bytes"].as_u64())
-                }
-            };
-            check_stage_memory(request, &consent, tokens)?;
+            check_run_stage_memory(request, state, &contributor, tokens)?;
             // `_step_slices` (`demo_chain.py:838-839`): a whole-snapshot run has no slice to
             // fetch. v0.1.4 binds the snapshot each member already holds
             // (`bind_hf_prepositions`) and passes the step; only a stage-sharded compile has a
