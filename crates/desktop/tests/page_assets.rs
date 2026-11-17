@@ -97,7 +97,8 @@ fn after_the_relay_window_closes_the_owner_can_start_a_relay_again_from_the_page
 /// owner can answer `revoked`/`stale`, so only an expired membership gets the restart/reconnect
 /// advice (v0.2 records no confirmed-unreachable owner origin: `recovery_error` is not a reachability
 /// verdict). Revoked/stale: the owner ended or replaced this Mac's membership and must add it
-/// again. Retained: renewal is retrying. Unknown, and any state the page does not know: not known
+/// again. Retained: renewal is retrying. Unknown (the seed does not recognise this Mac): the owner's
+/// pick (a), ask the owner to add it again (B11 c). Any state the page does not know: not known
 /// yet. (Replaces patch 2's test, which accepted ONE message for every non-current state.)
 #[test]
 fn a_joined_macs_relay_line_follows_the_full_membership_state_matrix() {
@@ -172,6 +173,17 @@ fn a_joined_macs_relay_line_follows_the_full_membership_state_matrix() {
                 "{state}: {message}"
             ),
             "absent" => assert!(message.contains("no membership"), "{state}: {message}"),
+            // B11(c), owner pick (a) (ledger rows 100-101): `unknown` is the disposition the seed
+            // answered (`peer_member_unknown`: it does not recognise this Mac), so the line says
+            // exactly that and who acts: "The owner's swarm doesn't recognise this Mac — ask the
+            // owner to add it again". A state the page does not know keeps "not known yet".
+            "unknown" => assert!(
+                message.contains("swarm doesn")
+                    && message.contains("recognise this mac")
+                    && message.contains("ask the owner to add it again")
+                    && !message.contains("not known yet"),
+                "{state}: {message}"
+            ),
             _ => assert!(message.contains("not known yet"), "{state:?}: {message}"),
         }
         assert_eq!(
