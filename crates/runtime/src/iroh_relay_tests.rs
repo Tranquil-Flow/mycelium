@@ -166,3 +166,60 @@ fn a_relay_mode_host_refuses_a_peer_naming_a_foreign_relay() {
         host.close(&clock, after(BudgetId::RouterClose)).unwrap();
     }
 }
+
+/// The relays a builder's final configuration registers at, read from its `Debug` (the relay
+/// map's `RelayUrl("…")` entries), and whether its portmapper is off.
+fn configured(builder: &iroh::endpoint::Builder) -> (std::collections::BTreeSet<String>, bool) {
+    let shape = format!("{builder:?}");
+    let relays = shape
+        .split("RelayUrl(\"")
+        .skip(1)
+        .filter_map(|rest| rest.split('"').next())
+        .map(str::to_owned)
+        .collect();
+    let off = shape.matches("portmapper_config: Disabled").count() == 1
+        && !shape.contains("portmapper_config: Enabled");
+    (relays, off)
+}
+
+/// Lane XB patch 2 (REVIEW XB-09): the default-off guard is structural. EVERY product endpoint
+/// shape ([`NetworkMode::ALL`]) is built through the one product builder ([`super::mode_builder`],
+/// which `bind` uses) and its FINAL configuration is read: portmapping off (a later override or an
+/// explicit `Enabled` would show), and exactly its own relay set: Mycelium's in the relay modes,
+/// the run's across networks, none on the LAN or local only. Only a cross-network policy that
+/// asked for portmapping turns it on.
+#[test]
+fn every_product_endpoint_shape_is_built_with_portmapping_off_and_only_its_relay() {
+    use super::{NetworkMode as M, mode_builder};
+    let mycelium: std::collections::BTreeSet<String> =
+        ["https://relay.mycelium.now/".to_owned()].into();
+    let run: std::collections::BTreeSet<String> = [dead_relay().to_string()].into();
+    let across = LanPolicy::private_only().across_networks(dead_relay());
+    for (at, mode) in M::ALL.into_iter().enumerate() {
+        assert_eq!(mode.listed(), at, "{mode:?} is listed once, in order");
+        let admission = Admission::new(LanPolicy::with_explicit(vec![LOOPBACK]).unwrap(), 4, 4);
+        let transport = Arc::new(LanTransport::bind(LOOPBACK, admission).unwrap());
+        let builder = mode_builder(
+            mode,
+            &Reach::Shipped,
+            Some((LOOPBACK, &across)),
+            Some(transport),
+        )
+        .unwrap();
+        let (relays, off) = configured(&builder);
+        assert!(off, "{mode:?}: portmapping off: {builder:?}");
+        let expected = match mode {
+            M::Production | M::ForceRelay => mycelium.clone(),
+            M::CrossNetwork => run.clone(),
+            M::LocalOnly | M::DirectLan => Default::default(),
+        };
+        assert_eq!(relays, expected, "{mode:?}: exactly its relay set");
+    }
+    // The one opt-in: a cross-network policy whose Mac chose portmapping.
+    let mapped = across.clone().with_portmapping(true);
+    let builder = mode_builder(M::CrossNetwork, &Reach::Shipped, Some((LOOPBACK, &mapped)), None)
+        .unwrap();
+    assert!(!configured(&builder).1, "the chosen portmapping is on");
+    // The local mailbox carrier's builder (api::managed_carrier) is the local-only one.
+    assert_eq!(configured(&super::local_builder().unwrap()), (Default::default(), true));
+}

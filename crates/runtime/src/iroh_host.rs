@@ -321,6 +321,25 @@ pub fn validate_lan_peer(peer: &EndpointAddr, policy: &LanPolicy) -> Result<(), 
     Ok(())
 }
 impl NetworkMode {
+    /// Every mode (lane XB patch 2, XB-09: the structural builder guard iterates it). A new mode
+    /// fails to compile in [`NetworkMode::listed`] until it is listed here too.
+    pub const ALL: [NetworkMode; 5] = [
+        Self::LocalOnly,
+        Self::Production,
+        Self::ForceRelay,
+        Self::DirectLan,
+        Self::CrossNetwork,
+    ];
+    /// The index of `self` in [`NetworkMode::ALL`] (an exhaustive match: no wildcard).
+    pub const fn listed(self) -> usize {
+        match self {
+            Self::LocalOnly => 0,
+            Self::Production => 1,
+            Self::ForceRelay => 2,
+            Self::DirectLan => 3,
+            Self::CrossNetwork => 4,
+        }
+    }
     pub const fn local_only(self) -> bool {
         matches!(self, Self::LocalOnly)
     }
@@ -418,8 +437,30 @@ struct LanReuse {
     alpns: Vec<Vec<u8>>,
 }
 type Handshake = Result<(Connection, Option<Pin>), Error>;
-/// The builder of a local-only endpoint: 127.0.0.1, no relay, no address lookup.
-pub(crate) fn local_builder() -> Result<iroh::endpoint::Builder, Error> {
+/// Lane XB patch 2 (REVIEW XB-09): THE builder of every product endpoint shape, one per
+/// [`NetworkMode`] (the local mailbox carrier of `api::managed_carrier` is [`local_builder`]).
+/// Product code builds no iroh endpoint any other way (`runtime/tests/portmapping_default_off.rs`),
+/// and a unit test builds every [`NetworkMode::ALL`] shape through this function and reads its
+/// final configuration: portmapping off unless a cross-network policy asked, exactly its relay.
+pub(crate) fn mode_builder(
+    mode: NetworkMode,
+    reach: &Reach,
+    across: Option<(IpAddr, &LanPolicy)>,
+    lan: Option<Arc<LanTransport>>,
+) -> Result<iroh::endpoint::Builder, Error> {
+    match mode {
+        NetworkMode::LocalOnly => local_builder(),
+        NetworkMode::DirectLan => Ok(lan_builder(lan.ok_or(Error::Unavailable)?)),
+        NetworkMode::CrossNetwork => {
+            let (interface, policy) = across.ok_or(Error::Unavailable)?;
+            cross_builder(interface, policy)
+        }
+        NetworkMode::Production | NetworkMode::ForceRelay => relay_builder(mode, reach),
+    }
+}
+/// The builder of a local-only endpoint: 127.0.0.1, no relay, no address lookup, no
+/// portmapping. Also the local mailbox carrier's (`api::managed_carrier`).
+pub fn local_builder() -> Result<iroh::endpoint::Builder, Error> {
     Endpoint::builder(presets::Minimal)
         .relay_mode(RelayMode::Disabled)
         .clear_address_lookup()
@@ -758,17 +799,12 @@ impl<'a> LoopbackHost<'a> {
         };
         let lan_socket = lan_transport.as_ref().map(|t| t.local());
         let endpoint = runtime.block_on(async {
-            let mut builder = match mode {
-                NetworkMode::LocalOnly => local_builder()?,
-                NetworkMode::DirectLan => {
-                    lan_builder(lan_transport.clone().ok_or(Error::Unavailable)?)
-                }
-                NetworkMode::CrossNetwork => {
-                    let (interface, policy) = across.as_ref().ok_or(Error::Unavailable)?;
-                    cross_builder(*interface, policy)?
-                }
-                NetworkMode::Production | NetworkMode::ForceRelay => relay_builder(mode, reach)?,
-            }
+            let mut builder = mode_builder(
+                mode,
+                reach,
+                across.as_ref().map(|(interface, policy)| (*interface, policy)),
+                lan_transport.clone(),
+            )?
             .alpns(alpns);
             if let Some(secret) = secret {
                 builder = builder.secret_key(secret);
