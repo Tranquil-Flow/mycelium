@@ -1202,7 +1202,10 @@ fn a_publish_that_fails_after_a_stage_prepared_closes_that_stage_before_its_disc
         members[1].0.lock().unwrap().commands.clone(),
     );
     eprintln!("B5_QV_CLOSE first={first:?} second={second:?} state={state}");
-    let (close, discard) = (position(&first, "native_close"), position(&first, "discard"));
+    let (close, discard) = (
+        position(&first, "native_close"),
+        position(&first, "discard"),
+    );
     assert!(
         close.is_some() && close < discard,
         "the prepared stage is closed before its discard: {first:?}"

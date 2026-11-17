@@ -169,8 +169,15 @@ fn at_the_shell_deadline_a_relay_close_that_overruns_its_own_budgets_exits_3() {
         ),
         "a relay close past its own budgets is v0.1.4's relay_stop_failed (exit 3)"
     );
-    assert!(took >= budgets, "ended before the relay's budgets ran out: {took:?}");
-    assert_eq!(stops.load(Ordering::SeqCst), 1, "the workflow Stop was issued once");
+    assert!(
+        took >= budgets,
+        "ended before the relay's budgets ran out: {took:?}"
+    );
+    assert_eq!(
+        stops.load(Ordering::SeqCst),
+        1,
+        "the workflow Stop was issued once"
+    );
 }
 
 /// Proves: B-RUN-10 (REVIEW-laneSRV-r3-astra R3A-01, the delayed close thread: the run ended and

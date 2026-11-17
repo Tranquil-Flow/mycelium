@@ -927,6 +927,9 @@ impl WorkStop {
         Ok(true)
     }
 }
+/// The run's close found the owner's work still owed after its last retry (lane B, B5/QV: a stage
+/// the owner cannot prove released, e.g. a member worker its discard could not retire, D8).
+const OWNER_WORK_UNPROVEN: &str = "owner_work_cleanup_unproven";
 impl RunClose {
     pub fn new(config: RunConfig) -> Self {
         Self {
@@ -997,8 +1000,15 @@ impl RunClose {
                 closer.issue();
             }
             lock(&installed.runs).close();
-            owner_ports::stop_local_contributor(&installed.host)
-                .map_err(|_| "local_contributor_stop_failed")
+            // Lane B, B5/QV (owner ruling 15 Nov, row 57; D8): what a failed close retained is
+            // retried once more here (the next close's own retry); still owed, Quit is unproven.
+            let settled = work::settle_debt(&installed.host).map_err(|code| {
+                eprintln!("owner run: {OWNER_WORK_UNPROVEN}:{code}");
+                OWNER_WORK_UNPROVEN
+            });
+            let contributor = owner_ports::stop_local_contributor(&installed.host)
+                .map_err(|_| "local_contributor_stop_failed");
+            settled.and(contributor)
         });
         self.closing = match spawned {
             Ok(worker) => Closing::Running {
@@ -1080,6 +1090,9 @@ impl RunClose {
             Closing::Running { worker, .. } => {
                 let result = match worker.join() {
                     Ok(Ok(())) => Ok(()),
+                    Ok(Err(OWNER_WORK_UNPROVEN)) => {
+                        Err(CleanupError::Unproven(OWNER_WORK_UNPROVEN))
+                    }
                     Ok(Err(code)) => {
                         eprintln!("owner run: {code}");
                         Err(CleanupError::Poll)

@@ -250,11 +250,15 @@ impl Network {
     /// Quit's relay step (`DemoApp.close`, app.py:1831, 1848-1850): a relay a Start is still
     /// bringing up is closed at once and no later Start brings one up (`application_closed`),
     /// then the relay this host keeps is closed.
-    pub fn quit(&self) {
+    ///
+    /// Lane B, B5/QV (owner ruling 15 Nov, row 57): `Err` names a work service whose close did
+    /// not prove its member custody (a stage it still holds): Quit must not say `Verified` then.
+    pub fn quit(&self) -> Result<(), String> {
         self.work_closed.store(true, Ordering::SeqCst);
-        self.close_work();
+        let work = self.close_work_proven();
         self.start_guard.close();
         self.close();
+        work
     }
     /// `_leave_fence`: no new work once a leave began.
     pub fn fenced(&self) -> bool {
@@ -735,11 +739,11 @@ pub struct RelayClose {
 enum RelayClosing {
     NotStarted,
     Running {
-        worker: std::thread::JoinHandle<()>,
+        worker: std::thread::JoinHandle<Result<(), String>>,
         until: std::time::Instant,
     },
     /// Past the deadline: the close is left to the process exit (the handle stays owned here).
-    Late(std::thread::JoinHandle<()>),
+    Late(std::thread::JoinHandle<Result<(), String>>),
     Done(Result<(), desktop::lifecycle::CleanupError>),
 }
 /// The relay step's close did not end within its own close budgets (REVIEW-laneCHATPAGE-p3-astra
@@ -804,8 +808,7 @@ impl RelayClose {
                     held.recv().unwrap_or(());
                 }
                 network.quit()
-            })
-        {
+            }) {
             Ok(worker) => RelayClosing::Running {
                 worker,
                 until: std::time::Instant::now() + allowance,
@@ -835,10 +838,18 @@ impl RelayClose {
                 Some(Err(RELAY_STOP_FAILED))
             }
             RelayClosing::Running { worker, .. } => {
-                let result = worker.join().map_err(|_| {
-                    eprintln!("relay_stop_failed: relay_close_panicked");
-                    desktop::lifecycle::CleanupError::Poll
-                });
+                let result = match worker.join() {
+                    Ok(Ok(())) => Ok(()),
+                    // Lane B, B5/QV: the joined Mac's work service still holds a stage (its
+                    // close printed `packaged_work_cleanup_unproven:<code>`).
+                    Ok(Err(_)) => Err(desktop::lifecycle::CleanupError::Unproven(
+                        "member_work_cleanup_unproven",
+                    )),
+                    Err(_) => {
+                        eprintln!("relay_stop_failed: relay_close_panicked");
+                        Err(desktop::lifecycle::CleanupError::Poll)
+                    }
+                };
                 self.closing = RelayClosing::Done(result);
                 Some(result)
             }

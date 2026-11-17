@@ -70,14 +70,21 @@ fn a_quit_whose_run_close_leaves_the_owners_work_owed_is_unproven() {
     eprintln!(
         "B5_QV_OWNER_DEBT failed={failed:?} owed={owed} quit={quit:?} kept={kept} control={control:?} settled={settled}"
     );
-    assert!(failed.is_err() && owed, "the fault must reach the owner's cleanup");
+    assert!(
+        failed.is_err() && owed,
+        "the fault must reach the owner's cleanup"
+    );
     assert_eq!(
         quit,
         Err(CleanupError::Unproven("owner_work_cleanup_unproven")),
         "Quit's run step said proven while the owner's work is still owed"
     );
     assert!(kept, "the unproven owner is kept for the next close");
-    assert_eq!(control, Ok(()), "the restored owner settles: the step is proven");
+    assert_eq!(
+        control,
+        Ok(()),
+        "the restored owner settles: the step is proven"
+    );
     assert!(settled, "the settled debt is released");
 }
 
@@ -121,5 +128,8 @@ fn a_joined_macs_quit_with_its_work_service_holding_a_stage_is_unproven() {
         "the joined Mac's Quit said proven while its work service holds a stage"
     );
     assert!(kept, "a failed close must not unlink the member's stage");
-    assert!(released, "the same Service owner releases it once the fault is gone");
+    assert!(
+        released,
+        "the same Service owner releases it once the fault is gone"
+    );
 }
