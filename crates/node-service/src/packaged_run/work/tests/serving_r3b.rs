@@ -122,6 +122,57 @@ fn at_the_shell_deadline_a_serving_quit_stops_the_workflow_before_it_may_exit() 
     );
 }
 
+/// Proves: CP3-01 (REVIEW-laneCHATPAGE-p3-astra) beside the run-only timeout above: at the shell's
+/// deadline the relay step starts its close, and that close does not end within its OWN close
+/// budgets (held here, as a tunnel child still unreaped after its terminate/wait and kill/wait
+/// would hold it). v0.1.4's `public_relay.close()` raises there (public_relay.py:445-447 @
+/// f4e366e9), `DemoApp.close` records `relay_stop_failed` (app.py:1848-1850) and the launcher
+/// exits 3 (__main__.py:219-223): Quit ends `Unproven("relay_stop_failed")` with exit 3, bounded by
+/// those budgets after the deadline; only the run's own join running out is the exit-0 `Deadline`.
+#[test]
+fn at_the_shell_deadline_a_relay_close_that_overruns_its_own_budgets_exits_3() {
+    let served = served();
+    let stops = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = stops.clone();
+    lock(&served.f.host.custody).work_stop = Some(Arc::new(move || {
+        count.fetch_add(1, Ordering::SeqCst);
+    }));
+    let (_core, mut cleanup) = window_quit(&served);
+    // Held until after the verdict (dropped first if an assertion unwinds).
+    let relay_held = cleanup.hold_relay_close();
+    let allowance = quit_allowance().unwrap();
+    let mut shutdown = Shutdown::new(cleanup, allowance).unwrap();
+    shutdown.request(QuitSource::Menu, Span::ZERO);
+    let budgets = crate::packaged_network::RelayClose::allowance().unwrap();
+    let began = Instant::now();
+    let until = began + budgets + patience();
+    let at_deadline = loop {
+        let state = shutdown.tick(allowance);
+        if state != State::Stopping || Instant::now() >= until {
+            break state;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let took = began.elapsed();
+    let exit = shutdown.exit_status();
+    drop(relay_held);
+    lock(&served.f.host.custody).work_stop = None;
+    eprintln!(
+        "CP3_01_RELAY_OVERRUN state={at_deadline:?} exit={exit:?} took_ms={}",
+        took.as_millis()
+    );
+    assert_eq!(
+        (at_deadline, exit),
+        (
+            State::Failed(CleanupError::Unproven("relay_stop_failed")),
+            Some(3)
+        ),
+        "a relay close past its own budgets is v0.1.4's relay_stop_failed (exit 3)"
+    );
+    assert!(took >= budgets, "ended before the relay's budgets ran out: {took:?}");
+    assert_eq!(stops.load(Ordering::SeqCst), 1, "the workflow Stop was issued once");
+}
+
 /// Proves: B-RUN-10 (REVIEW-laneSRV-r3-astra R3A-01, the delayed close thread: the run ended and
 /// the close thread is inside the workflow Stop when the shell's deadline arrives; the Quit stays
 /// pending (no exit status) until that Stop has returned, then exits 0, and the workflow is

@@ -727,6 +727,10 @@ impl Backend for PackagedActions {
 pub struct RelayClose {
     network: Arc<Network>,
     closing: RelayClosing,
+    /// TEST ONLY (lane B, CP3-01): the close thread waits for this before it closes anything, as
+    /// a tunnel child still unreaped after its terminate/wait and kill/wait would hold it.
+    #[cfg(test)]
+    held: Option<std::sync::mpsc::Receiver<()>>,
 }
 enum RelayClosing {
     NotStarted,
@@ -743,10 +747,17 @@ impl RelayClose {
         Self {
             network,
             closing: RelayClosing::NotStarted,
+            #[cfg(test)]
+            held: None,
         }
     }
+    /// TEST ONLY: see [`RelayClose::held`].
+    #[cfg(test)]
+    pub(crate) fn hold(&mut self, release: std::sync::mpsc::Receiver<()>) {
+        self.held = Some(release);
+    }
     /// The relay's own close budgets, summed.
-    fn allowance() -> Result<std::time::Duration, desktop::lifecycle::CleanupError> {
+    pub(crate) fn allowance() -> Result<std::time::Duration, desktop::lifecycle::CleanupError> {
         use budgets::{BudgetId as B, Entries};
         [
             B::PyMyceliumA13MacosPublicRelayTemporaryhttpsrelayCloseSelfProcessWaitL446,
@@ -776,9 +787,17 @@ impl RelayClose {
             }
         };
         let network = self.network.clone();
+        #[cfg(test)]
+        let held = self.held.take();
         self.closing = match std::thread::Builder::new()
             .name("packaged-relay-close".into())
-            .spawn(move || network.quit())
+            .spawn(move || {
+                #[cfg(test)]
+                if let Some(held) = held {
+                    held.recv().unwrap_or(());
+                }
+                network.quit()
+            })
         {
             Ok(worker) => RelayClosing::Running {
                 worker,

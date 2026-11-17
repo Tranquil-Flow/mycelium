@@ -274,6 +274,18 @@ impl Cleanup for AppCleanup {
         }
     }
 }
+#[cfg(test)]
+impl AppCleanup {
+    /// TEST ONLY (lane B, CP3-01): the relay step's close thread waits for the returned sender
+    /// (a send or its drop) before it closes anything.
+    pub(crate) fn hold_relay_close(&mut self) -> std::sync::mpsc::Sender<()> {
+        let (release, held) = std::sync::mpsc::channel();
+        if let Self::Service(quit) = self {
+            quit.relay.hold(held);
+        }
+        release
+    }
+}
 /// Quit's listing step, `swarm_publish.close` (swarm_publish.py:450-455 @ f4e366e9, called from
 /// `DemoApp.close` before the acquisition, app.py:1824-1829), as the headless launcher runs it
 /// (reconcile/laneB12f.md): `close(now, budget)` on its own thread (no new exchange starts, a live
