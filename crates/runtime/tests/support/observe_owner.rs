@@ -246,7 +246,7 @@ fn owner_run_step_collects_and_retires_the_real_runtime_context() {
     let mut state = RunState::new(RUN, DEP, Reason::Start);
     state.descriptors = cards();
     state.model = Some(owner_run::steps::model::ModelStepOutput {
-            forced_slice: false,
+        forced_slice: false,
         model_id: "model".into(),
         resolved_commit: "revision".into(),
         slice_mode: false,

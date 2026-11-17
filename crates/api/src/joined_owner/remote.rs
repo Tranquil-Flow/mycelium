@@ -236,16 +236,17 @@ fn drive(
     // at most one summary per period, and one outcome line when the operation ends.
     let mut failed_polls = runtime::repeats::Repeats::<u64>::new(runtime::repeats::period());
     let member = remote.addr.id.fmt_short().to_string();
-    let poll_outcome = |failed: &mut runtime::repeats::Repeats<u64>, id: u64, name: &str, outcome: &str| {
-        if let Some(line) = failed.outcome_line(
-            &id,
-            Instant::now(),
-            &format!("member result poll {id} ({name}) member={member}"),
-            outcome,
-        ) {
-            eprintln!("{line}");
-        }
-    };
+    let poll_outcome =
+        |failed: &mut runtime::repeats::Repeats<u64>, id: u64, name: &str, outcome: &str| {
+            if let Some(line) = failed.outcome_line(
+                &id,
+                Instant::now(),
+                &format!("member result poll {id} ({name}) member={member}"),
+                outcome,
+            ) {
+                eprintln!("{line}");
+            }
+        };
     loop {
         let next = if pending.is_empty() {
             commands.recv().ok()
@@ -352,7 +353,12 @@ fn drive(
             if pending.front().is_some_and(|p| p.0 == id) && began.elapsed() >= budgets.wall {
                 polls.remove(&id);
                 pending.pop_front();
-                poll_outcome(&mut failed_polls, id, &name, "member_operation_wall_exceeded");
+                poll_outcome(
+                    &mut failed_polls,
+                    id,
+                    &name,
+                    "member_operation_wall_exceeded",
+                );
                 send(json!({"ok":false,"code":"member_operation_wall_exceeded"}));
             }
         }

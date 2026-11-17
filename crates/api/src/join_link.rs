@@ -293,8 +293,8 @@ pub fn is_bare_code(text: &Value) -> bool {
 pub fn link_for_known_origin(origin: &str, text: &Value) -> Result<JoinLink, PublicError> {
     let raw = text.as_str().map(py_strip).ok_or_else(invalid_code)?;
     let (window_id, code) = normalized_code(raw)?;
-    let origin = canonical_https_origin(&Value::String(origin.to_owned()))
-        .map_err(|_| invalid_code())?;
+    let origin =
+        canonical_https_origin(&Value::String(origin.to_owned())).map_err(|_| invalid_code())?;
     Ok(JoinLink {
         origin,
         window_id,

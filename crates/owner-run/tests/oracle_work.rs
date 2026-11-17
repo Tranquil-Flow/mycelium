@@ -212,7 +212,7 @@ fn state_of(spec: &Value) -> RunState {
         source_bytes: json!(123),
     };
     state.model = Some(ModelStepOutput {
-            forced_slice: false,
+        forced_slice: false,
         prepared,
         choice: m["choice"].as_str().map(str::to_owned),
         slice_mode: s["slice_mode"].as_bool().unwrap(),

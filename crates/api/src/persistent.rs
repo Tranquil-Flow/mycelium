@@ -596,7 +596,12 @@ impl<H: Host, B: Backend> PersistentBackend<H, B> {
                 let remembered = crate::peer::load_membership_state(&self.root)
                     .ok()
                     .flatten()
-                    .and_then(|state| state.get("origin").and_then(Value::as_str).map(str::to_owned));
+                    .and_then(|state| {
+                        state
+                            .get("origin")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    });
                 match remembered.filter(|_| crate::join_link::is_bare_code(&body["join"])) {
                     Some(origin) => crate::join_link::link_for_known_origin(&origin, &body["join"])
                         .map_err(|_| err)?,
@@ -1326,7 +1331,7 @@ mod join_state_tests {
     use super::{JOIN_STATE, PublicError, discard_join_state, settle_submit};
     fn root(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("joinstate-{}-{tag}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::remove_dir_all(&dir).unwrap_or(());
         std::fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -1345,18 +1350,24 @@ mod join_state_tests {
             "a failed submit must not leave the previous attempt's window pollable"
         );
         // The failure itself is still what the caller reports, and repeating it is not an error.
-        let _ = discard_join_state(&dir).unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
+        discard_join_state(&dir).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap_or(());
     }
     #[test]
     fn a_successful_join_keeps_its_window() {
         let dir = root("ok");
         let pending = dir.join(JOIN_STATE);
         std::fs::write(&pending, b"{}").unwrap();
-        let answer = (serde_json::json!({"state": "waiting_for_owner"}), Vec::new());
+        let answer = (
+            serde_json::json!({"state": "waiting_for_owner"}),
+            Vec::new(),
+        );
         let kept = settle_submit(Ok(answer), &dir).unwrap();
         assert_eq!(kept.0["state"], "waiting_for_owner");
-        assert!(pending.exists(), "a window that was reached must stay pollable");
-        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            pending.exists(),
+            "a window that was reached must stay pollable"
+        );
+        std::fs::remove_dir_all(&dir).unwrap_or(());
     }
 }

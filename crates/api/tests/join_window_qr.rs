@@ -23,17 +23,29 @@ fn an_open_window_publishes_its_join_link_as_an_svg() {
     let windows = PairingWindows::system();
     let opened = open_window(&windows);
     let id = opened["window_id"].as_str().expect("id").to_owned();
-    let svg = windows.link_svg(&json!(id)).expect("svg for an open window");
+    let svg = windows
+        .link_svg(&json!(id))
+        .expect("svg for an open window");
     let text = String::from_utf8(svg).expect("utf8");
-    assert!(text.contains("<svg"), "not an svg: {}", &text[..40.min(text.len())]);
+    assert!(
+        text.contains("<svg"),
+        "not an svg: {}",
+        &text[..40.min(text.len())]
+    );
 }
 
 #[test]
 fn an_unknown_or_closed_window_has_no_qr() {
     let windows = PairingWindows::system();
-    assert!(windows.link_svg(&json!("ZZZZ")).is_none(), "unknown id must not render");
+    assert!(
+        windows.link_svg(&json!("ZZZZ")).is_none(),
+        "unknown id must not render"
+    );
     let opened = open_window(&windows);
     let id = opened["window_id"].as_str().expect("id").to_owned();
     windows.revoke(&json!(id)).expect("revoke");
-    assert!(windows.link_svg(&json!(id)).is_none(), "a revoked window has no join link");
+    assert!(
+        windows.link_svg(&json!(id)).is_none(),
+        "a revoked window has no join link"
+    );
 }

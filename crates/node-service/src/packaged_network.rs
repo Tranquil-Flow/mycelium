@@ -1050,8 +1050,10 @@ pub struct MemberSeams {
     pub acquisition: Box<dyn Fn() -> Option<api::acquisition::Acquisition> + Send + Sync>,
     /// `_ensure_whole_model` (demo_target.py:600-607): start this Mac's own acquisition of the
     /// owner's announced model, so a joined Mac with no snapshot fetches one instead of refusing.
-    pub start_whole_model: Box<dyn Fn(&Value) -> Result<(), String> + Send + Sync>,
+    pub start_whole_model: StartWholeModel,
 }
+/// The `start_whole_model` seam: the announced model choice in, the start's refusal out.
+type StartWholeModel = Box<dyn Fn(&Value) -> Result<(), String> + Send + Sync>;
 /// The member's one bootstrap worker slot (`app.authority`'s control worker on a joined Mac).
 #[derive(Default)]
 struct MemberSlot {
@@ -1357,6 +1359,6 @@ mod serving_probe_tests {
         );
         network.set_serving(false);
         assert!(!probe().expect("probe"), "the run ended");
-        let _ = std::fs::remove_dir_all(&root);
+        std::fs::remove_dir_all(&root).unwrap_or(());
     }
 }

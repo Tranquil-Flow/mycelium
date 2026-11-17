@@ -794,6 +794,9 @@ mod internal_probe_tests {
     #[test]
     fn the_probe_cannot_forge_a_second_log_line() {
         let line = internal_probe("boom\nseed_http_internal_fired");
-        assert!(!line.contains('\n'), "a detail must not break the log line: {line}");
+        assert!(
+            !line.contains('\n'),
+            "a detail must not break the log line: {line}"
+        );
     }
 }

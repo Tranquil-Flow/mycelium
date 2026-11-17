@@ -553,7 +553,10 @@ impl<H: ChainHost> Backend<H> {
         let carrier = LocalMailboxCarrier::start(move |raw| local(raw))?;
         seed.mailbox_routes
             .bind(Arc::new(move |raw: &[u8]| dispatch(raw).map_err(|e| e.0)));
-        eprintln!("diag: managed seat bound swarm={}", seed.coordinator.swarm_id());
+        eprintln!(
+            "diag: managed seat bound swarm={}",
+            seed.coordinator.swarm_id()
+        );
         host.pin()?;
         let managed = Arc::new(Managed {
             owner,

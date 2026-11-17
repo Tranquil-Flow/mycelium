@@ -81,7 +81,7 @@ fn the_stage_workers_reservation_at_the_serving_context_is_pinned_independently(
     };
     assert_eq!(at(0..19), RESERVED_0_19);
     assert_eq!(at(19..28), RESERVED_19_28);
-    assert!(RESERVED_0_19 > MODELLED_0_19 && RESERVED_19_28 > MODELLED_19_28);
+    const { assert!(RESERVED_0_19 > MODELLED_0_19 && RESERVED_19_28 > MODELLED_19_28) };
 }
 
 /// CAP-1 (compile half): the packaged composition gives the compile the stage worker's own

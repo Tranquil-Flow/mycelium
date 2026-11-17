@@ -426,7 +426,10 @@ pub fn run_descriptors_step(
     .map(|_| ());
     eprintln!("l10_desc_wait:{:?}", waited.as_ref().map(|_| "ok"));
     eprintln!("l10_desc_expected:{expected:?}");
-    eprintln!("l10_desc_seen:{:?}", collector.seen.keys().collect::<Vec<_>>());
+    eprintln!(
+        "l10_desc_seen:{:?}",
+        collector.seen.keys().collect::<Vec<_>>()
+    );
     eprintln!("l10_desc_reasons:{:?}", collector.reasons);
     waited?;
     // The step proceeds with the Macs that reported; the compiler decides if enough.

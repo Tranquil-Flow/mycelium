@@ -698,12 +698,8 @@ impl Work {
             .host
             .with(|c| c.run.contributor.as_ref().map(|n| n.node.clone()));
         let resident = lock(&self.resident);
-        let Some(network) = resident.network.clone() else {
-            return None;
-        };
-        let Some((from, policy)) = network.0.clone() else {
-            return None;
-        };
+        let network = resident.network.clone()?;
+        let (from, policy) = network.0.clone()?;
         // Lane XB patch 2 (XB-12): across networks the joined Mac's advertised private address
         // names nothing on this network: no permission probe, no same-network advice.
         if policy.relay().is_some() {

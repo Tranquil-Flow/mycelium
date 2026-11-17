@@ -367,7 +367,8 @@ fn local_work_session_tracks_renewal_and_contributor_removal() {
         "renewal flight retains the lease-bounded snapshot"
     );
     // The same Session out with no flight standing in (a renewal that unwound): no snapshot.
-    f.host.with(|c| c.run.contributor.as_mut().unwrap().flight = None);
+    f.host
+        .with(|c| c.run.contributor.as_mut().unwrap().flight = None);
     assert!(
         lock(&cell).is_none(),
         "a Session out with no renewal flight leaves no snapshot in use"

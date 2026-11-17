@@ -246,21 +246,27 @@ pub fn start_local_contributor<H: RunHost>(host: &H) -> Result<Json, PublicError
     })
 }
 
-
 /// `grant_standing_consent` + `bind_standing_consent` (`standing_consent.py:139,161`) for the
 /// owner's own worker.
 ///
 /// Caps come from the resource policy the user chose (the storage limit is theirs; the wall and
 /// command budgets are this app's own grant defaults) and the grant is bound to the membership the
 /// worker just accepted, so a different owner never inherits it.
-fn grant_self_consent(dir: &std::path::Path, node: &str, policy: &Value) -> Result<(), PublicError> {
+fn grant_self_consent(
+    dir: &std::path::Path,
+    node: &str,
+    policy: &Value,
+) -> Result<(), PublicError> {
     use crate::preferences::standing_consent;
     let Some(state) = crate::peer::load_membership_state(dir)? else {
         return Ok(());
     };
     // An existing grant is the user's: never re-grant over it (different caps are a refusal, not an
     // update). Only a fresh worker - or one whose grant was withdrawn - needs one recorded.
-    if standing_consent::load(dir).map_err(|e| PublicError::new(409, e.0))?.is_some_and(|record| record["state"] != "withdrawn") {
+    if standing_consent::load(dir)
+        .map_err(|e| PublicError::new(409, e.0))?
+        .is_some_and(|record| record["state"] != "withdrawn")
+    {
         return Ok(());
     }
     let storage = policy
@@ -345,8 +351,7 @@ pub fn renew_contributor<H: RunHost>(host: &H) {
             random_hex: &random_hex,
             seed: &options,
         };
-        if let Err(failure) = crate::peer::renew_with_origin(&dir, true, Some(&mut session), &env)
-        {
+        if let Err(failure) = crate::peer::renew_with_origin(&dir, true, Some(&mut session), &env) {
             eprintln!("contributor renew: {}", failure.error.code);
             // Only the seed's own refusal keeps the Session out (FLK2-02); a code raised on this
             // Mac (a lease the local wall clock reads as past) puts it back, as at the base.

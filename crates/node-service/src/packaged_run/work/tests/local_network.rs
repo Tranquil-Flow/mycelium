@@ -306,7 +306,7 @@ fn a_member_revoked_after_compose_is_not_probed_by_the_step_6_diagnostic() {
         "the revoked member's address was probed: {:?}",
         probe.sent()
     );
-    let _ = ports.work.teardown();
+    ports.work.teardown().ok();
 }
 
 /// PHY2-01 (lane PHY patch 3): a reading of this Mac's interfaces that answers `first` to the run's
@@ -458,7 +458,7 @@ fn compose_after_a_local_only_probe_uses_the_lan_it_now_finds() {
         watch.started.lock().unwrap().iter().all(|s| !s),
         "a datagram left after a work endpoint started"
     );
-    let _ = work.teardown();
+    work.teardown().ok();
 }
 
 /// Proves PHY2-01, LAN -> local-only: the probe passes reached the joined Mac on this Mac's LAN; by
@@ -547,7 +547,7 @@ fn compose_on_a_new_lan_address_binds_it_and_asks_again_from_it_first() {
                 assert!(resident.local.is_none() && resident.work.is_none());
             }
         }
-        let _ = work.teardown();
+        work.teardown().ok();
     }
 }
 
@@ -588,7 +588,7 @@ fn a_changed_resolution_with_no_verified_member_sends_nothing() {
     if let Err(StepError::Refused(e)) = &composed {
         assert_ne!(e.code, PERMISSION_REQUIRED, "{composed:?}");
     }
-    let _ = work.teardown();
+    work.teardown().ok();
 }
 
 /// Proves PHY2-01 lifecycle: Stop (the chain's teardown) between the probe passes and compose
@@ -607,7 +607,7 @@ fn stop_between_the_probe_and_compose_drops_the_preflight_record() {
     assert!(!first.is_empty());
     assert!(!preflight_reset(&chain.work));
     let mut env = Env { at: Instant::now() };
-    let _ = chain.teardown(false, &mut env);
+    chain.teardown(false, &mut env).ok();
     assert!(
         preflight_reset(&chain.work),
         "teardown kept the run's preflight record"
@@ -682,7 +682,7 @@ fn a_second_run_reads_the_interfaces_afresh() {
         2 * first,
         "an unchanged resolution is not asked again"
     );
-    let _ = chain.work.teardown();
+    chain.work.teardown().ok();
 }
 
 /// Proves PHY-03: a signed member address the run's transport would not dial is not probed: an

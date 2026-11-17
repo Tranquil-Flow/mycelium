@@ -10,7 +10,8 @@ use serde_json::json;
 
 #[test]
 fn a_named_tunnel_host_is_accepted_as_written() {
-    let (link, _) = parse_join_text(&json!("demo.mycelium.now ABCD-EFGH-JKMN"), &json!(0.0)).unwrap();
+    let (link, _) =
+        parse_join_text(&json!("demo.mycelium.now ABCD-EFGH-JKMN"), &json!(0.0)).unwrap();
     assert_eq!(link.origin, "https://demo.mycelium.now");
     assert_eq!(link.window_id, "ABCD");
     assert_eq!(link.code, "EFGHJKMN");
@@ -24,6 +25,10 @@ fn a_bare_quick_tunnel_name_still_gets_its_suffix() {
 
 #[test]
 fn a_full_quick_tunnel_host_is_not_doubled() {
-    let (link, _) = parse_join_text(&json!("plain-name.trycloudflare.com ABCD-EFGH-JKMN"), &json!(0.0)).unwrap();
+    let (link, _) = parse_join_text(
+        &json!("plain-name.trycloudflare.com ABCD-EFGH-JKMN"),
+        &json!(0.0),
+    )
+    .unwrap();
     assert_eq!(link.origin, "https://plain-name.trycloudflare.com");
 }

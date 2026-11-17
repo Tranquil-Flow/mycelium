@@ -92,8 +92,10 @@ pub fn verify_resident(
 /// prepare for (lane A, CAP-2).
 #[derive(Default)]
 pub struct Challenges {
-    outstanding: std::sync::Mutex<std::collections::BTreeMap<String, (String, [u64; 2], u64)>>,
+    outstanding: std::sync::Mutex<Outstanding>,
 }
+/// Per challenge key: (nonce, assignment range, capacity tokens).
+type Outstanding = std::collections::BTreeMap<String, (String, [u64; 2], u64)>;
 /// A stage admitted from a consumed challenge; only `Challenges::admit` builds it.
 #[derive(Clone, Debug)]
 pub struct Admitted {
