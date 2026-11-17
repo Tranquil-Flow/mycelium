@@ -230,6 +230,11 @@ fn relay_message(script: &str, line: &str, state: &str) -> String {
         .iter()
         .find(|(k, _)| *k == state)
         .map_or(fallback, |(_, v)| *v);
+    relay_advice(script, key)
+}
+
+/// The text of `relayAdvice.<key>` in app.js.
+fn relay_advice(script: &str, key: &str) -> String {
     let advice = script
         .split_once("const relayAdvice={")
         .and_then(|(_, rest)| rest.split_once("};"))
@@ -248,7 +253,40 @@ fn relay_message(script: &str, line: &str, state: &str) -> String {
             return text.to_owned();
         }
     }
-    panic!("relayAdvice has no `{key}` (for state `{state}`)")
+    panic!("relayAdvice has no `{key}`")
+}
+
+/// Lane B, lane C review C-02: a joined Mac whose launch-time resume failed is recorded
+/// `recovery_error` and NOT running (`joined_member::resume_membership`); nothing renews then
+/// (`renew_member` returns at once while `!running`, and there is no Session), so the relay line
+/// must not promise that Mycelium keeps retrying, which the `retained` advice says. That case is
+/// chosen from `value.running` before the membership state: the line says the Mac is stopped and
+/// names the action that resumes it (“Start / reconnect”, `/api/start`, which resumes the
+/// membership: C-01). A renewal failure while the Mac runs keeps the state matrix above.
+#[test]
+fn a_stopped_joined_mac_after_a_failed_resume_is_not_promised_a_retry() {
+    let script = script_without_comments(APP_JS);
+    let line = script
+        .lines()
+        .find(|l| l.contains("rung('Owner relay'"))
+        .expect("app.js lost the relay line");
+    let compact = line.replace(' ', "");
+    let stopped_first = compact
+        .find("!value.running")
+        .zip(compact.find("relayLine[a.membership_state]"))
+        .is_some_and(|(running, state)| running < state);
+    assert!(
+        stopped_first,
+        "the relay line does not choose the stopped case before the membership state: {line}"
+    );
+    let stopped = relay_advice(&script, "stopped").to_lowercase();
+    assert!(
+        stopped.contains("stopped") && stopped.contains("start / reconnect"),
+        "{stopped}"
+    );
+    for promise in ["retrying", "keeps retr", "retries"] {
+        assert!(!stopped.contains(promise), "`{promise}`: {stopped}");
+    }
 }
 
 /// Lane CHATS item 3 (owner ruling 14 Nov, ledger rows 17 and 106 b): one chat path, through the
