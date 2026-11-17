@@ -139,6 +139,9 @@ impl ReportsPort for Exchange {
     }
 }
 fn state_of(spec: &Value) -> RunState {
+    state_forced(spec, false)
+}
+fn state_forced(spec: &Value, forced_slice: bool) -> RunState {
     let s = &spec["state"];
     let m = &spec["model"];
     let mut state = RunState::new(
@@ -170,7 +173,7 @@ fn state_of(spec: &Value) -> RunState {
         source_bytes: json!(123),
     };
     state.model = Some(ModelStepOutput {
-            forced_slice: false,
+        forced_slice,
         prepared,
         choice: m["choice"].as_str().map(str::to_owned),
         slice_mode: s["slice_mode"].as_bool().unwrap(),
@@ -192,6 +195,9 @@ fn rle(xs: &[Value]) -> Value {
     json!(out)
 }
 fn replay(name: &str, case: &Value) {
+    replay_as(name, case, false, &case["progress"]);
+}
+fn replay_as(name: &str, case: &Value, forced_slice: bool, progress: &Value) {
     let spec = &case["spec"];
     let rec = Arc::new(Mutex::new(Record::default()));
     let mut env = Env {
@@ -210,7 +216,7 @@ fn replay(name: &str, case: &Value) {
         spec: spec.clone(),
         rec: rec.clone(),
     };
-    let mut state = state_of(spec);
+    let mut state = state_forced(spec, forced_slice);
     let interval = budgets::BudgetId::OwnerPoll
         .span(budgets::Entries::ZERO)
         .unwrap()
@@ -230,7 +236,7 @@ fn replay(name: &str, case: &Value) {
         "{name}: partial/final state"
     );
     assert_eq!(env.result, case["result"], "{name}: result");
-    assert_eq!(rle(&env.progress), case["progress"], "{name}: progress");
+    assert_eq!(rle(&env.progress), *progress, "{name}: progress");
     assert_eq!(
         rle(&env.publishes),
         case["publishes"],
@@ -251,5 +257,32 @@ fn replay(name: &str, case: &Value) {
 fn slices_matches_executed_oracle() {
     for (name, case) in fixture()["cases"].as_object().unwrap() {
         replay(name, case);
+    }
+}
+
+/// B11(b) (ledger rows 84 a, 93 (4 a), owner ruling 16 Nov): on the packaged two-Mac path the
+/// host forces stage slicing (`ModelStepOutput::forced_slice`) and the owner pushes each Mac its
+/// own stage shard inside the slices port before it answers "no slice plan"
+/// (`OwnerWork::node_slice_plans`), so the oracle's `whole snapshots: no slice to fetch`
+/// (`demo_chain.py:880`, a run whose members already hold the whole snapshot) told the owner that
+/// nothing moved while the stage shards did. Such a run reports the owner's shard push instead;
+/// everything else the oracle recorded for the case (calls, announcement, limits, state, result,
+/// budget) is unchanged, and a run that is not force-sliced keeps the oracle's text (the executed
+/// cases above). Recorded divergence (text for `api/contracts/divergences.json`, lane A's file):
+/// REPORT-laneC-release.md, B11(b).
+#[test]
+fn a_force_sliced_run_reports_the_owner_s_shard_push_not_whole_snapshots() {
+    const ORACLE: &str = "whole snapshots: no slice to fetch";
+    const PUSHED: &str = "stage shards pushed: every Mac holds only its own layers";
+    let cases = fixture();
+    for name in ["whole-none", "whole-empty"] {
+        let case = &cases["cases"][name];
+        let oracle = case["progress"].to_string();
+        assert!(
+            oracle.contains(ORACLE),
+            "{name}: the oracle's own text: {oracle}"
+        );
+        let pushed: Value = serde_json::from_str(&oracle.replace(ORACLE, PUSHED)).unwrap();
+        replay_as(name, case, true, &pushed);
     }
 }
