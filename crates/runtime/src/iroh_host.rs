@@ -1006,17 +1006,16 @@ impl<'a> LoopbackHost<'a> {
                 addr.with_ip_addr(socket)
             }))
     }
-    /// Lane XA status: this host's direct addresses with their kind: `local` (the bound socket),
-    /// `qad` (the public address the relay's QUIC address discovery reported), `portmapped` (any
-    /// other public address while the run asked for portmapping: the router's mapping), else
-    /// `public`. Empty unless bound across networks or locally.
+    /// Lane XA status: this host's direct addresses with their kind (`local`, `qad`,
+    /// `qad_local_port`, `portmapped` only with mapping evidence, else `unknown`:
+    /// [`crate::iroh_cross::direct_addr_kind`]).
     pub fn direct_addrs(&self) -> Result<Vec<(SocketAddr, &'static str)>, Error> {
         use iroh::Watcher;
         let endpoint = self.endpoint()?;
         let bound = endpoint.bound_sockets();
-        let Some(gate) = &self.cross else {
+        if self.cross.is_none() {
             return Ok(bound.into_iter().map(|s| (s, "local")).collect());
-        };
+        }
         let report = endpoint.net_report().get();
         let qad: Vec<SocketAddr> = report
             .iter()
@@ -1028,13 +1027,15 @@ impl<'a> LoopbackHost<'a> {
             })
             .flatten()
             .collect();
+        // Mapping evidence (XB-07): iroh 1.0.2 exposes a granted mapping only through its
+        // `metrics` feature (`portmap_external_address_updated`), which this build does not
+        // enable: with no evidence a residual address is `unknown`, never `portmapped`, whether
+        // or not this Mac chose portmapping.
+        let granted = false;
         Ok(endpoint
             .addr()
             .ip_addrs()
-            .map(|addr| {
-                let kind = direct_addr_kind(*addr, &bound, &qad, gate.policy().portmapping());
-                (*addr, kind)
-            })
+            .map(|addr| (*addr, direct_addr_kind(*addr, &bound, &qad, granted)))
             .collect())
     }
     /// TLS authenticates an endpoint, not membership. Pass the connection to

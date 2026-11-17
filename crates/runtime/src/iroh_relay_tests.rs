@@ -94,27 +94,24 @@ fn portmapping_is_off_unless_the_cross_network_policy_asks_for_it() {
     );
 }
 
-/// Lane XA status: a portmapped direct address is named as such, only when the run asked for it.
+/// Lane XA status, patch 2 (REVIEW XB-07): a direct address is named `portmapped` only with
+/// mapping evidence (the router granted a mapping), never because portmapping was merely asked
+/// for. iroh's QAD address with the bound port (its `Qad4LocalPort`) is `qad_local_port`, and a
+/// residual address without evidence is `unknown`.
 #[test]
-fn status_names_a_portmapped_direct_address() {
+fn status_names_a_portmapped_direct_address_only_with_mapping_evidence() {
     let at = |s: &str| s.parse::<std::net::SocketAddr>().unwrap();
     let (bound, qad) = ([at("192.168.1.20:51000")], [at("203.0.113.9:40001")]);
-    assert_eq!(
-        direct_addr_kind(at("192.168.1.20:51000"), &bound, &qad, true),
-        "local"
-    );
-    assert_eq!(
-        direct_addr_kind(at("203.0.113.9:40001"), &bound, &qad, true),
-        "qad"
-    );
-    assert_eq!(
-        direct_addr_kind(at("203.0.113.9:51000"), &bound, &qad, true),
-        "portmapped"
-    );
-    assert_eq!(
-        direct_addr_kind(at("203.0.113.9:51000"), &bound, &qad, false),
-        "public"
-    );
+    let kind = |addr: &str, granted: bool| direct_addr_kind(at(addr), &bound, &qad, granted);
+    assert_eq!(kind("192.168.1.20:51000", true), "local");
+    assert_eq!(kind("203.0.113.9:40001", true), "qad");
+    // The QAD address with the local port is iroh's own candidate, mapping or not.
+    assert_eq!(kind("203.0.113.9:51000", true), "qad_local_port");
+    assert_eq!(kind("203.0.113.9:51000", false), "qad_local_port");
+    // Portmapping asked for but the router refused (no mapping granted): not `portmapped`.
+    assert_eq!(kind("198.51.100.7:61000", false), "unknown");
+    // The router granted a mapping: the residual address is the mapping.
+    assert_eq!(kind("198.51.100.7:61000", true), "portmapped");
 }
 
 /// Lane XB patch 2 (REVIEW XB-01, D4): a relay-mode host dials a peer only through the relay it

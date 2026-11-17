@@ -61,24 +61,29 @@ pub(crate) fn cross_builder(
         .map_err(|_| Error::Unavailable)
 }
 
-/// Lane XA status: the kind of one of this endpoint's direct addresses. `local` is a bound socket,
-/// `qad` the public address the relay's QUIC address discovery reported; any other public address
-/// is the router's mapping (`portmapped`) when the run asked for portmapping, else `public` (e.g.
-/// iroh's QAD address with the local port).
+/// Lane XA status (patch 2, REVIEW XB-07): the kind of one of this endpoint's direct addresses.
+/// `local` is a bound socket, `qad` the public address the relay's QUIC address discovery
+/// reported, `qad_local_port` that public IP with a bound port (iroh's own `Qad4LocalPort`
+/// candidate). Any other address is `portmapped` ONLY with mapping evidence (`mapping_granted`:
+/// the router granted this endpoint a mapping); without it, `unknown`.
 pub(crate) fn direct_addr_kind(
     addr: SocketAddr,
     bound: &[SocketAddr],
     qad: &[SocketAddr],
-    portmapping: bool,
+    mapping_granted: bool,
 ) -> &'static str {
     if bound.contains(&addr) {
         "local"
     } else if qad.contains(&addr) {
         "qad"
-    } else if portmapping {
+    } else if qad.iter().any(|q| q.ip() == addr.ip())
+        && bound.iter().any(|b| b.port() == addr.port())
+    {
+        "qad_local_port"
+    } else if mapping_granted {
         "portmapped"
     } else {
-        "public"
+        "unknown"
     }
 }
 /// The monotonic clock of a relay probe ([`crate::iroh_host::relay_reachable`]).
