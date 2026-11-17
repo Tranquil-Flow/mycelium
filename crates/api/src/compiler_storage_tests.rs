@@ -796,7 +796,11 @@ fn a_ledger_lock_copy_still_held_by_a_forked_child_does_not_refuse_the_next_comp
     let mut child = held_by_a_child(&runs.join(STORAGE_LOCK));
     let got = storage_ledger(&runs).map(drop).map_err(|e| e.0);
     child.wait().unwrap();
-    assert_eq!(got, Ok(()), "a lock only a forked child's copy held refused the ledger");
+    assert_eq!(
+        got,
+        Ok(()),
+        "a lock only a forked child's copy held refused the ledger"
+    );
 }
 
 /// A dead run's directory lock (the retirement pass read it as a live run: 1 of the same 30).
