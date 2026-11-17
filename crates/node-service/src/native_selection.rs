@@ -79,7 +79,12 @@ pub fn stage_reservation(
 /// [`stage_reservation`] in the planner's terms (`planner::chain_compile::StageReservation`, lane
 /// A, B7 / CAP-1): the packed-int8 stage the packaged member prepares, `None` for a model or range
 /// the native backend does not admit (the slices step then refuses it by name).
-pub fn planned_reservation(model_id: &str, range: [u64; 2], total: u64, tokens: u64) -> Option<u64> {
+pub fn planned_reservation(
+    model_id: &str,
+    range: [u64; 2],
+    total: u64,
+    tokens: u64,
+) -> Option<u64> {
     let narrow = |n: u64| u32::try_from(n).ok();
     stage_reservation(
         model_id,

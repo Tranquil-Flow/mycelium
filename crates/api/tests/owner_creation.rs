@@ -332,6 +332,9 @@ fn an_owners_withdraw_reaches_its_contributors_grant() {
         "withdrawn",
         "the contributor's grant is withdrawn"
     );
-    assert!(!dir.join(sc::FILE).exists(), "nothing written at the owner's root");
+    assert!(
+        !dir.join(sc::FILE).exists(),
+        "nothing written at the owner's root"
+    );
     fs::remove_dir_all(dir).unwrap();
 }

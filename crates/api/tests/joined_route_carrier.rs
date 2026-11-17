@@ -3746,7 +3746,11 @@ fn a_stage_whose_command_grant_runs_out_mid_answer_ends_it_by_name_and_leaves_se
     ]);
     let began = Instant::now();
     let submitted = r.submit(32);
-    assert!(submitted.is_ok(), "{:?}", submitted.as_ref().err().map(|e| e.code));
+    assert!(
+        submitted.is_ok(),
+        "{:?}",
+        submitted.as_ref().err().map(|e| e.code)
+    );
     let (id, _) = submitted.unwrap();
     r.pump_until(span(B::WorkerStartup), |r| r.terminal(&id).is_some());
     let elapsed = began.elapsed();
@@ -3780,7 +3784,11 @@ fn a_stage_whose_command_grant_runs_out_mid_answer_ends_it_by_name_and_leaves_se
         Some("joined_route_member_consent_exhausted"),
         "the next chat is refused by the same name"
     );
-    assert!(r.until_closed(), "the epoch's carrier closed: {}", r.state());
+    assert!(
+        r.until_closed(),
+        "the epoch's carrier closed: {}",
+        r.state()
+    );
     let shown = r.state();
     {
         let o = r.handle.state.lock().unwrap();
@@ -3798,7 +3806,11 @@ fn a_stage_whose_command_grant_runs_out_mid_answer_ends_it_by_name_and_leaves_se
         "{:?}",
         reports[1]
     );
-    assert_eq!(reports[1]["teardown"], "member_consent_ended", "{:?}", reports[1]);
+    assert_eq!(
+        reports[1]["teardown"], "member_consent_ended",
+        "{:?}",
+        reports[1]
+    );
     assert!(
         reports[1]["redial_ack_ms"].is_number(),
         "the exhausted member ACKed the owner's re-dial: {:?}",

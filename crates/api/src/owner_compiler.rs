@@ -900,7 +900,9 @@ mod contributor_grant_tests {
         let stored = std::fs::read(dir.join(standing_consent::FILE)).unwrap();
         let planned = local_grant(&root).unwrap();
         assert_eq!(
-            planned.as_ref().map(|g| (g.max_wall_seconds, g.max_memory_bytes, g.storage_bytes)),
+            planned
+                .as_ref()
+                .map(|g| (g.max_wall_seconds, g.max_memory_bytes, g.storage_bytes)),
             Some((Some(1800), Some(12_884_901_888), Some(4_000_000_000))),
             "the owner's node is planned with its contributor's stored grant"
         );

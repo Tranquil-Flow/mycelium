@@ -527,8 +527,9 @@ fn the_member_holds_its_worker_to_the_share_announced_for_this_run() {
     work.announced(&member.announced_for("run-ep2", Some(share(SHARE, 1_000_000_000, 300))));
     let prepared = prepare(&mut work, &member);
     assert!(
-        prepared.as_ref().is_err_and(|code| !code.ends_with("_below_share")
-            && code != "member_share_unannounced"),
+        prepared.as_ref().is_err_and(
+            |code| !code.ends_with("_below_share") && code != "member_share_unannounced"
+        ),
         "the share is admitted; the prepare ends at the missing worker: {prepared:?}"
     );
     assert_eq!(
@@ -598,7 +599,10 @@ fn a_resident_proof_prepared_for_another_capacity_is_refused_by_name() {
     member.grant();
     member.bind();
     let (offer, _shard) = custody(&member, "run-cap2-transfer-0");
-    let node = offer["message"]["member"]["node_id"].as_str().unwrap().to_owned();
+    let node = offer["message"]["member"]["node_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     let challenges = api::joined_shard::native::Challenges::new();
     let nonce = challenges.issue(&node, [0, 14], 2356).unwrap();
     let smaller = resident(&member, &offer, &nonce, [0, 14], 39);

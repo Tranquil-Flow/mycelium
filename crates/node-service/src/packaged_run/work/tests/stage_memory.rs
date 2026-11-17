@@ -22,7 +22,11 @@ const MODELLED_19_28: u64 = 2_477_956_596;
 const CONTEXT: u64 = 2_356;
 const JOINED_CAP: u64 = 8_589_934_592;
 
-fn demo_request(owner: [usize; 2], joined: [usize; 2], context: u64) -> planner::chain_compile::BuildRequest {
+fn demo_request(
+    owner: [usize; 2],
+    joined: [usize; 2],
+    context: u64,
+) -> planner::chain_compile::BuildRequest {
     planner::chain_compile::BuildRequest {
         model_id: "Qwen/Qwen3-0.6B".into(),
         resolved_commit: "c1899de289a04d12100db370d81485cdf75e47ca".into(),
@@ -66,8 +70,14 @@ fn refusal(result: Result<(), StepError>) -> Option<(String, String)> {
 fn the_stage_workers_reservation_at_the_serving_context_is_pinned_independently() {
     use crate::native_selection::{Profile, stage_reservation};
     let at = |range: std::ops::Range<u32>| {
-        stage_reservation("Qwen/Qwen3-0.6B", Profile::PackedInt8, range, 28, CONTEXT as u32)
-            .unwrap()
+        stage_reservation(
+            "Qwen/Qwen3-0.6B",
+            Profile::PackedInt8,
+            range,
+            28,
+            CONTEXT as u32,
+        )
+        .unwrap()
     };
     assert_eq!(at(0..19), RESERVED_0_19);
     assert_eq!(at(19..28), RESERVED_19_28);
@@ -83,9 +93,18 @@ fn the_packaged_composition_plans_shares_with_the_stage_workers_reservation() {
     let hook = lock(&composed.compiler.0)
         .stage_reservation()
         .expect("the packaged compile plans with the stage worker's own reservation");
-    assert_eq!(hook("Qwen/Qwen3-0.6B", [0, 19], 28, CONTEXT), Some(RESERVED_0_19));
-    assert_eq!(hook("Qwen/Qwen3-0.6B", [19, 28], 28, CONTEXT), Some(RESERVED_19_28));
-    assert_eq!(hook("Qwen/Qwen2.5-0.5B-Instruct", [0, 12], 24, CONTEXT), None);
+    assert_eq!(
+        hook("Qwen/Qwen3-0.6B", [0, 19], 28, CONTEXT),
+        Some(RESERVED_0_19)
+    );
+    assert_eq!(
+        hook("Qwen/Qwen3-0.6B", [19, 28], 28, CONTEXT),
+        Some(RESERVED_19_28)
+    );
+    assert_eq!(
+        hook("Qwen/Qwen2.5-0.5B-Instruct", [0, 12], 24, CONTEXT),
+        None
+    );
 }
 
 /// CAP-1 (slices half): the check holds each stage to the limit its member will ENFORCE, its
@@ -113,7 +132,12 @@ fn the_slices_check_holds_each_stage_to_the_share_its_member_enforces() {
     );
     let reconciled = demo_state(Some(JOINED_CAP), Some((RESERVED_0_19, RESERVED_19_28)));
     assert_eq!(
-        refusal(check_run_stage_memory(&request, &reconciled, &contributor, tokens)),
+        refusal(check_run_stage_memory(
+            &request,
+            &reconciled,
+            &contributor,
+            tokens
+        )),
         None
     );
 }
@@ -137,7 +161,10 @@ fn the_slices_check_reads_the_contributors_grant_and_the_joined_macs_caps() {
     ))
     .expect("the contributor's 4 GB cannot hold 19 layers at 4,096");
     assert_eq!(code, "stage_memory_consent_below_context");
-    assert!(message.contains("Mac owner") && message.contains("4000000000"), "{message}");
+    assert!(
+        message.contains("Mac owner") && message.contains("4000000000"),
+        "{message}"
+    );
     let joined_short = demo_state(Some(2_000_000_000), None);
     let (code, message) = refusal(check_run_stage_memory(
         &demo_request([0, 19], [19, 28], CONTEXT),
@@ -147,7 +174,10 @@ fn the_slices_check_reads_the_contributors_grant_and_the_joined_macs_caps() {
     ))
     .expect("a joined Mac whose caps cannot hold its stage");
     assert_eq!(code, "stage_memory_consent_below_context");
-    assert!(message.contains("Mac joined") && message.contains("2000000000"), "{message}");
+    assert!(
+        message.contains("Mac joined") && message.contains("2000000000"),
+        "{message}"
+    );
     // Both consents large enough: no refusal.
     assert_eq!(
         refusal(check_run_stage_memory(

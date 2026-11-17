@@ -480,7 +480,10 @@ fn pair(
         },
     );
     choose_qwen3(&member);
-    let waiting = member.post("/api/join/window", join_body(&member, &owner.link, commands));
+    let waiting = member.post(
+        "/api/join/window",
+        join_body(&member, &owner.link, commands),
+    );
     assert_eq!(waiting.0, 200, "join: {}", waiting.1);
     approve_and_join(&owner, &member);
     // No download is asked of the joined Mac: its own agent starts the announced model's
@@ -1482,11 +1485,16 @@ fn a_small_command_grant_ends_the_answer_by_name_on_the_lan() {
     let owner_quit = quit(owner.mac);
     let member_quit = quit(member);
     let after = descendants();
-    let ok = owner_quit == Ok(Poll::Verified) && member_quit == Ok(Poll::Verified) && after.is_empty();
-    ev.row(json!({"row": "Quit", "result": if ok {"passed"} else {"failed"},
-        "children_before": before.len(), "descendants_after": after.len()}));
+    let ok =
+        owner_quit == Ok(Poll::Verified) && member_quit == Ok(Poll::Verified) && after.is_empty();
+    ev.row(
+        json!({"row": "Quit", "result": if ok {"passed"} else {"failed"},
+        "children_before": before.len(), "descendants_after": after.len()}),
+    );
     if !ok {
-        failures.push(format!("Quit: owner={owner_quit:?} member={member_quit:?} left={after:?}"));
+        failures.push(format!(
+            "Quit: owner={owner_quit:?} member={member_quit:?} left={after:?}"
+        ));
     }
     drop(repository);
     if failures.is_empty() {

@@ -750,7 +750,11 @@ fn the_compile_plans_each_share_with_the_stage_workers_own_reservation() {
             Ok(planned) => {
                 let planned = planned.finish(&out(a));
                 for row in rows(&planned) {
-                    assert_eq!(row["max_rss_bytes"], json!(highest + 1_000_000), "{name}: {row}");
+                    assert_eq!(
+                        row["max_rss_bytes"],
+                        json!(highest + 1_000_000),
+                        "{name}: {row}"
+                    );
                 }
                 assert_eq!(
                     planned["execution_proposal"]["max_combined_rss_bytes"],
@@ -790,5 +794,8 @@ fn the_compile_plans_each_share_with_the_stage_workers_own_reservation() {
             Ok(_) => panic!("{name}: a 1 PiB stage reservation was planned"),
         }
     }
-    assert!(raised >= 10 && refused >= 10, "raised {raised}, refused {refused}");
+    assert!(
+        raised >= 10 && refused >= 10,
+        "raised {raised}, refused {refused}"
+    );
 }
