@@ -242,8 +242,15 @@ impl NetworkChoice {
     /// transport does not admit ([`NetworkChoice::allows`] false), named before any dial.
     pub fn address_refusal(&self, refused: std::net::SocketAddr) -> (&'static str, String) {
         let ip = refused.ip();
-        let again = "Connect both Macs to the same Wi-Fi or Ethernet network, turn off any VPN \
-                     on the joined Mac, and start again.";
+        // Lane XB patch 3 (REVIEW XB2-07): a run across networks gets relay-mode advice.
+        let across = matches!(&self.0, Some((_, policy)) if policy.relay().is_some());
+        let again = if across {
+            "Connect each Mac to one Wi-Fi or Ethernet network with internet access, turn off \
+             any VPN on the joined Mac, and start again."
+        } else {
+            "Connect both Macs to the same Wi-Fi or Ethernet network, turn off any VPN on the \
+             joined Mac, and start again."
+        };
         match &self.0 {
             Some((bound, _)) if ip.is_loopback() => (
                 "member_work_network_mismatch",

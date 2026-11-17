@@ -433,6 +433,20 @@ pub fn relay_refusal() -> (&'static str, String) {
         ),
     )
 }
+/// Lane XB patch 3 (REVIEW XB2-07): the refusal (code, plain message) of a run ACROSS networks
+/// whose owner reading found no usable network (`reason`).
+pub fn owner_network_refusal_across(reason: &str) -> (&'static str, String) {
+    let (code, _) = crate::packaged_work::owner_network_refusal(reason);
+    (
+        code,
+        format!(
+            "This Mac has no network it can use for a run across networks ({reason}): no \
+             private network address, more than one (often a VPN), or none it could read. \
+             Connect this Mac to one Wi-Fi or Ethernet network with internet access, turn off \
+             any VPN, and start again."
+        ),
+    )
+}
 /// D3: the named refusals a joined Mac reports when it cannot bind its run's signed reach.
 pub const MEMBER_REFUSALS: [&str; 6] = [
     RELAY_UNREACHABLE,
@@ -445,6 +459,17 @@ pub const MEMBER_REFUSALS: [&str; 6] = [
 /// The owner's refusal of a run whose joined Mac `node` reported `code` (D3).
 pub fn member_refusal(node: &str, code: &str) -> (&'static str, String) {
     let short = node.get(..12).unwrap_or(node);
+    if code == UNAVAILABLE {
+        return (
+            "joined_mac_network_refused",
+            format!(
+                "The joined Mac {short} has no network it can use for a run across networks \
+                 ({code}): no private network address, more than one (often a VPN), or none it \
+                 could read. On that Mac, connect to one Wi-Fi or Ethernet network with internet \
+                 access and turn off any VPN, then press Start again."
+            ),
+        );
+    }
     if code == RELAY_UNREACHABLE {
         return (
             "joined_mac_relay_unreachable",
@@ -472,8 +497,9 @@ pub fn owner_refusal_message(code: &str) -> String {
                     press Start again."
             .into(),
         _ => format!(
-            "This Mac cannot work across networks ({code}). Choose \"Macs on the same \
-             network\" and put both Macs on one network, then press Start again."
+            "This Mac cannot work across networks ({code}). Connect it to one Wi-Fi or \
+             Ethernet network with internet access and turn off any VPN, or choose \"Macs on \
+             the same network\" and put both Macs on one network, then press Start again."
         ),
     }
 }
@@ -785,6 +811,49 @@ mod tests {
         );
         assert!(!status.to_string().contains("portmapped"), "{status}");
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Lane XB patch 3 (REVIEW XB2-07): in a run across networks, every interface or address
+    /// refusal gives relay-mode advice (one network with internet access, no VPN), never the
+    /// same-network advice ("same Wi-Fi") and never "update Mycelium" for a Mac that simply has no
+    /// usable network.
+    #[test]
+    fn relay_mode_refusals_give_relay_advice() {
+        let node = "0123456789abcdef";
+        let (code, message) = member_refusal(node, UNAVAILABLE);
+        assert_eq!(code, "joined_mac_network_refused");
+        assert!(
+            message.contains("VPN") && !message.contains("same version"),
+            "{message}"
+        );
+        let (code, message) =
+            owner_network_refusal_across(api::lan_interface::AMBIGUOUS_PRIVATE_INTERFACES);
+        assert_eq!(code, "owner_work_network_unavailable");
+        assert!(
+            message.contains("VPN") && !message.contains("same Wi-Fi"),
+            "{message}"
+        );
+        assert!(
+            owner_refusal_message(UNAVAILABLE).contains("VPN"),
+            "{}",
+            owner_refusal_message(UNAVAILABLE)
+        );
+        let relay_run = NetworkChoice(Some((
+            IpAddr::from([192, 168, 1, 7]),
+            LanPolicy::private_only().across_networks(mycelium()),
+        )));
+        for refused in ["127.0.0.1:61700", "[2001:db8::1]:61700"] {
+            let (_, message) = relay_run.address_refusal(refused.parse().unwrap());
+            assert!(!message.contains("same Wi-Fi"), "{refused}: {message}");
+            assert!(message.contains("internet"), "{refused}: {message}");
+        }
+        // The same-network advice stays for a same-network run.
+        let lan_run = NetworkChoice(Some((
+            IpAddr::from([192, 168, 1, 7]),
+            LanPolicy::private_only(),
+        )));
+        let (_, message) = lan_run.address_refusal("127.0.0.1:61700".parse().unwrap());
+        assert!(message.contains("same Wi-Fi"), "{message}");
     }
 
     /// The owner's stored choice, its signed form, the window's action and status; an invalid

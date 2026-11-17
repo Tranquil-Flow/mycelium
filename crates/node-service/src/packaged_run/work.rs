@@ -885,7 +885,16 @@ impl Work {
                 .iter()
                 .any(|node| Some(node) != state.local_node.as_ref())
         {
-            let (code, message) = crate::packaged_work::owner_network_refusal(reason);
+            // Lane XB patch 3 (REVIEW XB2-07): a run across networks gets relay-mode advice.
+            let across = matches!(
+                self.host.network.reach.run_choice(),
+                Some(Ok(api::run_exchange::work_network::RunReach::Relay(_)))
+            );
+            let (code, message) = if across {
+                crate::packaged_work::reach::owner_network_refusal_across(reason)
+            } else {
+                crate::packaged_work::owner_network_refusal(reason)
+            };
             return Err(owner_run::OwnerRunError::with(code, Some(&message), None).into());
         }
         // PHY2-01: a network other than the one the probe passes asked on (local-only <-> LAN, or

@@ -687,7 +687,7 @@ for (const trigger of document.querySelectorAll('summary > button.disclosure-btn
     work_network_relay_mismatch:'The owner’s run names a relay this Mac does not use. Update Mycelium on both Macs to the same version.',
     work_network_invalid:'The owner’s run carries a network choice this Mac cannot read. Update Mycelium on both Macs to the same version.',
     work_network_version_unsupported:'The owner’s run carries a network choice from another version of Mycelium. Update Mycelium on both Macs to the same version.',
-    work_network_unavailable:'This Mac cannot work across networks.',
+    work_network_unavailable:'This Mac has no network it can use for a run across networks: no private network address, more than one (often a VPN), or none it could read. Connect it to one Wi-Fi or Ethernet network with internet access, turn off any VPN, and start again.',
     network_reach_invalid:'This Mac’s network setting could not be read. Choose it again below; saving replaces it.',
     network_reach_run_active:'Stop the current run before changing how the Macs reach each other. The choice applies to the next run.',
     owner_role_required:'Only the owner chooses how the Macs reach each other; this Mac follows the owner’s choice.',
@@ -701,9 +701,9 @@ for (const trigger of document.querySelectorAll('summary > button.disclosure-btn
   const ownerPart = el('fieldset', {id:'reach-owner'},
     el('legend', {textContent:'For the next run (the joined Macs follow automatically)'}),
     el('label', {className:'check'}, sameRadio, ' Macs on the same network'),
-    el('p', {className:'detail', textContent:'Both Macs on the same Wi-Fi or Ethernet. The Macs talk directly; nothing goes through the internet.'}),
+    el('p', {className:'detail', textContent:'Both Macs on the same Wi-Fi or Ethernet. Model and stage traffic stay on your network, directly between the Macs; the run’s control messages still pass through the owner’s relay link.'}),
     el('label', {className:'check'}, acrossRadio, ' Macs on different networks (through the Mycelium relay)'),
-    el('p', {className:'detail', textContent:'For a Mac on another network, for example an iPhone hotspot. Both Macs register at relay.mycelium.now, which helps them find each other and carries their traffic when no direct path opens. The relay sees the Macs’ addresses and how much they send, never the content: it is encrypted end to end between the two Macs.'}));
+    el('p', {className:'detail', textContent:'For a Mac on another network, for example an iPhone hotspot. Both Macs register at relay.mycelium.now, which helps them find each other and carries their traffic when no direct path opens. Mycelium also tries direct paths across the internet, including to addresses the other Mac reports. The relay sees the Macs’ addresses and how much they send, never the content: it is encrypted end to end between the two Macs. The run’s control messages still pass through the owner’s relay link.'}));
   const mapPart = el('div', {},
     el('label', {className:'check'}, mapBox, ' Let this Mac ask its router to open a port (portmapping)'),
     el('p', {className:'detail', textContent:'Off by default. Used only in runs across networks, where it can give a direct connection instead of the relay. When it is on, macOS may ask whether Mycelium may find devices on your local network. This is this Mac’s own setting; it applies to the next run.'}));
@@ -717,7 +717,7 @@ for (const trigger of document.querySelectorAll('summary > button.disclosure-btn
   if (anchor) anchor.after(card); else document.getElementById('main')?.append(card);
   function describe(active) {
     if (!active) return '';
-    if (active.reach === 'relay') return `This run: Macs on different networks, through the Mycelium relay (${active.relay_url})${active.portmapping ? ', portmapping requested (whether the router opened a port cannot be seen in this build)' : ''}.`;
+    if (active.reach === 'relay') return `This run: Macs on different networks; the Mycelium relay (${active.relay_url}) may carry the traffic when no direct path opens (the live paths say which is used)${active.portmapping ? ', portmapping requested (whether the router opened a port cannot be seen in this build)' : ''}.`;
     if (active.reach === 'same_network') return 'This run: Macs on the same network.';
     return 'This run: this Mac only (no network to another Mac).';
   }

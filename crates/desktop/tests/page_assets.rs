@@ -386,3 +386,30 @@ fn the_network_section_shows_live_paths_and_portmapping_honestly() {
         "the section never claims a mapping"
     );
 }
+
+/// Lane XB patch 3 (REVIEW XB2-07): the section says what crosses which path. Same network: model
+/// and stage traffic stay on the network while the run's control messages still pass through the
+/// owner's relay link (never "nothing goes through the internet"). Different networks: the relay
+/// sees the Macs' addresses (not the content: encrypted end to end) and direct paths are tried,
+/// including to addresses the other Mac reports. A Mac that cannot cross networks gets
+/// network advice (one network, no VPN), not "update Mycelium".
+#[test]
+fn the_network_section_says_what_crosses_which_path() {
+    let section = network_section();
+    for needed in [
+        "Model and stage traffic stay on your network",
+        "control messages still pass through the owner’s relay link",
+        "sees the Macs’ addresses",
+        "never the content",
+        "encrypted end to end",
+        "tries direct paths",
+        "addresses the other Mac reports",
+        "turn off any VPN",
+    ] {
+        assert!(section.contains(needed), "the section lacks {needed}");
+    }
+    assert!(
+        !section.contains("nothing goes through the internet"),
+        "no unqualified privacy promise"
+    );
+}
