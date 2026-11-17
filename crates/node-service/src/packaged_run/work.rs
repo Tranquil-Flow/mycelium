@@ -452,9 +452,21 @@ impl Work {
         let Some(network) = resident.network.clone() else {
             return None;
         };
-        let Some((from, _)) = network.0.clone() else {
+        let Some((from, policy)) = network.0.clone() else {
             return None;
         };
+        // Lane XB patch 2 (XB-12): across networks the joined Mac's advertised private address
+        // names nothing on this network: no permission probe, no same-network advice.
+        if policy.relay().is_some() {
+            return Some(
+                owner_run::OwnerRunError::with(
+                    crate::packaged_work::reach::SILENT_VIA_RELAY,
+                    Some(&crate::packaged_work::reach::silent_via_relay_message(cause)),
+                    None,
+                )
+                .into(),
+            );
+        }
         let (Some((run, deployment)), bindings) = (resident.run.clone(), resident.bindings.clone())
         else {
             return None;

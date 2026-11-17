@@ -831,3 +831,43 @@ fn the_slices_step_names_an_unanswered_dial_through_the_composed_wrapper() {
         "teardown did not take the workflow: {closed:?}"
     );
 }
+
+/// Lane XB patch 2 (REVIEW XB-12): across networks the joined Mac's advertised private address
+/// names nothing on this Mac's network. A relay run's step-6 dial without an answer is named
+/// `joined_mac_did_not_answer_via_relay` (relay advice, no same-network advice) and sends ZERO
+/// local-network permission probes; another cause passes unnamed, as on the LAN.
+#[test]
+fn a_relay_runs_unanswered_dial_is_named_via_the_relay_with_zero_local_network_probes() {
+    let f = Fixture::on(lan_on_loopback());
+    let mut ports = PackagedChainPorts::new(&f.host, None, None);
+    let probe = Scripted::new(Answer::Blocked);
+    ports.work.probe = probe.clone();
+    let loopback = std::net::IpAddr::from([127, 0, 0, 1]);
+    let across = runtime::iroh_host::LanPolicy::with_explicit(vec![loopback])
+        .unwrap()
+        .across_networks("http://127.0.0.1:1".parse().unwrap());
+    {
+        let mut resident = lock(&ports.work.resident);
+        resident.network = Some(NetworkChoice(Some((loopback, across))));
+        resident.run = Some(("run-relay".into(), "dep-run-relay".into()));
+    }
+    let named = ports
+        .work
+        .named_dial_failure("control_call_failed:control_connect_timeout");
+    let (code, message) = refusal(Err(named.expect("named via the relay")));
+    assert_eq!(code, "joined_mac_did_not_answer_via_relay");
+    assert!(
+        message.contains("relay") && !message.contains("same Wi-Fi"),
+        "{message}"
+    );
+    assert!(
+        ports.work.named_dial_failure("member_consent_required").is_none(),
+        "another cause passes unnamed"
+    );
+    assert!(
+        probe.sent().is_empty(),
+        "no local-network probe across networks: {:?}",
+        probe.sent()
+    );
+    drop(f);
+}
