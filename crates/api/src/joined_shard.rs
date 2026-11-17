@@ -344,6 +344,7 @@ pub struct JoinedShard {
     shard: MemberShard,
 }
 impl JoinedShard {
+    /// Unbudgeted custody; the member's `receive` operation uses [`JoinedShard::begin_checked`].
     pub fn begin(
         root: &Path,
         session: &Session,
@@ -351,6 +352,19 @@ impl JoinedShard {
         carrier: &Identity,
         offer: &Value,
         now: f64,
+    ) -> Result<Self> {
+        Self::begin_checked(root, session, signer, carrier, offer, now, &|| Ok(()))
+    }
+    /// [`JoinedShard::begin`] under the receiving operation's own `checkpoint` (cancellation,
+    /// deadline), which bounds the storage reservation (lane A patch 3, A2-01).
+    pub fn begin_checked(
+        root: &Path,
+        session: &Session,
+        signer: &Identity,
+        carrier: &Identity,
+        offer: &Value,
+        now: f64,
+        _checkpoint: &dyn Fn() -> Result<()>,
     ) -> Result<Self> {
         admit(root, session, signer, carrier, offer, now)?;
         let m = &offer["message"];

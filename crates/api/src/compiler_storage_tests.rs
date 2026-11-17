@@ -844,3 +844,50 @@ fn a_retirement_pass_over_eight_live_runs_waits_one_allowance_in_total() {
     );
     drop(live);
 }
+
+/// Lane A patch 3, A2-01 (REVIEW-laneA-p2-astra.md), the producer's side: a compile stopped while
+/// its stage-output reservation waits for a busy storage ledger ends by its own name
+/// (`compiler_stopped`) at the first poll past the Stop, and writes no reservation, even when the
+/// ledger frees inside a fresh close allowance.
+#[test]
+fn a_compile_stopped_while_its_reservation_waits_for_the_ledger_reserves_nothing() {
+    use std::sync::{Arc, atomic::AtomicBool};
+    let poll = std::time::Duration::from_millis(
+        budgets::BudgetId::OwnerPoll
+            .span(budgets::Entries::ZERO)
+            .unwrap()
+            .millis(),
+    );
+    let f = Fixture::new();
+    let runs = f.root.join("chain-runs");
+    let mut artifact = f.emit_run("stopped");
+    let stop = Arc::new(AtomicBool::new(false));
+    artifact.bind_cancellation(stop.clone()).unwrap();
+    drop(storage_ledger(&runs).unwrap());
+    let ledger = fs::File::open(runs.join(STORAGE_LOCK)).unwrap();
+    ledger.try_lock().unwrap();
+    let holder = std::thread::spawn(move || {
+        std::thread::sleep(poll / 2);
+        stop.store(true, Ordering::SeqCst);
+        std::thread::sleep(poll * 5 / 2);
+        drop(ledger);
+    });
+    let started = std::time::Instant::now();
+    let got = artifact
+        .reserve_stage_output(300)
+        .map(drop)
+        .map_err(|e| e.0);
+    let waited = started.elapsed();
+    holder.join().unwrap();
+    assert_eq!(got, Err("compiler_stopped"));
+    assert!(
+        waited < poll * 2,
+        "the reservation's ledger wait outlived the compile's Stop: {waited:?}"
+    );
+    let (_lock, ledger) = storage_ledger(&runs).unwrap();
+    assert_eq!(
+        ledger["entries"]["stopped"],
+        Value::Null,
+        "no reservation written"
+    );
+}

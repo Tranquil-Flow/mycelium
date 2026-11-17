@@ -62,6 +62,21 @@ impl Fixture {
         )
         .unwrap()
     }
+    fn begin_checked(
+        &self,
+        run: &str,
+        checkpoint: &dyn Fn() -> Result<(), api::compiler_inputs::Error>,
+    ) -> Result<MemberShard, api::compiler_inputs::Error> {
+        MemberShard::begin_checked(
+            &self.root,
+            run,
+            "node-0",
+            &self.transfer,
+            &self.recipe,
+            self.recipe["node_plan_digest"].as_str().unwrap(),
+            checkpoint,
+        )
+    }
     fn resume(&self, run: &str) -> Result<MemberShard, api::compiler_inputs::Error> {
         MemberShard::resume(
             &self.root,
@@ -553,4 +568,84 @@ fn a_ledger_freed_after_the_deadline_is_not_committed() {
     holder.join().unwrap();
     assert_eq!(got.map_err(|e| e.0), Err("member_operation_deadline"));
     assert_eq!(phase(&f, "late"), "cleanup_required");
+}
+
+/// Lane A patch 3, A2-01 (REVIEW-laneA-p2-astra.md): taking custody reserves storage under the
+/// storage ledger's lock. A busy ledger is waited for under the RECEIVING OPERATION's own bound:
+/// an operation whose deadline passes while another holder keeps the ledger is refused by its own
+/// name at about its deadline, and no reservation is written (a fresh close allowance would let it
+/// commit a `cleanup_required` charge after its operation ended).
+#[test]
+fn a_reservation_waiting_on_a_busy_ledger_ends_at_the_operations_deadline_unreserved() {
+    use std::time::Instant;
+    let f = Fixture::new();
+    drop(f.begin("first"));
+    let ledger = held_ledger(&f);
+    let started = Instant::now();
+    let deadline = started + poll() / 2;
+    // The other holder lets go well after the deadline, inside a fresh close allowance.
+    let holder = std::thread::spawn(move || {
+        std::thread::sleep(poll() * 3);
+        drop(ledger);
+    });
+    let got = f.begin_checked("deadline", &|| {
+        if Instant::now() >= deadline {
+            Err(api::compiler_inputs::Error("member_operation_deadline"))
+        } else {
+            Ok(())
+        }
+    });
+    let waited = started.elapsed();
+    holder.join().unwrap();
+    assert_eq!(
+        got.map(drop).map_err(|e| e.0),
+        Err("member_operation_deadline")
+    );
+    assert!(
+        waited < poll() * 2,
+        "the reservation's ledger wait outlived the operation's deadline: {waited:?}"
+    );
+    assert_eq!(phase(&f, "deadline"), Value::Null, "no reservation written");
+    assert_eq!(
+        f.charge(),
+        f.bytes.len() as u64,
+        "only the first run is charged"
+    );
+}
+/// A2-01, the ledger freed inside the reservation's wait: the operation is re-checked after the
+/// lock is taken and immediately before the reservation is written. Deterministic, one thread:
+/// this test holds the ledger, so the checkpoint's FIRST call is the reservation's busy wait (the
+/// operation still current: the test lets the ledger go there); the operation ends before the
+/// next call, which can only be the re-check after the acquisition.
+#[test]
+fn a_ledger_freed_inside_the_reservation_wait_is_rechecked_before_reserving() {
+    let f = Fixture::new();
+    drop(f.begin("first"));
+    let held = std::cell::RefCell::new(Some(held_ledger(&f)));
+    let calls = std::cell::Cell::new(0);
+    let got = f.begin_checked("cancelled", &|| {
+        calls.set(calls.get() + 1);
+        match held.borrow_mut().take() {
+            Some(ledger) => {
+                drop(ledger);
+                Ok(())
+            }
+            None => Err(api::compiler_inputs::Error("member_operation_cancelled")),
+        }
+    });
+    let calls = calls.get();
+    assert_eq!(
+        got.map(drop).map_err(|e| e.0),
+        Err("member_operation_cancelled")
+    );
+    assert_eq!(
+        calls, 2,
+        "one call in the busy wait (ledger held), then the re-check after acquiring it"
+    );
+    assert_eq!(
+        phase(&f, "cancelled"),
+        Value::Null,
+        "no reservation written"
+    );
+    assert_eq!(f.charge(), f.bytes.len() as u64);
 }

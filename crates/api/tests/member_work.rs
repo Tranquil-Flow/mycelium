@@ -361,11 +361,6 @@ fn a_share_above_the_members_caps_is_refused_by_name_before_custody() {
 /// A seed-signed shard offer for this member, transfer `run` (`<owner run>-transfer-<stage>`), and
 /// the member's custody of it (no bytes fetched: nothing reaches a native worker).
 fn custody(member: &Joined, run: &str) -> (Value, api::joined_shard::JoinedShard) {
-    let fixture: Value = serde_json::from_str(include_str!(
-        "../../planner/tests/fixtures/source-slices.json"
-    ))
-    .unwrap();
-    let case = &fixture["cases"][0];
     let session = member.session.lock().unwrap().clone().unwrap();
     let carrier_key = iroh::SecretKey::generate();
     let carrier = Identity::from_secret(
@@ -373,23 +368,7 @@ fn custody(member: &Joined, run: &str) -> (Value, api::joined_shard::JoinedShard
         &member.signer.secret_bytes(),
     )
     .unwrap();
-    let registration =
-        api::joined_shard::register(&session, &member.signer, &carrier, app_host::now()).unwrap();
-    let mut recipe = case["node_plans"]["node-0"].clone();
-    recipe["node_id"] = json!(session.node_id());
-    recipe.as_object_mut().unwrap().remove("node_plan_digest");
-    recipe["node_plan_digest"] = json!(protocol::canonical::digest(&recipe).unwrap());
-    let source_key = iroh::SecretKey::generate();
-    let source = Identity::from_secret(&source_key.public().to_string(), &[9; 32]).unwrap();
-    let offer = api::joined_shard::issue(
-        &member.seed.coordinator,
-        &registration,
-        run,
-        &case["node_files"]["node-0"][0],
-        &recipe,
-        &source,
-    )
-    .unwrap();
+    let offer = offer_for(member, run, &carrier);
     let shard = api::joined_shard::JoinedShard::begin(
         &member.member_root,
         &session,
@@ -400,6 +379,32 @@ fn custody(member: &Joined, run: &str) -> (Value, api::joined_shard::JoinedShard
     )
     .unwrap();
     (offer, shard)
+}
+/// A seed-signed shard offer for this member's carrier `carrier`, transfer `run`.
+fn offer_for(member: &Joined, run: &str, carrier: &Identity) -> Value {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../planner/tests/fixtures/source-slices.json"
+    ))
+    .unwrap();
+    let case = &fixture["cases"][0];
+    let session = member.session.lock().unwrap().clone().unwrap();
+    let registration =
+        api::joined_shard::register(&session, &member.signer, carrier, app_host::now()).unwrap();
+    let mut recipe = case["node_plans"]["node-0"].clone();
+    recipe["node_id"] = json!(session.node_id());
+    recipe.as_object_mut().unwrap().remove("node_plan_digest");
+    recipe["node_plan_digest"] = json!(protocol::canonical::digest(&recipe).unwrap());
+    let source_key = iroh::SecretKey::generate();
+    let source = Identity::from_secret(&source_key.public().to_string(), &[9; 32]).unwrap();
+    api::joined_shard::issue(
+        &member.seed.coordinator,
+        &registration,
+        run,
+        &case["node_files"]["node-0"][0],
+        &recipe,
+        &source,
+    )
+    .unwrap()
 }
 /// The owner's `prepare_native` for stage [0, 14) with a fresh challenge.
 fn prepare(work: &mut Work, member: &Joined) -> Result<Value, String> {
@@ -1022,4 +1027,125 @@ fn r2_invalid_route_expiries_refuse_without_panicking() {
         failures.is_empty(),
         "invalid owner routes must refuse route_invalid without process death: {failures:#?}"
     );
+}
+
+// ---- Lane A patch 3, A2-01 (REVIEW-laneA-p2-astra.md): custody's storage reservation is bounded
+// by the `receive` operation ----
+//
+// `receive` takes custody (`JoinedShard::begin` -> `MemberShard::begin` -> the storage
+// reservation) under the storage ledger's lock. Another holder keeping the ledger busy must not
+// carry the reservation past the operation's own deadline or cancellation: the operation ends by
+// its own name and no `cleanup_required` reservation is written.
+
+/// How a [`receive_on_a_busy_ledger`] operation ends while the ledger is held.
+enum Ends {
+    /// Its deadline passes half an owner poll after it starts.
+    Deadline,
+    /// It is cancelled half an owner poll after it starts.
+    Cancelled,
+}
+/// One real `receive` of a seed-signed offer for transfer `run`, while another holder keeps the
+/// member's storage ledger for three owner polls (inside one close allowance). Returns the
+/// receive's answer, how long it took, and the run's ledger row afterwards.
+fn receive_on_a_busy_ledger(
+    member: &Joined,
+    run: &str,
+    ends: Ends,
+) -> (Result<Value, String>, Duration, Value) {
+    let poll = test_span(B::OwnerPoll);
+    // An earlier transfer's custody creates the ledger (its charge stays: custody kept).
+    let (_, earlier) = custody(member, &format!("{run}-earlier"));
+    drop(earlier);
+    let ledger_path = member
+        .member_root
+        .join("chain-runs/compiler-storage.private.json");
+    let lock = fs::File::open(member.member_root.join("chain-runs/compiler-storage.lock")).unwrap();
+    lock.try_lock().unwrap();
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let clock = api::managed_carrier::HostClock::default();
+    let bind_end = clock
+        .monotonic()
+        .checked_add(B::RouterClose.span(Entries::ZERO).unwrap())
+        .unwrap();
+    let host = LoopbackHost::bind(&rt, &clock, bind_end).unwrap();
+    let endpoint = host.address().unwrap().id;
+    let carrier =
+        Identity::from_secret(&endpoint.to_string(), &member.signer.secret_bytes()).unwrap();
+    let offer = offer_for(member, run, &carrier);
+    let source = iroh::SecretKey::generate().public();
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let started = Instant::now();
+    let deadline = match ends {
+        Ends::Deadline => started + poll / 2,
+        Ends::Cancelled => started + test_span(B::MemberChosenWall),
+    };
+    let operation = Operation {
+        request: json!({"command":"receive","operation_id":1,"offer":offer,
+            "source_id":source.to_string(),"source_socket":"127.0.0.1:9"}),
+        cancelled: cancelled.clone(),
+        deadline,
+        origin: Origin::Remote,
+        id: Some(1),
+    };
+    let cancel = matches!(ends, Ends::Cancelled).then_some(cancelled);
+    let holder = std::thread::spawn(move || {
+        std::thread::sleep(poll / 2);
+        if let Some(cancel) = cancel {
+            cancel.store(true, Ordering::SeqCst);
+        }
+        std::thread::sleep(poll * 5 / 2);
+        drop(lock);
+    });
+    let mut work = Work::new(member.member_root.clone());
+    let got = work.receive(
+        Some(member),
+        &Carrier {
+            host: &host,
+            runtime: &rt,
+            clock: &clock,
+            endpoint,
+            lan: None,
+        },
+        &member.signer,
+        &carrier,
+        &operation,
+    );
+    let waited = started.elapsed();
+    holder.join().unwrap();
+    drop(work.shard.take());
+    let row = serde_json::from_slice::<Value>(&fs::read(ledger_path).unwrap()).unwrap()["entries"]
+        [run]
+        .clone();
+    (got, waited, row)
+}
+#[test]
+fn a_receive_whose_deadline_passes_on_a_busy_ledger_reserves_nothing() {
+    let member = Joined::new();
+    member.grant();
+    member.bind();
+    let (got, waited, row) = receive_on_a_busy_ledger(&member, "run-a2-transfer-0", Ends::Deadline);
+    assert_eq!(got, Err("member_operation_deadline".into()));
+    assert!(
+        waited < test_span(B::OwnerPoll) * 2,
+        "the reservation's ledger wait outlived the receive's deadline: {waited:?}"
+    );
+    assert_eq!(row, Value::Null, "no reservation written");
+}
+#[test]
+fn a_receive_cancelled_on_a_busy_ledger_reserves_nothing() {
+    let member = Joined::new();
+    member.grant();
+    member.bind();
+    let (got, waited, row) =
+        receive_on_a_busy_ledger(&member, "run-a2-transfer-1", Ends::Cancelled);
+    assert_eq!(got, Err("member_operation_cancelled".into()));
+    assert!(
+        waited < test_span(B::OwnerPoll) * 2,
+        "the reservation's ledger wait outlived the receive's cancellation: {waited:?}"
+    );
+    assert_eq!(row, Value::Null, "no reservation written");
 }

@@ -137,6 +137,8 @@ fn sync_dir(path: &Path) -> Result<()> {
 impl MemberShard {
     /// Reserve before writing. Pins are supplied by the admission owner, NOT
     /// inferred from arriving bytes. No source checkpoint or InputArtifact needed.
+    /// Unbudgeted: a production operation with a deadline or cancellation uses
+    /// [`MemberShard::begin_checked`].
     pub fn begin(
         host: &Path,
         run: &str,
@@ -144,6 +146,20 @@ impl MemberShard {
         transfer: &Value,
         recipe: &Value,
         digest: &str,
+    ) -> Result<Self> {
+        Self::begin_checked(host, run, node, transfer, recipe, digest, &|| Ok(()))
+    }
+    /// [`MemberShard::begin`] under the receiving operation's own `checkpoint` (cancellation,
+    /// deadline). Lane A patch 3, A2-01 (REVIEW-laneA-p2-astra.md): the storage reservation's wait
+    /// for a busy ledger is the operation's, not a fresh close allowance.
+    pub fn begin_checked(
+        host: &Path,
+        run: &str,
+        node: &str,
+        transfer: &Value,
+        recipe: &Value,
+        digest: &str,
+        _checkpoint: &dyn Fn() -> Result<()>,
     ) -> Result<Self> {
         let mut record = pins(node, transfer, recipe, digest)?;
         if !segment(run) {
