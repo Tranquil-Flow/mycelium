@@ -5,12 +5,15 @@
 //! loopback, real stage custody, no native worker and no model. The cases:
 //! (a) the owner's run close leaves the owner's work owed (a stage it cannot prove released), and
 //!     a joined Mac's work service still holds a stage at its Quit;
+//! (c) a workflow Stop that never returns (row 44) still lets Quit end, `Unproven`, bounded.
 //! Case (b) (a failed publish closes the prepared stage) is `api/tests/owner_work.rs`.
 use super::regressions::{Rescue, setup, stage_root};
 use super::serving_r3::patience;
 use super::*;
-use desktop::lifecycle::CleanupError;
+use budgets::Span;
+use desktop::lifecycle::{Cleanup, CleanupError, QuitSource, Shutdown, State, quit_allowance};
 use std::os::unix::fs::PermissionsExt;
+use std::sync::mpsc;
 
 /// An owner run installed on the fixture's host, never started (no chain is ever built).
 fn installed(f: &Fixture) -> (OwnerRun, RunConfig) {
@@ -132,4 +135,101 @@ fn a_joined_macs_quit_with_its_work_service_holding_a_stage_is_unproven() {
         released,
         "the same Service owner releases it once the fault is gone"
     );
+}
+
+/// The packaged window's Quit (`assemble`, then the run's close first) over model-free services
+/// and `config`'s run.
+fn window_quit(f: &Fixture, config: &RunConfig) -> crate::packaged::AppCleanup {
+    let root = f.root.join("window");
+    let dirs = crate::packaged::prepare_dirs(&root).unwrap();
+    let node = NodeService::new(
+        Arc::new(NoNative),
+        "qv-window".into(),
+        crate::native::development_qualification().unwrap(),
+    );
+    let source = crate::app_host::ModelSource::hub(root.clone());
+    let services = crate::desktop_host::DesktopServices::with_model_source(
+        node,
+        crate::packaged::CALLBACK_CAPACITY,
+        &dirs.private,
+        source.clone(),
+    );
+    let (_core, mut cleanup) = crate::packaged::assemble(services, source);
+    crate::packaged::close_run_first(&mut cleanup, config.clone());
+    cleanup
+}
+/// What the shell's Quit ended with: its state, its exit status and the real time it took.
+type Verdict = (State, Option<i32>, Duration);
+/// The shell's Quit over `cleanup`, requested `into` its allowance ago (the cleanup's clock origin
+/// bound that far back: no real wait), ticked every 20 ms on its own thread until it has a result.
+fn quit_on_thread(
+    mut cleanup: crate::packaged::AppCleanup,
+    into: Duration,
+) -> mpsc::Receiver<Verdict> {
+    let allowance = quit_allowance().unwrap();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let began = Instant::now();
+        let origin = began
+            .checked_sub(into)
+            .expect("the clock reaches that far back");
+        cleanup.bind_clock(origin).unwrap();
+        let mut shutdown = Shutdown::new(cleanup, allowance).unwrap();
+        let shell_now = || Span::from_millis(u64::try_from(origin.elapsed().as_millis()).unwrap());
+        shutdown.request(QuitSource::Menu, Span::ZERO);
+        let state = loop {
+            let state = shutdown.tick(shell_now());
+            if state != State::Stopping {
+                break state;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        tx.send((state, shutdown.exit_status(), began.elapsed()))
+            .unwrap_or_default();
+    });
+    rx
+}
+
+/// Proves: B5/QV (c) (ledger row 44's residual: "if the workflow Stop itself never returns, Quit
+/// never completes"; trunk issued that Stop on the window's thread). A run outside its serving
+/// step has its workflow Stop issued as Quit begins; that Stop never returns here. Quit still
+/// ends: at its deadline it waits for the Stop only within the post-deadline window the relay's
+/// own close budgets already give it (lane CHATPAGE patch 3), then reports
+/// `Unproven("workflow_stop_unreturned")` and exit 3, never `Verified` and never forever.
+#[test]
+fn a_workflow_stop_that_never_returns_still_ends_the_quit_unproven_within_its_bound() {
+    let f = Fixture::new();
+    let (_run, config) = installed(&f);
+    let (entered_tx, entered) = mpsc::channel();
+    let (release, held) = mpsc::channel::<()>();
+    let parked = Mutex::new((Some(entered_tx), held));
+    lock(&f.host.custody).work_stop = Some(Arc::new(move || {
+        let mut parked = lock(&parked);
+        if let Some(entered) = parked.0.take() {
+            entered.send(()).unwrap_or_default();
+            // Never returns while the test runs: released (or dropped) only after the verdict.
+            parked.1.recv().unwrap_or(());
+        }
+    }));
+    let allowance = Duration::from_millis(quit_allowance().unwrap().millis());
+    let left = Duration::from_secs(2);
+    let verdict = quit_on_thread(window_quit(&f, &config), allowance - left);
+    let issued = entered.recv_timeout(patience());
+    let relay = crate::packaged_network::RelayClose::allowance().unwrap();
+    let ended = verdict.recv_timeout(left + relay + patience());
+    drop(release);
+    lock(&f.host.custody).work_stop = None;
+    eprintln!("B5_QV_STOP_UNRETURNED issued={issued:?} ended={ended:?}");
+    assert!(issued.is_ok(), "Quit issues the workflow Stop as it begins");
+    let (state, exit, took) = ended.expect("Quit never ended: the workflow Stop held it");
+    assert_eq!(
+        (state, exit),
+        (
+            State::Failed(CleanupError::Unproven("workflow_stop_unreturned")),
+            Some(3)
+        ),
+        "after {took:?}"
+    );
+    assert!(took >= left, "Quit ended before its deadline: {took:?}");
+    assert!(took < left + relay + patience(), "{took:?}");
 }
