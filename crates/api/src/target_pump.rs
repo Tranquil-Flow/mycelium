@@ -60,10 +60,12 @@ fn archive_failed<T>(_: T) -> &'static str {
     "control_archive_failed"
 }
 #[cfg(test)]
+type SyncHook = fn(&Path) -> std::io::Result<()>;
+#[cfg(test)]
 std::thread_local! {
     /// Test-only: runs before each archive fsync with the synced path; an `Err` stands for that
     /// fsync failing (thread-local, so parallel tests stay isolated).
-    pub(crate) static ARCHIVE_SYNC: std::cell::Cell<Option<fn(&Path) -> std::io::Result<()>>> =
+    pub(crate) static ARCHIVE_SYNC: std::cell::Cell<Option<SyncHook>> =
         const { std::cell::Cell::new(None) };
 }
 /// fsync `path` (an archive file or the archive directory).
