@@ -3,7 +3,7 @@
 //! model is `Qwen/Qwen3-0.6B`, the only model proven across two Macs (the hermetic ten-row gate and
 //! the rv40 physical run), and the picker stops claiming that Qwen2.5-0.5B is "tested on two Macs".
 //! v0.1.4's default (`run_model.py`, `demo_default` = `a9-route`, Qwen2.5-0.5B-Instruct, "tested
-//! starter") is a recorded v0.2 divergence (`api::preferences::run_model::v02_divergence`).
+//! starter") is a recorded v0.2 divergence (`contracts/divergences.json` `run_model_default`).
 use api::preferences::run_model;
 use std::{fs, path::PathBuf};
 
@@ -17,7 +17,6 @@ fn root(tag: &str) -> PathBuf {
 }
 
 #[test]
-#[ignore = "B13 parked: the product change (qualification/laneC/b13-product.patch) turns 8+ oracle and golden suites red (REPORT-laneC-release.md, B13)"]
 fn a_fresh_install_runs_qwen3_0_6b_the_one_model_proven_on_two_macs() {
     let dir = root("fresh");
     let model = run_model::selected_model(&dir, None).unwrap();
@@ -53,7 +52,6 @@ fn a_fresh_install_runs_qwen3_0_6b_the_one_model_proven_on_two_macs() {
 }
 
 #[test]
-#[ignore = "B13 parked: the product change (qualification/laneC/b13-product.patch) turns 8+ oracle and golden suites red (REPORT-laneC-release.md, B13)"]
 fn the_picker_says_which_model_was_tested_on_two_macs() {
     let dir = root("labels");
     let document = run_model::document(&dir, None, None).unwrap();

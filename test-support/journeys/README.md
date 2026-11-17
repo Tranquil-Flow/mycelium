@@ -143,7 +143,7 @@ or permission to expand a user's consent. Source values and provenance live in
 | Owner status has no member standing grant; grant filename | `mycelium_a13_macos/app.py:1214-1236`; `mycelium_a13_macos/standing_consent.py:33-51` |
 | Owner initial membership/status/TLS/contribution fields | `mycelium_a13_macos/authority.py:638-706` |
 | Normal-mode default false, saved next-run modes | `mycelium_a13_macos/fast_mode.py:16-37,53-69` |
-| Starter a9-route; qwen3-0.6b picker; saved model | `mycelium_a13_macos/run_model.py:34-43,75-113,116-131` |
+| Starter a9-route; qwen3-0.6b picker; saved model | `mycelium_a13_macos/run_model.py:34-43,75-113,116-131`; the Rust target swaps the two (starter qwen3-0.6b, pick a9-route: `Target::run_model`, `crates/api/contracts/divergences.json` `run_model_default`) |
 | Selection opens acquisition but never starts it | `mycelium_a13_macos/app.py:649-672,855-868` |
 | Idle/zero-byte new acquisition; CLOSED survives restart | `mycelium_a13_macos/acquisition.py:853-881,905-914,1524-1548` |
 | Supported Mac peer class, signature validation before approval | `mycelium_a13_macos/pairing.py:42-44,200-248` |

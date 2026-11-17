@@ -315,17 +315,19 @@ pub mod run_model {
         private_state::store(&root.join(FILE), &record, MAX).map_err(|e| PublicError::new(409, e.0))
     }
     /// Run-model labels, pinned snapshot and int8 resident sizes of the four picker choices
-    /// (run_model.CHOICES).
+    /// (run_model.CHOICES). v0.2 divergence (B13, ORCHESTRATOR DECISION 17 Nov 2026, reversible,
+    /// on ruling 28; `contracts/divergences.json` `run_model_default`): Qwen3-0.6B is the one model
+    /// proven across two Macs, so its text says so and Qwen2.5-0.5B's no longer does.
     const CHOICE_ROWS: [(&str, &str, u64, u64); 4] = [
         (
             "a9-route",
-            "Qwen2.5-0.5B-Instruct \u{2014} tested starter (tested on two Macs; ~1 GB download if not cached)",
+            "Qwen2.5-0.5B-Instruct (not yet tested on two Macs; ~1 GB download if not cached)",
             999_604_126,
             500_000_000,
         ),
         (
             "qwen3-0.6b",
-            "Qwen3-0.6B (not yet tested on two Macs)",
+            "Qwen3-0.6B \u{2014} tested starter (tested on two Macs; ~1.5 GB download if not cached)",
             1_519_209_243,
             750_000_000,
         ),
@@ -342,6 +344,9 @@ pub mod run_model {
             14_800_000_000,
         ),
     ];
+    /// v0.2's built-in run model for an installation with no saved choice and no environment
+    /// override: Qwen3-0.6B (B13; v0.1.4's is `a9-route`, run_model.py:69-75, a recorded divergence).
+    pub const DEMO_DEFAULT: &str = "qwen3-0.6b";
     /// `MYCELIUM_A13_RUN_MODEL`: the operator override of the picker.
     pub const ENV: &str = "MYCELIUM_A13_RUN_MODEL";
     /// Run-time facts the caller owns (os.environ, app flags, host memory).
@@ -356,11 +361,12 @@ pub mod run_model {
         let index = CHOICES.iter().position(|c| *c == name)?;
         model_catalog::registered().get(index + 1)
     }
+    /// `demo_default_choice()` with v0.2's starter ([`DEMO_DEFAULT`], B13).
     fn demo_default_choice() -> Option<&'static str> {
-        let starter = picker_model("a9-route")?;
+        let starter = picker_model(DEMO_DEFAULT)?;
         (model_catalog::owner_storage_requirement(starter)
             <= model_catalog::storage_consent_ceiling())
-        .then_some("a9-route")
+        .then_some(DEMO_DEFAULT)
     }
     /// `app_run_model`: `(name, source, model)`. A bad environment value or unreadable state is
     /// a builtin `ValueError` in the source, hence the collapsed 409.

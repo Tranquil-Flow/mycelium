@@ -210,10 +210,15 @@ fn consent() -> Value {
 }
 
 /// `/api/create`, then `/api/model/download` of the tiny snapshot until the owner's acquisition
-/// prepared it (its `status.json` in v0.1.4's `model-source-*` root).
+/// prepared it (its `status.json` in v0.1.4's `model-source-*` root). The repository serves the
+/// tiny Qwen2 snapshot of `a9-route` (`SOURCE`): the owner takes that run model explicitly through
+/// the picker, since v0.2's starter is Qwen3-0.6B (B13, `api/contracts/divergences.json`
+/// `run_model_default`). These tests are about the run, not the default.
 fn create_and_prepare(mac: &Mac) {
     let created = mac.post("/api/create", json!({"consent": consent()}));
     assert_eq!(created.0, 200, "create: {}", created.1);
+    let chosen = mac.post("/api/run-model", json!({"choice": "a9-route"}));
+    assert_eq!(chosen.0, 200, "run-model: {}", chosen.1);
     let grant = json!({"consent": {"download_acknowledged": true,
         "max_download_bytes": 10_000_000u64, "storage_limit_bytes": 10_000_000u64}});
     let started = mac.post("/api/model/download", grant);

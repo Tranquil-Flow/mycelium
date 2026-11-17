@@ -172,7 +172,7 @@ pub fn execute(target: &Target, real_home: &Path, run: &mut Run) -> Result<()> {
     let mut member = App::launch(target, real_home, None)?;
     let mut signed_request = Value::Null;
     let action = (|| {
-        run.status(&mut member,"first_run",APP,json!({"/installation_role":"owner","/resource_policy":null,"/authority/swarm_created":false,"/authority/membership_state":"absent","/fast_mode/enabled":false,"/fast_mode/source":"default","/fast_mode/locked":false,"/run_model/selected":"a9-route","/run_model/source":"demo_default","/run_model/locked":false,"/network/state":"private","/swarm/enabled":false,"/serving/route_ready":false}))?;
+        run.status(&mut member,"first_run",APP,json!({"/installation_role":"owner","/resource_policy":null,"/authority/swarm_created":false,"/authority/membership_state":"absent","/fast_mode/enabled":false,"/fast_mode/source":"default","/fast_mode/locked":false,"/run_model/selected":target.starter_run_model()?,"/run_model/source":"demo_default","/run_model/locked":false,"/network/state":"private","/swarm/enabled":false,"/serving/route_ready":false}))?;
         let page = member.api()?.get("/")?;
         require(page.status == 200, "ui:status")?;
         let html = page.text()?;
@@ -324,16 +324,17 @@ pub fn execute(target: &Target, real_home: &Path, run: &mut Run) -> Result<()> {
             404,
             json!({"/error":"not_found"}),
         )?;
-        let response = owner
-            .api()?
-            .post("/api/run-model", &json!({"choice":"qwen3-0.6b"}))?;
+        let response = owner.api()?.post(
+            "/api/run-model",
+            &json!({"choice":target.picked_run_model()?}),
+        )?;
         run.observe(
             "choose_model_without_download",
             MODEL,
             ("POST", "/api/run-model"),
             response,
             200,
-            json!({"/selected":"qwen3-0.6b","/source":"saved","/locked":false}),
+            json!({"/selected":target.picked_run_model()?,"/source":"saved","/locked":false}),
         )?;
         let response = owner
             .api()?
@@ -352,7 +353,7 @@ pub fn execute(target: &Target, real_home: &Path, run: &mut Run) -> Result<()> {
     run.finish(&mut owner, action)?;
     let mut fast = App::launch(target, real_home, Some(&owner.scratch))?;
     let action = (|| {
-        run.status(&mut fast,"fast_restart_preserved",MODE,json!({"/fast_mode/enabled":true,"/fast_mode/source":"saved","/run_model/selected":"qwen3-0.6b","/run_model/source":"saved","/resource_policy/storage_bytes":4_000_000_000u64,"/authority/swarm_created":true,"/authority/membership_state":"current"}))?;
+        run.status(&mut fast,"fast_restart_preserved",MODE,json!({"/fast_mode/enabled":true,"/fast_mode/source":"saved","/run_model/selected":target.picked_run_model()?,"/run_model/source":"saved","/resource_policy/storage_bytes":4_000_000_000u64,"/authority/swarm_created":true,"/authority/membership_state":"current"}))?;
         no_standing(&fast)?;
         let response = fast
             .api()?
@@ -370,7 +371,7 @@ pub fn execute(target: &Target, real_home: &Path, run: &mut Run) -> Result<()> {
     run.finish(&mut fast, action)?;
     let mut normal = App::launch(target, real_home, Some(&fast.scratch))?;
     let action = (|| {
-        run.status(&mut normal,"normal_restart_preserved",MODE,json!({"/fast_mode/enabled":false,"/fast_mode/source":"saved","/fast_mode/locked":false,"/run_model/selected":"qwen3-0.6b","/resource_policy/storage_bytes":4_000_000_000u64}))?;
+        run.status(&mut normal,"normal_restart_preserved",MODE,json!({"/fast_mode/enabled":false,"/fast_mode/source":"saved","/fast_mode/locked":false,"/run_model/selected":target.picked_run_model()?,"/resource_policy/storage_bytes":4_000_000_000u64}))?;
         no_standing(&normal)?;
         Ok(())
     })();

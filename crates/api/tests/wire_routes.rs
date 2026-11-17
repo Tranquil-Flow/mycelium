@@ -14,7 +14,7 @@ use api::{
     schema::PublicError,
     wire::{Json, Text},
 };
-use oracle_context::at_product_context_bytes;
+use oracle_context::{at_product_context_bytes, at_product_picker_bytes};
 use serde_json::{Map, Value, json};
 use std::{fs, path::PathBuf};
 
@@ -106,7 +106,10 @@ fn run_model_documents_are_byte_identical_over_state_env_memory() {
         }
         let env = (parts[1] != "None").then_some(parts[1]);
         let got = run_model::document_json(&dir, env, memory(parts[2])).unwrap();
-        let expected = at_product_context_bytes(expected.as_str().unwrap());
+        // v0.2's starter and picker texts (B13), then the serving context: the oracle side of
+        // each is checked by the transform before it moves.
+        let expected =
+            at_product_context_bytes(&at_product_picker_bytes(expected.as_str().unwrap()));
         assert_eq!(bytes(&got), expected, "{key}");
         fs::remove_dir_all(dir).unwrap();
     }
@@ -132,7 +135,8 @@ fn run_model_choose_bodies_are_byte_identical() {
         let got = app(&dir, host)
             .action_json("/api/run-model", &body(&case["body"]))
             .unwrap();
-        let expected = at_product_context_bytes(expected.as_str().unwrap());
+        let expected =
+            at_product_context_bytes(&at_product_picker_bytes(expected.as_str().unwrap()));
         assert_eq!(bytes(&got), expected, "{label}");
         fs::remove_dir_all(dir).unwrap();
     }
@@ -299,7 +303,7 @@ mod http {
         );
         assert_eq!(
             String::from_utf8(reply.body).unwrap(),
-            super::at_product_context_bytes(want)
+            super::at_product_context_bytes(&super::at_product_picker_bytes(want))
         );
         fs::remove_dir_all(dir).unwrap();
     }

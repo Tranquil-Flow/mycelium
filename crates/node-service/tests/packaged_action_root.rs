@@ -11,6 +11,8 @@
 //! `MYCELIUM_A13_RUN_MODEL` re-run themselves in a child of this test binary with exactly the
 //! environment they need. The child records what it saw; the parent asserts.
 #![cfg(feature = "desktop-shell")]
+#[path = "../../api/tests/support/oracle_context.rs"]
+mod oracle_context;
 use api::schema::PublicError;
 use budgets::{BudgetId as B, Entries};
 use desktop::services::{ServiceRequest, Services};
@@ -230,7 +232,11 @@ fn packaged_action_root_run_model_persists_choice() {
                 v
             };
             assert!(seen["body"]["resources"].is_object(), "{label}");
-            assert_eq!(strip(&seen["body"]), strip(ok), "{label}");
+            // v0.2's starter and picker texts (B13, `api/contracts/divergences.json`): the
+            // oracle's are checked, then moved to the product's.
+            let mut ok = ok.clone();
+            assert_eq!(oracle_context::at_product_picker(&mut ok), 1, "{label}");
+            assert_eq!(strip(&seen["body"]), strip(&ok), "{label}");
         } else {
             assert_eq!(
                 (seen["status"].clone(), seen["body"]["error"].clone()),

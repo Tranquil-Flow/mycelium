@@ -289,10 +289,21 @@ fn seed_member_cache(owner: &Instance, member_root: &Path) {
         fs::create_dir_all(dir).unwrap();
         fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).unwrap();
     }
+    // The member opens its own run model's acquisition (without the cached snapshot it reports
+    // `member_model_download_not_ported`): it takes the owner's model, `a9-route`, explicitly too,
+    // since v0.2's starter is Qwen3-0.6B (B13).
+    api::preferences::run_model::save_choice(member_root, "a9-route").unwrap();
 }
 
 /// `/api/model/download` from the test repository until this process's model is prepared.
 fn prepare_model(instance: &Instance) {
+    // The test repository serves the tiny Qwen2 snapshot of `a9-route` (`tiny_repository`): this
+    // Mac takes that run model explicitly, through the picker, since v0.2's starter is Qwen3-0.6B
+    // (B13, `contracts/divergences.json` `run_model_default`). This test is about the download and
+    // the observation, not the default.
+    let (code, chosen) = instance.post("/api/run-model", &json!({"choice": "a9-route"}));
+    assert_eq!(code, 200, "{chosen}");
+    assert_eq!(chosen["selected"], "a9-route", "{chosen}");
     let grant = json!({"consent":{"download_acknowledged":true,"max_download_bytes":STORAGE,"storage_limit_bytes":STORAGE}});
     let mut retries = 0;
     let (code, answer) = loop {

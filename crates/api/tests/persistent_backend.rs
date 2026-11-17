@@ -240,8 +240,10 @@ fn run_model_choice_persists_and_returns_the_oracle_document() {
     // The fixture's consent document was recorded at the oracle's serving context: parity is
     // checked at it, passed explicitly; the product's document is the one at its model
     // contract's serving context (`support/oracle_context.rs`).
+    // The same for v0.2's starter and picker texts (B13): the oracle's are checked, then moved.
     let mut expected = case["ok"].clone();
     assert!(expected["resources"].is_object());
+    assert_eq!(oracle_context::at_product_picker(&mut expected), 1);
     oracle_context::at_product_context(&mut expected);
     assert_eq!(
         c.action("/api/run-model", &body(json!({"choice": "qwen3-8b"})))
@@ -432,9 +434,11 @@ fn preference_observations_persist_over_real_rust_http() {
         serde_json::from_str(include_str!("fixtures/oracle_wire_routes.json")).unwrap();
     let want_bytes = [
         json!(oracle_context::at_product_context_bytes(
-            wire["routes"]["run_model_choose"]["golden_choose_0.6b_no_memory"]
-                .as_str()
-                .unwrap()
+            &oracle_context::at_product_picker_bytes(
+                wire["routes"]["run_model_choose"]["golden_choose_0.6b_no_memory"]
+                    .as_str()
+                    .unwrap()
+            )
         )),
         wire["routes"]["fast_mode"]["choose_true"].clone(),
         wire["routes"]["fast_mode"]["choose_false"].clone(),
