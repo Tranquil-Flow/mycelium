@@ -121,13 +121,31 @@ mod tests {
         for (bad, code) in [
             (json!("relay"), INVALID),
             (json!({"reach": "relay"}), INVALID),
-            (json!({"protocol": "mycelium.a13_work_network.v2", "reach": "relay", "relay_url": "https://relay.mycelium.now/"}), VERSION_UNSUPPORTED),
-            (json!({"protocol": PROTOCOL, "reach": "same_network", "relay_url": "https://relay.mycelium.now/"}), INVALID),
+            (
+                json!({"protocol": "mycelium.a13_work_network.v2", "reach": "relay", "relay_url": "https://relay.mycelium.now/"}),
+                VERSION_UNSUPPORTED,
+            ),
+            (
+                json!({"protocol": PROTOCOL, "reach": "same_network", "relay_url": "https://relay.mycelium.now/"}),
+                INVALID,
+            ),
             (json!({"protocol": PROTOCOL, "reach": "relay"}), INVALID),
-            (json!({"protocol": PROTOCOL, "reach": "relay", "relay_url": 7}), INVALID),
-            (json!({"protocol": PROTOCOL, "reach": "relay", "relay_url": "not a url"}), INVALID),
-            (json!({"protocol": PROTOCOL, "reach": "relay", "relay_url": "https://relay.mycelium.now"}), INVALID),
-            (json!({"protocol": PROTOCOL, "reach": "relay", "relay_url": "https://relay.mycelium.now/", "extra": 1}), INVALID),
+            (
+                json!({"protocol": PROTOCOL, "reach": "relay", "relay_url": 7}),
+                INVALID,
+            ),
+            (
+                json!({"protocol": PROTOCOL, "reach": "relay", "relay_url": "not a url"}),
+                INVALID,
+            ),
+            (
+                json!({"protocol": PROTOCOL, "reach": "relay", "relay_url": "https://relay.mycelium.now"}),
+                INVALID,
+            ),
+            (
+                json!({"protocol": PROTOCOL, "reach": "relay", "relay_url": "https://relay.mycelium.now/", "extra": 1}),
+                INVALID,
+            ),
         ] {
             assert_eq!(RunReach::from_value(&doc(bad.clone())), Err(code), "{bad}");
         }

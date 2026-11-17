@@ -802,7 +802,9 @@ impl<'a> LoopbackHost<'a> {
             let mut builder = mode_builder(
                 mode,
                 reach,
-                across.as_ref().map(|(interface, policy)| (*interface, policy)),
+                across
+                    .as_ref()
+                    .map(|(interface, policy)| (*interface, policy)),
                 lan_transport.clone(),
             )?
             .alpns(alpns);

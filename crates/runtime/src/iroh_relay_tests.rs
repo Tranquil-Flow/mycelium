@@ -159,7 +159,10 @@ fn a_relay_mode_host_refuses_a_peer_naming_a_foreign_relay() {
         let ours = iroh::EndpointAddr::new(peer).with_relay_url(dead_relay());
         assert!(host.validate_peer(&ours).is_ok(), "{mode:?}: our relay");
         let direct = iroh::EndpointAddr::new(peer).with_ip_addr(public);
-        assert!(host.validate_peer(&direct).is_ok(), "{mode:?}: an IP address");
+        assert!(
+            host.validate_peer(&direct).is_ok(),
+            "{mode:?}: an IP address"
+        );
         host.close(&clock, after(BudgetId::RouterClose)).unwrap();
     }
 }
@@ -214,9 +217,17 @@ fn every_product_endpoint_shape_is_built_with_portmapping_off_and_only_its_relay
     }
     // The one opt-in: a cross-network policy whose Mac chose portmapping.
     let mapped = across.clone().with_portmapping(true);
-    let builder = mode_builder(M::CrossNetwork, &Reach::Shipped, Some((LOOPBACK, &mapped)), None)
-        .unwrap();
+    let builder = mode_builder(
+        M::CrossNetwork,
+        &Reach::Shipped,
+        Some((LOOPBACK, &mapped)),
+        None,
+    )
+    .unwrap();
     assert!(!configured(&builder).1, "the chosen portmapping is on");
     // The local mailbox carrier's builder (api::managed_carrier) is the local-only one.
-    assert_eq!(configured(&super::local_builder().unwrap()), (Default::default(), true));
+    assert_eq!(
+        configured(&super::local_builder().unwrap()),
+        (Default::default(), true)
+    );
 }

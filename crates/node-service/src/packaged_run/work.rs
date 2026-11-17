@@ -461,7 +461,9 @@ impl Work {
             return Some(
                 owner_run::OwnerRunError::with(
                     crate::packaged_work::reach::SILENT_VIA_RELAY,
-                    Some(&crate::packaged_work::reach::silent_via_relay_message(cause)),
+                    Some(&crate::packaged_work::reach::silent_via_relay_message(
+                        cause,
+                    )),
                     None,
                 )
                 .into(),

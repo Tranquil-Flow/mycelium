@@ -336,7 +336,10 @@ fn both_pages_offer_the_network_choices_in_one_contained_section() {
             "relay_unreachable",
             ".active",
         ] {
-            assert!(section.contains(needed), "{name}: the section lacks {needed}");
+            assert!(
+                section.contains(needed),
+                "{name}: the section lacks {needed}"
+            );
         }
         assert!(
             !script_without_comments(section).contains("window.confirm("),

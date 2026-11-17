@@ -356,9 +356,14 @@ fn an_unadmitted_key_is_never_dialled_across_networks_zero_outbound_probes() {
     witness
         .set_read_timeout(Some(std::time::Duration::from_millis(400)))
         .unwrap();
-    let stranger_at = EndpointAddr::new(stranger.public()).with_ip_addr(witness.local_addr().unwrap());
+    let stranger_at =
+        EndpointAddr::new(stranger.public()).with_ip_addr(witness.local_addr().unwrap());
     let before = host.lan_refused_datagrams().unwrap();
-    let dialled = host.connect(&stranger_at, &clock, deadline(&clock, B::SidecarLocalHandshake));
+    let dialled = host.connect(
+        &stranger_at,
+        &clock,
+        deadline(&clock, B::SidecarLocalHandshake),
+    );
     assert_eq!(dialled.err(), Some(Error::Authentication), "refused by key");
     assert_eq!(
         host.lan_refused_datagrams(),

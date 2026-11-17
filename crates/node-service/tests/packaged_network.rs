@@ -454,7 +454,11 @@ fn the_window_saves_the_network_choices_through_the_packaged_action() {
     let (core, mut cleanup) = packaged_core(&state);
     let reach = || status(&core)["network_reach"].clone();
     assert_eq!(
-        (reach()["portmapping"].clone(), reach()["next_run"].clone(), reach()["active"].clone()),
+        (
+            reach()["portmapping"].clone(),
+            reach()["next_run"].clone(),
+            reach()["active"].clone()
+        ),
         (json!(false), json!("same_network"), Value::Null),
         "defaults: {}",
         reach()
@@ -463,13 +467,20 @@ fn the_window_saves_the_network_choices_through_the_packaged_action() {
     assert_eq!(saved.0, 200, "{}", saved.1);
     assert_eq!(reach()["portmapping"], true, "{}", reach());
     let refused = post(&core, "/api/network/reach", json!({"portmapping": "yes"}));
-    assert_eq!((refused.0, refused.1["error"].clone()), (400, json!("invalid_request")));
+    assert_eq!(
+        (refused.0, refused.1["error"].clone()),
+        (400, json!("invalid_request"))
+    );
     let created = post(&core, "/api/create", json!({"consent": consent()}));
     assert_eq!(created.0, 200, "create: {}", created.1);
     let chosen = post(&core, "/api/network/reach", json!({"reach": "relay"}));
     assert_eq!(chosen.0, 200, "{}", chosen.1);
     assert_eq!(reach()["next_run"], "relay", "{}", reach());
-    let back = post(&core, "/api/network/reach", json!({"reach": "same_network"}));
+    let back = post(
+        &core,
+        "/api/network/reach",
+        json!({"reach": "same_network"}),
+    );
     assert_eq!(back.0, 200, "{}", back.1);
     assert_eq!(reach()["next_run"], "same_network", "{}", reach());
     assert_eq!(quit(&mut cleanup), Ok(Poll::Verified));

@@ -381,7 +381,9 @@ impl ReachMember {
                 closed: Box::new(|| false),
                 resource: Box::new(|_| None),
                 acquisition: Box::new(|| None),
-                start_whole_model: Box::new(|_| Err("member_model_download_not_ported".to_string())),
+                start_whole_model: Box::new(
+                    |_| Err("member_model_download_not_ported".to_string()),
+                ),
             },
         );
         Self {
@@ -408,7 +410,10 @@ impl ReachMember {
             Some(&self.authority),
             &self.network,
         );
-        (status["network_reach"].clone(), status["demo_target"].clone())
+        (
+            status["network_reach"].clone(),
+            status["demo_target"].clone(),
+        )
     }
     /// The owner's view of this Mac's last report.
     fn report(&self) -> serde_json::Value {
@@ -442,9 +447,19 @@ fn a_joined_mac_binds_in_the_mode_the_owner_signed_and_names_a_foreign_relay() {
     // The owner signed nothing: the same network, the LAN carrier.
     m.tick();
     let (reach_status, _) = m.status();
-    assert_eq!(reach_status["active"]["reach"], "same_network", "{reach_status}");
-    assert_eq!(reach_status["active"]["portmapping"], false, "{reach_status}");
-    assert_eq!(reach_status["error"], serde_json::Value::Null, "{reach_status}");
+    assert_eq!(
+        reach_status["active"]["reach"], "same_network",
+        "{reach_status}"
+    );
+    assert_eq!(
+        reach_status["active"]["portmapping"], false,
+        "{reach_status}"
+    );
+    assert_eq!(
+        reach_status["error"],
+        serde_json::Value::Null,
+        "{reach_status}"
+    );
     assert!(
         m.p.seed
             .work_members
@@ -465,8 +480,15 @@ fn a_joined_mac_binds_in_the_mode_the_owner_signed_and_names_a_foreign_relay() {
     ));
     m.tick();
     let (reach_status, card) = m.status();
-    assert_eq!(reach_status["error"], "work_network_relay_mismatch", "{reach_status}");
-    assert_eq!(reach_status["active"], serde_json::Value::Null, "{reach_status}");
+    assert_eq!(
+        reach_status["error"], "work_network_relay_mismatch",
+        "{reach_status}"
+    );
+    assert_eq!(
+        reach_status["active"],
+        serde_json::Value::Null,
+        "{reach_status}"
+    );
     assert_eq!(card["state"], "error", "{card}");
     assert_eq!(card["detail"], "work_network_relay_mismatch", "{card}");
     let report = m.report();
@@ -492,7 +514,11 @@ fn a_joined_mac_whose_relay_is_unreachable_refuses_by_name_before_announcing_rea
     let elapsed = started.elapsed();
     let (reach_status, card) = m.status();
     assert_eq!(reach_status["error"], "relay_unreachable", "{reach_status}");
-    assert_eq!(reach_status["active"], serde_json::Value::Null, "{reach_status}");
+    assert_eq!(
+        reach_status["active"],
+        serde_json::Value::Null,
+        "{reach_status}"
+    );
     assert_eq!(card["state"], "error", "{card}");
     assert_eq!(card["detail"], "relay_unreachable", "{card}");
     let report = m.report();

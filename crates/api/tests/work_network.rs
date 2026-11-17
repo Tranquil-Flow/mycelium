@@ -13,10 +13,19 @@ use api::run_exchange::work_network::{FIELD, RunReach};
 fn the_owners_reach_reaches_the_joined_mac_inside_the_signed_announcement() {
     let p = fixture::Joined::new();
     let same = p.announced();
-    assert!(same.announcement().get(FIELD).is_none(), "{:?}", same.announcement());
-    assert_eq!(RunReach::from_announcement(&same), Ok(RunReach::SameNetwork));
+    assert!(
+        same.announcement().get(FIELD).is_none(),
+        "{:?}",
+        same.announcement()
+    );
+    assert_eq!(
+        RunReach::from_announcement(&same),
+        Ok(RunReach::SameNetwork)
+    );
     let relay: iroh::RelayUrl = "https://relay.mycelium.now".parse().unwrap();
-    p.seed.exchange.set_work_network(RunReach::Relay(relay.clone()));
+    p.seed
+        .exchange
+        .set_work_network(RunReach::Relay(relay.clone()));
     let across = p.announced();
     assert_eq!(
         RunReach::from_announcement(&across),
@@ -34,5 +43,9 @@ fn the_owners_reach_reaches_the_joined_mac_inside_the_signed_announcement() {
         }
         v
     };
-    assert_eq!(strip(again.announcement()), strip(same.announcement()), "exact bytes");
+    assert_eq!(
+        strip(again.announcement()),
+        strip(same.announcement()),
+        "exact bytes"
+    );
 }

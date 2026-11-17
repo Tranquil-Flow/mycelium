@@ -17,14 +17,18 @@ impl Network {
     pub fn resolve_run_network(&self, role: &str) -> crate::packaged_work::Resolved {
         // Lane XB patch 2 (D1): an owner run binds in the mode its owner chose when the run
         // started ([`Network::begin_owner_run`]); nothing re-reads a file mid-run.
-        let network = self.owner_run_network().unwrap_or_else(|_| self.work_network.clone());
+        let network = self
+            .owner_run_network()
+            .unwrap_or_else(|_| self.work_network.clone());
         let resolved = network.resolution();
         eprintln!("l11_work_network:{} role={role}", resolved.transport);
         resolved
     }
     /// Lane XB patch 2 (D1): the owner reads its choice for the run starting now, once; the
     /// run keeps it, and its signed form is what the run announcement carries.
-    pub fn begin_owner_run(&self) -> Result<api::run_exchange::work_network::RunReach, &'static str> {
+    pub fn begin_owner_run(
+        &self,
+    ) -> Result<api::run_exchange::work_network::RunReach, &'static str> {
         self.reach.begin_run(&self.root)
     }
     /// Lane XB patch 2 (XB-05): the window's `/api/network/reach` action on this Mac's

@@ -87,9 +87,8 @@ fn product_code_builds_endpoints_only_through_the_runtime_builders() {
     let mut outside = Vec::new();
     for file in files {
         let path = file.display().to_string();
-        let product = path.contains("/src/")
-            && !path.contains("/tests/")
-            && !path.ends_with("tests.rs");
+        let product =
+            path.contains("/src/") && !path.contains("/tests/") && !path.ends_with("tests.rs");
         if !product || central.iter().any(|c| path.ends_with(c)) {
             continue;
         }
@@ -97,11 +96,19 @@ fn product_code_builds_endpoints_only_through_the_runtime_builders() {
         for (at, line) in text.lines().enumerate() {
             let code = line.trim_start();
             // An inline test module ends the product part of a file.
-            if code.starts_with("#[cfg(test)]") && text[..].lines().nth(at + 1).is_some_and(|n| n.trim_start().starts_with("mod ")) {
+            if code.starts_with("#[cfg(test)]")
+                && text[..]
+                    .lines()
+                    .nth(at + 1)
+                    .is_some_and(|n| n.trim_start().starts_with("mod "))
+            {
                 break;
             }
             let code = code.split("//").next().unwrap_or_default();
-            if code.contains("presets::") || code.contains("empty_builder") || code.contains("Endpoint::builder") {
+            if code.contains("presets::")
+                || code.contains("empty_builder")
+                || code.contains("Endpoint::builder")
+            {
                 outside.push(format!("{path}:{}", at + 1));
             }
         }

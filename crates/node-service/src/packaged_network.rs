@@ -773,10 +773,7 @@ pub fn status_overlay(status: &mut Value, authority: Option<&Mutex<Authority>>, 
     fields.insert("network".into(), network.status().to_value());
     // Lane XB patch 2 (D1, XB-06): the ACTIVE endpoints' reach, the owner's choice for its
     // next run, this Mac's portmapping preference and a named error.
-    fields.insert(
-        "network_reach".into(),
-        network.reach.status(&network.root),
-    );
+    fields.insert("network_reach".into(), network.reach.status(&network.root));
     let Some(authority) = authority else {
         // The authority's state was refused at bind (an unreadable or invalid role file among
         // them, app.py:595-611): no role is claimed for it.

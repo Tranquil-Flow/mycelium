@@ -171,7 +171,9 @@ pub struct State {
     refusal: Mutex<Option<Refusal>>,
 }
 fn held<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 impl State {
     pub fn new(relay: Reach) -> Self {
@@ -410,7 +412,12 @@ mod tests {
     /// (D4) and a loopback-fixed Mac cannot cross networks (named).
     #[test]
     fn a_joined_mac_binds_in_the_mode_the_owner_signed() {
-        let same = follow(&WorkNetwork::ThisMac, &Reach::Shipped, &RunReach::SameNetwork, true);
+        let same = follow(
+            &WorkNetwork::ThisMac,
+            &Reach::Shipped,
+            &RunReach::SameNetwork,
+            true,
+        );
         assert_eq!(same, Ok(WorkNetwork::ThisMac));
         let across = follow(
             &WorkNetwork::ThisMac,
@@ -436,10 +443,21 @@ mod tests {
         )
         .unwrap()
         .resolution_with(|| reading("10.0.0.7"));
-        assert!(mapped.choice.0.as_ref().is_some_and(|(_, p)| p.portmapping()));
+        assert!(
+            mapped
+                .choice
+                .0
+                .as_ref()
+                .is_some_and(|(_, p)| p.portmapping())
+        );
         let foreign: iroh::RelayUrl = "https://relay.example.org".parse().unwrap();
         assert_eq!(
-            follow(&WorkNetwork::ThisMac, &Reach::Shipped, &RunReach::Relay(foreign), false),
+            follow(
+                &WorkNetwork::ThisMac,
+                &Reach::Shipped,
+                &RunReach::Relay(foreign),
+                false
+            ),
             Err(RELAY_MISMATCH)
         );
         assert_eq!(
@@ -465,7 +483,10 @@ mod tests {
     fn the_owners_choice_is_stored_signed_and_named_and_an_invalid_file_is_refused_by_name() {
         let dir = root("owner");
         let state = State::new(Reach::Shipped);
-        assert_eq!(owner_choice(&dir, &Reach::Shipped), Ok(RunReach::SameNetwork));
+        assert_eq!(
+            owner_choice(&dir, &Reach::Shipped),
+            Ok(RunReach::SameNetwork)
+        );
         let body = |v: Value| v.as_object().unwrap().clone();
         let status = action(&dir, &state, &body(json!({"reach": "relay"})), true).unwrap();
         assert_eq!(status["next_run"], "relay");
@@ -475,13 +496,24 @@ mod tests {
             Ok(RunReach::Relay(mycelium()))
         );
         let status = action(&dir, &state, &body(json!({"portmapping": true})), false).unwrap();
-        assert_eq!((status["next_run"].as_str(), status["portmapping"].as_bool()), (Some("relay"), Some(true)));
+        assert_eq!(
+            (status["next_run"].as_str(), status["portmapping"].as_bool()),
+            (Some("relay"), Some(true))
+        );
         assert_eq!(
             action(&dir, &state, &body(json!({"reach": "relay"})), false),
             Err("owner_role_required")
         );
-        for bad in [json!({}), json!({"reach": "lan"}), json!({"portmapping": 1}), json!({"reach": "relay", "portmapping": true})] {
-            assert_eq!(action(&dir, &state, &body(bad), true), Err("invalid_request"));
+        for bad in [
+            json!({}),
+            json!({"reach": "lan"}),
+            json!({"portmapping": 1}),
+            json!({"reach": "relay", "portmapping": true}),
+        ] {
+            assert_eq!(
+                action(&dir, &state, &body(bad), true),
+                Err("invalid_request")
+            );
         }
         assert_eq!(state.begin_run(&dir), Ok(RunReach::Relay(mycelium())));
         assert_eq!(
@@ -490,7 +522,11 @@ mod tests {
         );
         state.end_run();
         // A damaged file: named in status and at the next run's start; a save replaces it.
-        std::fs::write(dir.join(FILE), b"{\"portmapping\":false,\"protocol\":\"x\",\"reach\":\"relay\"}\n").unwrap();
+        std::fs::write(
+            dir.join(FILE),
+            b"{\"portmapping\":false,\"protocol\":\"x\",\"reach\":\"relay\"}\n",
+        )
+        .unwrap();
         std::fs::set_permissions(dir.join(FILE), std::fs::Permissions::from_mode(0o600)).unwrap();
         assert_eq!(load(&dir), Err(INVALID));
         assert_eq!(state.status(&dir)["error"], INVALID);

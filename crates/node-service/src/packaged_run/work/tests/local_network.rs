@@ -861,7 +861,10 @@ fn a_relay_runs_unanswered_dial_is_named_via_the_relay_with_zero_local_network_p
         "{message}"
     );
     assert!(
-        ports.work.named_dial_failure("member_consent_required").is_none(),
+        ports
+            .work
+            .named_dial_failure("member_consent_required")
+            .is_none(),
         "another cause passes unnamed"
     );
     assert!(
@@ -886,7 +889,14 @@ fn the_owner_signs_its_run_choice_once_per_run_and_binds_exactly_it() {
     let owner_root = f.root.join("owner");
     let seed = f.host.with(|c| c.authority.seed.clone().unwrap());
     let announced = || seed.exchange.announcement(None).to_value();
-    reach::save(&owner_root, reach::ReachChoice { across_networks: true, portmapping: false }).unwrap();
+    reach::save(
+        &owner_root,
+        reach::ReachChoice {
+            across_networks: true,
+            portmapping: false,
+        },
+    )
+    .unwrap();
     chain.new_run("run-xb", "dep-run-xb", owner_run::Reason::Start, None, None);
     let shipped: iroh::RelayUrl = runtime::iroh_host::MYCELIUM_RELAY_URL.parse().unwrap();
     assert_eq!(
@@ -900,16 +910,33 @@ fn the_owner_signs_its_run_choice_once_per_run_and_binds_exactly_it() {
     let resolved = f.host.network.resolve_run_network("owner_run");
     assert_eq!(resolved.reach, "relay");
     assert_eq!(
-        resolved.choice.0.as_ref().and_then(|(_, p)| p.relay().cloned()),
+        resolved
+            .choice
+            .0
+            .as_ref()
+            .and_then(|(_, p)| p.relay().cloned()),
         Some(shipped)
     );
     let mut env = Env { at: Instant::now() };
     chain.teardown(false, &mut env).ok();
-    assert!(announced().get(FIELD).is_none(), "withdrawn: {}", announced());
-    assert_eq!(f.host.network.resolve_run_network("owner_run").reach, "same_network");
+    assert!(
+        announced().get(FIELD).is_none(),
+        "withdrawn: {}",
+        announced()
+    );
+    assert_eq!(
+        f.host.network.resolve_run_network("owner_run").reach,
+        "same_network"
+    );
     // A damaged preference: the next run's steps are refused by name.
     std::fs::write(owner_root.join(reach::FILE), b"{}").unwrap();
-    chain.new_run("run-xb2", "dep-run-xb2", owner_run::Reason::Start, None, None);
+    chain.new_run(
+        "run-xb2",
+        "dep-run-xb2",
+        owner_run::Reason::Start,
+        None,
+        None,
+    );
     assert!(announced().get(FIELD).is_none());
     let (code, message) = refusal(chain.run_step("model", &mut env));
     assert_eq!(code, reach::INVALID);

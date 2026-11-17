@@ -742,7 +742,9 @@ impl DesktopServices {
             // portmapping preference; the owner's same/different-networks choice for its next run).
             ("POST", crate::packaged_work::reach::ACTION) => {
                 let owner = self.authority.as_ref().is_some_and(|authority| {
-                    authority.lock().is_ok_and(|a| !a.target && a.owner_authority().is_some())
+                    authority
+                        .lock()
+                        .is_ok_and(|a| !a.target && a.owner_authority().is_some())
                 });
                 let body = body
                     .as_object()
