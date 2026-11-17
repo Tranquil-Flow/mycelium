@@ -111,7 +111,7 @@ fn lock(root: &Path) -> Result<fs::File> {
     // Lane A, B12 (ledger row 96): a busy lock is retried for the close allowance before it is
     // refused (`settle_lock`: a forked child's copy of a dropped holder's lock lets go at its
     // exec); a holder that really holds it is still refused, by the same name.
-    if !settle_lock(&f).map_err(|_| fail("member_shard_busy"))? {
+    if settle_lock(&f, None, &|| Ok(()))? != Settled::Held {
         return Err(fail("member_shard_busy"));
     }
     Ok(f)
@@ -556,7 +556,7 @@ impl MemberShard {
                 run: self.root.file_name().unwrap().to_str().unwrap().into(),
                 row: self.row.clone(),
             }
-            .complete()?;
+            .complete(checkpoint)?;
             self.row["phase"] = json!("retained");
             self.retained = true;
         }
@@ -578,7 +578,7 @@ impl MemberShard {
         }
         let runs = self.root.parent().unwrap();
         let run = self.root.file_name().unwrap().to_str().unwrap();
-        let (_lock, mut ledger) = storage_ledger(runs)?;
+        let (_lock, mut ledger) = storage_ledger_within(runs, None, checkpoint)?;
         if ledger["entries"][run].is_null() && refund_matches(runs, run, &self.row) {
             sync_dir(runs)?;
             self.refunded = true;

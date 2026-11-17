@@ -489,7 +489,7 @@ fn compiled_run(f: &Fixture, run: &str, bytes: u64) -> InputArtifact {
         .unwrap()
         .set_len(bytes)
         .unwrap();
-    reservation.complete().unwrap();
+    reservation.complete(&|| Ok(())).unwrap();
     assert_eq!(ledger_of(&f.root)["entries"][run]["phase"], "retained");
     artifact
 }

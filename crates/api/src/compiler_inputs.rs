@@ -27,29 +27,59 @@ type Result<T> = std::result::Result<T, Error>;
 fn state(error: private_state::StateError) -> Error {
     Error(error.0)
 }
-/// Lane A, B12 (ledger row 96): take this module's exclusive `flock` on `file`, retrying a busy
-/// lock for the router's close allowance (every tenth of the owner's poll) before answering
-/// busy. The locks are `flock`s on open descriptions, and a child this process forks holds a
-/// copy of every descriptor from fork to exec (macOS has no close-on-fork; a confined spawn runs
-/// its pre-exec loop over the whole descriptor table in that window): a holder that let go in
-/// that window leaves its lock held by the child until it execs. `Ok(false)`: still busy after
-/// the allowance (a holder that really holds it); `Err`: the lock call itself failed.
-pub(crate) fn settle_lock(file: &fs::File) -> std::result::Result<bool, Error> {
-    let close = budgets::BudgetId::RouterClose
+/// What [`settle_lock`] found.
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum Settled {
+    /// The lock is ours.
+    Held,
+    /// Still busy when the wait's bound ended (a holder that really holds it).
+    Busy,
+    /// The lock call itself failed.
+    Failed,
+}
+/// The longest one lock acquisition of this module waits: the router's close allowance.
+pub(crate) fn lock_allowance() -> std::result::Result<std::time::Duration, Error> {
+    budgets::BudgetId::RouterClose
         .span(budgets::Entries::ZERO)
-        .map_err(|_| Error("budget_unavailable"))?;
+        .map(|close| std::time::Duration::from_millis(close.millis()))
+        .map_err(|_| Error("budget_unavailable"))
+}
+/// Lane A, B12 (ledger row 96): take this module's exclusive `flock` on `file`, retrying a busy
+/// lock (every tenth of the owner's poll) before answering busy. The locks are `flock`s on open
+/// descriptions, and a child this process forks holds a copy of every descriptor from fork to
+/// exec (macOS has no close-on-fork; a confined spawn runs its pre-exec loop over the whole
+/// descriptor table in that window): a holder that let go in that window leaves its lock held by
+/// the child until it execs.
+///
+/// Lane A patch 2, A-01: the wait is bounded by the CALLER as well as by the allowance. It ends
+/// at the earlier of `until` (a pass-wide end, e.g. one retirement pass over every run) and the
+/// close allowance from now, and while the lock is busy it calls the caller's `check` before
+/// every sleep: an operation's own deadline or cancellation ends the wait with the operation's
+/// own code (`Err`), at the first poll past it. A caller that commits after the wait re-checks
+/// its operation itself (`ShardReservation::complete`).
+pub(crate) fn settle_lock(
+    file: &fs::File,
+    until: Option<std::time::Instant>,
+    check: &dyn Fn() -> Result<()>,
+) -> Result<Settled> {
     let poll = budgets::BudgetId::OwnerPoll
         .span(budgets::Entries::ZERO)
         .map_err(|_| Error("budget_unavailable"))?;
-    let end = std::time::Instant::now() + std::time::Duration::from_millis(close.millis());
+    let slice = std::time::Duration::from_millis(poll.millis()) / 10;
+    let allowance = std::time::Instant::now() + lock_allowance()?;
+    let end = until.map_or(allowance, |until| until.min(allowance));
     loop {
         match file.try_lock() {
-            Ok(()) => return Ok(true),
-            Err(fs::TryLockError::WouldBlock) if std::time::Instant::now() < end => {
-                std::thread::sleep(std::time::Duration::from_millis(poll.millis()) / 10);
+            Ok(()) => return Ok(Settled::Held),
+            Err(fs::TryLockError::WouldBlock) => {
+                check()?;
+                let now = std::time::Instant::now();
+                if now >= end {
+                    return Ok(Settled::Busy);
+                }
+                std::thread::sleep(slice.min(end - now));
             }
-            Err(fs::TryLockError::WouldBlock) => return Ok(false),
-            Err(fs::TryLockError::Error(_)) => return Err(Error("compiler_lock_failed")),
+            Err(fs::TryLockError::Error(_)) => return Ok(Settled::Failed),
         }
     }
 }
@@ -433,7 +463,7 @@ impl InputArtifact {
         .map_err(|e| Error(e.code))?;
         reservation
             .ok_or(Error("compiler_storage_reservation_missing"))?
-            .complete()?;
+            .complete(&|| self.checkpoint())?;
         let document = json!({"protocol":"mycelium.source_stage_shards.v1",
             "state":"bytes_only","route_ready":false,
             "run_id":self.documents["compile-start.private.json"]["run_id"],
@@ -674,8 +704,12 @@ pub struct ShardReservation {
     row: Value,
 }
 impl ShardReservation {
-    pub fn complete(self) -> Result<()> {
-        let (_lock, mut ledger) = storage_ledger(&self.runs)?;
+    /// Commit the reservation as `retained`. `checkpoint` is the operation's own (cancellation,
+    /// deadline, admission): it bounds the wait for a busy ledger, and it is checked again after
+    /// the wait, immediately before the commit (lane A patch 2, A-01: an operation whose deadline
+    /// passed while it waited never commits).
+    pub fn complete(self, checkpoint: &dyn Fn() -> Result<()>) -> Result<()> {
+        let (_lock, mut ledger) = storage_ledger_within(&self.runs, None, checkpoint)?;
         let entries = ledger["entries"]
             .as_object_mut()
             .ok_or(Error("compiler_storage_ledger_invalid"))?;
@@ -690,6 +724,7 @@ impl ShardReservation {
         entries
             .get_mut(&self.run)
             .ok_or(Error("compiler_storage_reservation_changed"))?["phase"] = json!("retained");
+        checkpoint()?;
         store_storage_ledger(&self.runs, &ledger)
     }
 }
@@ -805,6 +840,14 @@ fn storage_inventory(runs: &Path, entries: &Map<String, Value>) -> Result<(u64, 
     Ok((total, materialized))
 }
 fn storage_ledger(runs: &Path) -> Result<(fs::File, Value)> {
+    storage_ledger_within(runs, None, &|| Ok(()))
+}
+/// [`storage_ledger`] with the caller's bound on the wait for a busy lock ([`settle_lock`]).
+fn storage_ledger_within(
+    runs: &Path,
+    until: Option<std::time::Instant>,
+    check: &dyn Fn() -> Result<()>,
+) -> Result<(fs::File, Value)> {
     use std::os::unix::fs::OpenOptionsExt;
     directory(runs)?;
     let lock = fs::OpenOptions::new()
@@ -826,7 +869,7 @@ fn storage_ledger(runs: &Path) -> Result<(fs::File, Value)> {
     {
         return Err(Error("compiler_storage_lock_failed"));
     }
-    if !settle_lock(&lock).map_err(|_| Error("compiler_storage_busy"))? {
+    if settle_lock(&lock, until, check)? != Settled::Held {
         return Err(Error("compiler_storage_busy"));
     }
     let path = runs.join(STORAGE_LEDGER);

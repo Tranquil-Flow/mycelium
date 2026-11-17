@@ -116,6 +116,13 @@ enum Outcome {
 
 /// Retire every ledger entry of the owner's own compile runs that no process holds any more, and
 /// remove their stage shards. Under the ledger's lock; the ledger is committed after each run.
+///
+/// Lane A patch 2, A-01: the whole pass has ONE bound for its lock waiting, the close allowance
+/// from the pass's start, shared by the ledger's lock and every run's probe: a pass that meets
+/// live runs holds the ledger for at most one allowance of waiting, not one per live run (eight
+/// retained runs were about 32 s). A run still busy when the pass's bound has ended is live for
+/// this pass (never retired); a dead run whose lock a forked child's copy held past it is
+/// retired by a later pass.
 pub fn retire_dead_runs(host: &Path) -> Result<Retirement> {
     let host = fs::canonicalize(host).map_err(|_| Error("compiler_directory_invalid"))?;
     let runs = host.join("chain-runs");
@@ -123,14 +130,15 @@ pub fn retire_dead_runs(host: &Path) -> Result<Retirement> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Retirement::default()),
         _ => {}
     }
-    let (_lock, mut ledger) = storage_ledger(&runs)?;
+    let end = std::time::Instant::now() + lock_allowance()?;
+    let (_lock, mut ledger) = storage_ledger_within(&runs, Some(end), &|| Ok(()))?;
     let rows = ledger["entries"]
         .as_object()
         .ok_or(Error("compiler_storage_ledger_invalid"))?
         .clone();
     let mut done = Retirement::default();
     for (run, row) in &rows {
-        match retire_one(&runs, run, row) {
+        match retire_one(&runs, run, row, end) {
             Ok(Outcome::NotOwner | Outcome::Live) => {}
             Ok(Outcome::Legacy(bytes)) => done.legacy.push((run.clone(), bytes)),
             Ok(Outcome::Retired(held)) => {
@@ -148,7 +156,7 @@ pub fn retire_dead_runs(host: &Path) -> Result<Retirement> {
     Ok(done)
 }
 
-fn retire_one(runs: &Path, run: &str, row: &Value) -> Result<Outcome> {
+fn retire_one(runs: &Path, run: &str, row: &Value, end: std::time::Instant) -> Result<Outcome> {
     let changed = || Error(OWNER_CHANGED);
     let root = runs.join(run);
     let directory = open_directory(&root).map_err(|_| changed())?;
@@ -176,12 +184,12 @@ fn retire_one(runs: &Path, run: &str, row: &Value) -> Result<Outcome> {
         Ok(None) => return Ok(Outcome::NotOwner),
         _ => return Err(changed()),
     }
-    // A busy lock is a live run once it stays busy past the close allowance (lane A, B12: a
-    // forked child's copy of a dead run's lock lets go at its exec).
-    match super::settle_lock(&directory) {
-        Ok(true) => {}
-        Ok(false) => return Ok(Outcome::Live),
-        Err(_) => return Err(changed()),
+    // A busy lock is a live run once it stays busy to the pass's bound (lane A, B12: a forked
+    // child's copy of a dead run's lock lets go at its exec; patch 2, A-01: one bound per pass).
+    match super::settle_lock(&directory, Some(end), &|| Ok(())) {
+        Ok(Settled::Held) => {}
+        Ok(Settled::Busy) => return Ok(Outcome::Live),
+        Ok(Settled::Failed) | Err(_) => return Err(changed()),
     }
     // Recheck the path still names the locked directory before anything below it is removed.
     let named = fs::symlink_metadata(&root).map_err(|_| changed())?;
