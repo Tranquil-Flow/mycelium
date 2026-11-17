@@ -118,7 +118,7 @@ fn probe_script(_state: &Path) -> Result<String, String> {
     Ok(include_str!("../packaged/probe.js")
         .replace(
             "__PROMPT_JSON__",
-            &serde_json::to_string(node_service::chat_template::ORACLE_USER_PROMPT)
+            &serde_json::to_string(api::prompt_codec::ORACLE_USER_PROMPT)
                 .map_err(|e| e.to_string())?,
         )
         .replace("__TOKENS_JSON__", &format!("\"{tokens}\"")))

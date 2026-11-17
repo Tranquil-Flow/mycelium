@@ -235,7 +235,7 @@ fn chat_send_hands_the_native_service_the_v014_qwen2_chatml_of_the_user_prompt()
 fn the_probe_question_is_the_recorded_oracle_question() {
     let fixture: Value = serde_json::from_str(TEMPLATE_FIXTURE).unwrap();
     assert_eq!(
-        node_service::chat_template::ORACLE_USER_PROMPT,
+        api::prompt_codec::ORACLE_USER_PROMPT,
         fixture["cases"][0]["user"]
     );
 }
@@ -250,12 +250,64 @@ fn the_chat_envelope_tokenises_to_the_v014_codec_ids() {
     for case in fixture["cases"].as_array().unwrap() {
         let user = case["user"].as_str().unwrap();
         let ids: Vec<u32> = serde_json::from_value(case["ids"].clone()).unwrap();
-        let prompt = node_service::chat_template::qwen2_chat_prompt(user);
+        let prompt = api::prompt_codec::PromptCodec::Qwen2
+            .chat(user)
+            .into_string();
         assert_eq!(
             codec.encode(prompt, false).unwrap().get_ids(),
             ids,
             "{user:?}"
         );
+    }
+}
+
+/// Lane CHATFIX: the seam's text tokenises (the route's tokenizer: `tokenizers` with no added
+/// special tokens, `node_service::tokenize`) to exactly the ids v0.1.4's EXECUTED codecs produced on
+/// the pinned Qwen3-0.6B snapshot (FX-CHATFIX-prompt-codec), for every probed prompt of both codecs.
+/// Tokenizer only, no model: reads the cached snapshot's `tokenizer.json` (or
+/// `MYCELIUM_QWEN3_TOKENIZER`); explicit gate `-- --ignored`.
+#[test]
+#[ignore = "needs the cached Qwen3-0.6B tokenizer.json (no model weights)"]
+fn the_seams_chat_text_tokenises_to_v014s_codec_ids_on_the_pinned_tokenizer() {
+    let path = std::env::var_os("MYCELIUM_QWEN3_TOKENIZER")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join(
+                ".cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/c1899de289a04d12100db370d81485cdf75e47ca/tokenizer.json",
+            )
+        });
+    let bytes = std::fs::read(&path).unwrap();
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../../api/tests/fixtures/prompt-codec-oracle.json"
+    ))
+    .unwrap();
+    assert_eq!(
+        protocol::canonical::sha256_prefixed(&bytes),
+        format!(
+            "sha256:{}",
+            fixture["snapshot"]["tokenizer_json_sha256"]
+                .as_str()
+                .unwrap()
+        ),
+        "the fixture was executed on this tokenizer.json"
+    );
+    let tokenizer = tokenizers::Tokenizer::from_bytes(&bytes).unwrap();
+    for (codec, name) in [
+        (api::prompt_codec::PromptCodec::Qwen3, "qwen3"),
+        (api::prompt_codec::PromptCodec::Qwen2, "qwen2"),
+    ] {
+        for case in fixture[name]["cases"].as_array().unwrap() {
+            let user = case["user"].as_str().unwrap();
+            let ids: Vec<u32> = serde_json::from_value(case["ids"].clone()).unwrap();
+            assert_eq!(
+                tokenizer
+                    .encode(codec.chat(user).into_string(), false)
+                    .unwrap()
+                    .get_ids(),
+                ids,
+                "{name} {user:?}"
+            );
+        }
     }
 }
 
@@ -1072,7 +1124,10 @@ fn the_invite_qr_route_is_served_by_the_host() {
     let (_private, host) = host();
     let reply = answered_within(&host, "GET", "/api/pair/window/qr/ZZZZ.svg", json!({}))
         .expect("the QR route must answer rather than hang");
-    assert_ne!(reply.status, 404, "the QR route must be served, not unknown");
+    assert_ne!(
+        reply.status, 404,
+        "the QR route must be served, not unknown"
+    );
     let body = String::from_utf8_lossy(&reply.body);
     assert!(
         body.contains("pairing_window_unknown") || body.contains("authority_state_invalid"),

@@ -1912,8 +1912,9 @@ fn carrier_epoch(
     drop(rt);
     result
 }
-/// The route's product stop tokens (the browser codec's terminal ids).
-const PRODUCT_STOP_TOKENS: [u32; 2] = [151_645, 151_643];
+/// The route's product stop tokens: the run model's codec stop ids (`crate::prompt_codec`,
+/// v0.1.4 `route.set_stop_token_ids(codec.stop_token_ids)`, supervisor.py:1952-1955, 3881).
+const PRODUCT_STOP_TOKENS: [u32; 2] = crate::prompt_codec::QWEN_STOP_TOKEN_IDS;
 /// The stop tokens of one request: the product's, or none for the route's startup challenge
 /// (`_stop_token_ids_override=frozenset()`, route.py:4563-4590 @ f4e366e9).
 fn stop_tokens(product: bool) -> &'static [u32] {
@@ -1983,15 +1984,17 @@ fn generate(
             ok
         })?;
         let token = token.get().ok_or("joined_route_frame_binding")?;
+        // A stop id ends the request and is never emitted (v0.1.4 route.py:5094-5098: `stopped`
+        // is set before `sink.emit`), so no page shows `<|im_end|>` (lane CHATFIX item 2).
+        if stops.contains(&token) {
+            return Ok(());
+        }
         {
             let mut o = observed.state.lock().map_err(|_| "joined_route_poisoned")?;
             o.tokens.push(token);
             o.token_times_ms.push(elapsed_ms(began));
         }
         observed.changed.notify_all();
-        if stops.contains(&token) {
-            return Ok(());
-        }
         input = vec![token];
     }
     Ok(())

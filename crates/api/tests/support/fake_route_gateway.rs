@@ -14,6 +14,10 @@ use std::{
     thread::JoinHandle,
     time::{Duration, Instant},
 };
+/// The id the fake gives its `index`-th token event (`token_id` = this + index), as the route's
+/// gateway gives every token event its id (`M16Requests`' `{token_id, text, token_index}`).
+#[allow(dead_code)] // not every including test file reads the ids
+pub const FIRST_TOKEN_ID: u64 = 7_000;
 /// How a stream ends after its tokens.
 #[derive(Clone, Debug)]
 #[allow(dead_code)] // not every including test file uses every ending
@@ -315,7 +319,7 @@ fn serve(stream: TcpStream, shared: &Shared, bearer: &str) {
                     &id,
                     sequence,
                     "token",
-                    json!({"text":text,"token_index":index}),
+                    json!({"token_id":FIRST_TOKEN_ID + index as u64,"text":text,"token_index":index}),
                 ) {
                     return;
                 }

@@ -59,6 +59,7 @@ pub mod process_identity;
 pub mod product_app;
 pub mod product_projector;
 pub mod product_routes;
+pub mod prompt_codec;
 pub mod qr;
 pub mod registry;
 pub mod relay;

@@ -660,6 +660,85 @@ pub(crate) fn build_selected(
     .map(Some)
 }
 
+/// A single-process greedy reference for the orchestrator's model-backed chat probe (lane CHATFIX
+/// item 4; no product path calls it). ONE native worker of the admitted `program` holds every layer
+/// of the pinned Qwen3-0.6B source `checkpoint` (the snapshot's `model.safetensors`, checked
+/// against the recorded reference's identity as the compile checks it), takes the prompt ids
+/// `prompt`, and runs greedy for at most `new_tokens`, ending BEFORE the first id in `stops`, as
+/// the route does (v0.1.4 route.py:5094-5098). It is [`build_selected`]'s own step loop with one
+/// stage over `[0, total)` instead of one per member. Returns the generated ids (no stop id) and,
+/// separately, the stop id that ended them (`None`: the `new_tokens` cap ended them).
+pub fn single_process_greedy(
+    program: &NativeProgram,
+    checkpoint: &Path,
+    prompt: &[u32],
+    new_tokens: usize,
+    stops: &[u32],
+) -> Result<Greedy> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let stopped = || cancel.load(Ordering::SeqCst);
+    let config = ProgramSelection::Explicit(Some(program.clone()))
+        .resolve(&stopped)?
+        .ok_or(Error("native_program_unavailable"))?;
+    let reference = reference()?;
+    let identity = &reference["recorded"]["identity"];
+    let source = checkpoint
+        .canonicalize()
+        .map_err(|_| Error("native_path_invalid"))?;
+    let pin = file_pin_until(&source, &stopped)?;
+    if pin.sha256 != text(identity, "checkpoint_sha256")?
+        || pin.bytes != number(identity, "checkpoint_bytes")?
+    {
+        return Err(Error("native_source_mismatch"));
+    }
+    let total = 28;
+    let memory =
+        budgets::BudgetId::PyFinalScriptsA13OperatorSingleMacUiRehearsalMaxMemoryBytesL171C55
+            .bytes()
+            .map_err(|_| Error("budget_unavailable"))?
+            .get();
+    let id = digest(&json!({"probe":"chatfix_single_process_reference","prompt":prompt}))?;
+    let id = id
+        .strip_prefix("sha256:")
+        .ok_or(Error("native_document_invalid"))?;
+    let prepare = json!({"command":"prepare","checkpoint":source,"start":0,"end":total,"total":total,"memory":memory,
+        "tokens":prompt.len() + new_tokens,"id":id,"generation":1,
+        "stage_image":{"model_id":"Qwen/Qwen3-0.6B","revision":identity["revision"],"image_digest":identity["checkpoint_sha256"],
+            "tensor_manifest":identity["manifest_sha256"],"profile":"packed_int8","layers":{"start":0,"end":total},
+            "total_layers":total,"source_metadata":{"header_sha256":identity["header_sha256"]}}});
+    let root = source.parent().ok_or(Error("native_path_invalid"))?;
+    let mut worker = worker::Worker::start(&config, &prepare, cancel.clone(), root)?;
+    let mut tokens = Vec::new();
+    let mut stepped = || -> Result<Option<u32>> {
+        let mut input = json!(prompt);
+        for _ in 0..new_tokens {
+            let (reply, body) = worker.request(&json!({"command":"step","tokens":input}), &[])?;
+            if reply != json!({"ok":true}) {
+                return Err(Error("native_step_reply_invalid"));
+            }
+            let token = worker::greedy(&body)?;
+            if stops.contains(&token) {
+                return Ok(Some(token));
+            }
+            tokens.push(token);
+            input = json!([token]);
+        }
+        Ok(None)
+    };
+    let outcome = stepped();
+    let closed = worker.close();
+    let stop = outcome?;
+    closed?;
+    Ok(Greedy { ids: tokens, stop })
+}
+/// [`single_process_greedy`]'s answer: the generated ids, and the stop id that ended them
+/// (`None`: the cap did). The route never emits its stop id, so only the reference records it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Greedy {
+    pub ids: Vec<u32>,
+    pub stop: Option<u32>,
+}
+
 fn emit(
     artifact: &InputArtifact,
     signer: &Identity,

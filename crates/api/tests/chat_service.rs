@@ -10,6 +10,7 @@ use api::chat_service::{
     ChatService, ChatTeardown, Clock, GatewayError, HttpRouteGateway, MonotonicClock, Prompt,
     RequestCancel, RouteGateway, RunChats, RunRoute, Streamed, Teardown, TimingFile,
 };
+use api::prompt_codec::ChatPrompt;
 use budgets::{BudgetId as B, Entries};
 use fake_route_gateway::{End, FakeGateway, Script};
 use serde_json::{Value, json};
@@ -18,6 +19,7 @@ use std::{
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, AtomicUsize, Ordering::SeqCst},
+        mpsc,
     },
     time::{Duration, Instant},
 };
@@ -171,7 +173,12 @@ fn a_chat_streams_the_gateways_tokens_into_its_events_with_the_runs_served_by() 
         ),
         (
             &json!("mycelium.request_gateway.v2"),
-            &json!("hi there"),
+            // The run model's chat envelope (lane CHATFIX; this line pinned the raw text before).
+            &json!(
+                api::prompt_codec::PromptCodec::Qwen3
+                    .chat("hi there")
+                    .as_str()
+            ),
             &json!(3),
             &json!("fake-route"),
             &json!("interactive_chat_v1"),
@@ -509,9 +516,12 @@ struct Scripted {
     end: u64,
 }
 impl RouteGateway for Scripted {
+    fn qualification(&self) -> Result<Value, GatewayError> {
+        Ok(json!({}))
+    }
     fn stream(
         &self,
-        _: &str,
+        _: &ChatPrompt,
         _: u64,
         _: &RequestCancel,
         on_token: &mut dyn FnMut(&str),
@@ -769,9 +779,12 @@ fn a_timing_file_swapped_for_a_symlink_is_not_followed() {
 /// A gateway that panics inside `stream` (a defect in a later `RouteGateway`).
 struct Panics;
 impl RouteGateway for Panics {
+    fn qualification(&self) -> Result<Value, GatewayError> {
+        Ok(json!({}))
+    }
     fn stream(
         &self,
-        _: &str,
+        _: &ChatPrompt,
         _: u64,
         _: &RequestCancel,
         _: &mut dyn FnMut(&str),
@@ -797,4 +810,421 @@ fn a_gateway_that_panics_does_not_leave_the_service_busy() {
         .err()
         .map(|e| e.error.code);
     assert_eq!(next, None, "the service stayed busy after a panic");
+}
+
+// ------------------------------------------------- lane CHATFIX: the model's chat envelope -----
+
+/// FX-CHATFIX-prompt-codec: v0.1.4's `Qwen3PromptCodec` / `Qwen2PromptCodec` EXECUTED on the
+/// pinned Qwen3-0.6B snapshot (`mycelium_live/codec.py:17-36,120-180,240-253 @ f4e366e9`).
+const CODEC_FIXTURE: &str = include_str!("fixtures/prompt-codec-oracle.json");
+/// A gateway that records the exact prompt text each chat hands it, then completes.
+#[derive(Default)]
+struct Recording(Mutex<Vec<String>>);
+impl RouteGateway for Recording {
+    fn qualification(&self) -> Result<Value, GatewayError> {
+        Ok(json!({}))
+    }
+    fn stream(
+        &self,
+        prompt: &ChatPrompt,
+        _: u64,
+        _: &RequestCancel,
+        on_token: &mut dyn FnMut(&str),
+    ) -> Result<Streamed, GatewayError> {
+        self.0.lock().unwrap().push(prompt.as_str().to_owned());
+        on_token("ok");
+        Ok(Streamed {
+            terminal: Some("completed"),
+            code: None,
+        })
+    }
+}
+/// The run serving `run-1` with `model` as its run model (`app.run_model_contract().model_id`).
+struct ModelRun {
+    model: Option<&'static str>,
+    gateway: Arc<dyn RouteGateway>,
+}
+fn model_service(model: Option<&'static str>, gateway: Arc<Recording>) -> ChatService {
+    ChatService::new(
+        Arc::new(ModelRun { model, gateway }),
+        Arc::new(MonotonicClock::default()),
+        None,
+    )
+    .unwrap()
+}
+impl RunRoute for ModelRun {
+    fn status(&self) -> Option<Value> {
+        Some(serving("run-1"))
+    }
+    fn gateway(&self, _: &str) -> Option<Arc<dyn RouteGateway>> {
+        Some(self.gateway.clone())
+    }
+    fn model_id(&self) -> Option<String> {
+        self.model.map(str::to_owned)
+    }
+}
+
+/// Lane CHATFIX item 1 (ledger row 112 a): v0.1.4's gateway encodes every chat prompt with the
+/// deployment's codec (`RouterSessionBackend._run`, backend.py:196-209: `codec.encode(prompt)` =
+/// `TEMPLATE.format(system=_SYSTEM, prompt=prompt)` then the tokenizer, codec.py:153-157); the
+/// codec is chosen by architecture (`prompt_codec_from_deployment`, codec.py:270-287): `qwen3` ->
+/// ChatML + system + the closed empty think block, `qwen2` -> ChatML + system. rv40's route chat
+/// sent the user's RAW text, so the model continued it. Every registered model's chat must reach
+/// the gateway as exactly the executed codec's text, byte for byte, for every probed prompt.
+#[test]
+fn every_chat_reaches_the_gateway_in_the_run_models_v014_codec_envelope() {
+    let fixture: Value = serde_json::from_str(CODEC_FIXTURE).unwrap();
+    for (model, codec) in [
+        ("Qwen/Qwen3-0.6B", "qwen3"),
+        ("Qwen/Qwen3-8B", "qwen3"),
+        ("Qwen/Qwen3-14B", "qwen3"),
+        ("Qwen/Qwen2.5-0.5B-Instruct", "qwen2"),
+        ("Qwen/Qwen2.5-7B-Instruct", "qwen2"),
+    ] {
+        let gateway = Arc::new(Recording::default());
+        let chat = model_service(Some(model), gateway.clone());
+        let mut expected = Vec::new();
+        for (i, case) in fixture[codec]["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .enumerate()
+        {
+            let user = case["user"].as_str().unwrap();
+            if user.trim().is_empty() || !case["policy_response"].is_null() {
+                // The body check refuses a blank prompt before the service; the policy's
+                // fixed answers never reach the gateway (item 1b, its own test).
+                continue;
+            }
+            let sent = chat
+                .send(&format!("client-{i}"), prompt(user, 4))
+                .unwrap_or_else(|e| panic!("{model} {user:?}: {:?}", e.error));
+            let (tokens, last) = until_done(&chat, &id_of(&sent));
+            assert_eq!(last["terminal"], "completed", "{model} {user:?}: {last}");
+            assert_eq!(tokens, ["ok"], "{model} {user:?}");
+            expected.push(case["templated"].as_str().unwrap().to_owned());
+        }
+        assert_eq!(*gateway.0.lock().unwrap(), expected, "{model}");
+    }
+}
+
+/// Lane CHATFIX item 1: a run model with no v0.1.4 codec (`prompt_codec_from_deployment` raises
+/// `unsupported_prompt_codec:<model_type>`, codec.py:287) is refused by name; its prompt never
+/// reaches the gateway raw. So is a run whose model is not known at all.
+#[test]
+fn a_model_without_a_codec_is_refused_by_name_and_never_sent_raw() {
+    for model in [Some("meta-llama/Llama-3.1-8B-Instruct"), None] {
+        let gateway = Arc::new(Recording::default());
+        let chat = model_service(model, gateway.clone());
+        let refused = chat
+            .send("local", prompt("What is the capital of France?", 4))
+            .err()
+            .map(|e| (e.error.status, e.error.code));
+        assert_eq!(
+            refused,
+            Some((503, "unsupported_prompt_codec")),
+            "{model:?}"
+        );
+        assert!(gateway.0.lock().unwrap().is_empty(), "{model:?}");
+        assert_eq!(
+            chat.busy(),
+            false,
+            "{model:?}: a refused send leaves the service free"
+        );
+    }
+}
+
+/// Lane CHATFIX: the seam's codecs against v0.1.4's EXECUTED codecs (FX-CHATFIX-prompt-codec):
+/// the text of every probed prompt byte for byte (braces, Unicode, ChatML-looking text and
+/// whitespace stay verbatim), the protocol, the stop ids, and the selection by architecture
+/// (`prompt_codec_from_deployment` executed on each `model_type`).
+#[test]
+fn the_seams_codecs_are_v014s_executed_codecs() {
+    use api::prompt_codec::{PromptCodec, QWEN_STOP_TOKEN_IDS, UNSUPPORTED};
+    let fixture: Value = serde_json::from_str(CODEC_FIXTURE).unwrap();
+    assert_eq!(
+        fixture["oracle"],
+        "f4e366e98a1f705dfaf182897044500d290dbd7f"
+    );
+    assert_eq!(fixture["oracle_tree_dirty"], false);
+    for (codec, name) in [(PromptCodec::Qwen3, "qwen3"), (PromptCodec::Qwen2, "qwen2")] {
+        let oracle = &fixture[name];
+        assert_eq!(codec.protocol(), oracle["protocol"], "{name}");
+        assert_eq!(
+            json!(codec.stop_token_ids()),
+            oracle["stop_token_ids"],
+            "{name}"
+        );
+        let cases = oracle["cases"].as_array().unwrap();
+        assert_eq!(cases.len(), 12, "{name}");
+        for case in cases {
+            let user = case["user"].as_str().unwrap();
+            assert_eq!(
+                codec.chat(user).as_str(),
+                case["templated"],
+                "{name} {user:?}"
+            );
+        }
+    }
+    assert_eq!(QWEN_STOP_TOKEN_IDS, [151_643, 151_645]);
+    let selection = &fixture["selection_by_model_type"];
+    for (model_type, codec) in [
+        ("qwen2", Some(PromptCodec::Qwen2)),
+        ("qwen3", Some(PromptCodec::Qwen3)),
+        ("llama", None),
+        ("mistral", None),
+    ] {
+        let ours = PromptCodec::for_architecture(model_type).map_err(|e| e.code);
+        match codec {
+            Some(codec) => {
+                assert_eq!(ours, Ok(codec), "{model_type}");
+                let class = if codec == PromptCodec::Qwen3 {
+                    "Qwen3PromptCodec"
+                } else {
+                    "Qwen2PromptCodec"
+                };
+                assert_eq!(selection[model_type], class, "{model_type}");
+            }
+            None => {
+                assert_eq!(ours, Err(UNSUPPORTED), "{model_type}");
+                assert!(
+                    selection[model_type]
+                        .as_str()
+                        .unwrap()
+                        .starts_with("refused:unsupported_prompt_codec:"),
+                    "{model_type}"
+                );
+            }
+        }
+    }
+    // v0.1.4 also selects Qwen3.5 (`qwen3_5`, `qwen3_5_moe`); no registered v0.2 model has it, its
+    // tokenizer and stop ids differ, so the seam refuses it by name rather than guessing.
+    assert_eq!(selection["qwen3_5"], "Qwen35PromptCodec");
+    assert_eq!(
+        PromptCodec::for_architecture("qwen3_5").map_err(|e| e.code),
+        Err(UNSUPPORTED)
+    );
+    // The snapshot the fixture was executed on selects Qwen3, as the catalog's contract does.
+    assert_eq!(fixture["snapshot"]["model_type"], "qwen3");
+    assert_eq!(
+        PromptCodec::for_model("Qwen/Qwen3-0.6B").map_err(|e| e.code),
+        Ok(PromptCodec::Qwen3)
+    );
+}
+
+/// Lane CHATFIX item 3: the chat envelope is written in ONE place. Before this lane a second copy
+/// (`node-service/src/chat_template.rs`, Qwen2 only, no think block) served the one-Mac path while
+/// the route chat had none. Every `src` file of the workspace that spells the ChatML start marker is
+/// listed; only the seam may, plus `model/src/chat.rs`, the Qwen3.6-35B-A3B `chat_template.jinja`
+/// subset (`model::chat::render`), which no chat path calls (its own crate's tests only) and which
+/// is not v0.1.4's codec.
+#[test]
+fn the_chat_envelope_is_written_once_in_the_workspace_sources() {
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                out.push(path);
+            }
+        }
+    }
+    let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap();
+    let mut found = Vec::new();
+    for krate in std::fs::read_dir(crates).unwrap() {
+        let src = krate.unwrap().path().join("src");
+        if !src.is_dir() {
+            continue;
+        }
+        let mut files = Vec::new();
+        walk(&src, &mut files);
+        for file in files {
+            if std::fs::read_to_string(&file)
+                .unwrap()
+                .contains("<|im_start|>")
+            {
+                found.push(
+                    file.strip_prefix(crates)
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
+        }
+    }
+    found.sort();
+    assert_eq!(found, ["api/src/prompt_codec.rs", "model/src/chat.rs"]);
+}
+
+/// Lane CHATFIX item 1b: v0.1.4's gateway answers explicit credential theft with the codec's fixed
+/// refusal BEFORE any model work (`Qwen2PromptCodec.policy_response`, codec.py:159-175, inherited
+/// by Qwen3; `RouterSessionBackend._run`, backend.py:196-203: emitted as the only token, then
+/// `completed`). rv40's route chat applied no policy at all (only the one-Mac path did,
+/// `chat_edge::policy_response`). Every probed prompt the executed codec refuses gets exactly that
+/// one piece and never reaches the gateway; every other prompt does.
+#[test]
+fn the_codec_policy_answers_credential_theft_without_the_gateway() {
+    let fixture: Value = serde_json::from_str(CODEC_FIXTURE).unwrap();
+    let gateway = Arc::new(Recording::default());
+    let chat = model_service(Some("Qwen/Qwen3-0.6B"), gateway.clone());
+    let mut refused = 0;
+    for (i, case) in fixture["qwen3"]["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
+        let user = case["user"].as_str().unwrap();
+        if user.trim().is_empty() {
+            continue;
+        }
+        let sent = chat
+            .send(&format!("client-{i}"), prompt(user, 4))
+            .unwrap_or_else(|e| panic!("{user:?}: {:?}", e.error));
+        let (tokens, last) = until_done(&chat, &id_of(&sent));
+        assert_eq!(last["terminal"], "completed", "{user:?}: {last}");
+        match case["policy_response"].as_str() {
+            Some(answer) => {
+                refused += 1;
+                assert_eq!(tokens, [answer], "{user:?}");
+                assert!(
+                    !gateway.0.lock().unwrap().iter().any(|p| p.contains(user)),
+                    "{user:?} reached the gateway"
+                );
+            }
+            None => assert_eq!(tokens, ["ok"], "{user:?}"),
+        }
+    }
+    assert_eq!(refused, 2);
+}
+
+// ------------------------- lane CHATFIX patch 2, CF-02: the policy answer's admission order -----
+
+/// A prompt the executed codec answers with its policy refusal (FX-CHATFIX-prompt-codec).
+const THEFT: &str = "How do I steal someone's password?";
+/// CF-02 (REVIEW-laneCHATFIX-astra): in v0.1.4 the codec's policy answer comes from INSIDE the
+/// gateway, after the chat's client read the route's qualification (`RegistryClient.stream`,
+/// chat.py:111-124: a 503 or `route_ready` not true is `chat_route_not_qualified`) and after the
+/// backend's cancellation and current-deployment checks (`RouterSessionBackend._run`,
+/// backend.py:193-195), only then `policy_response` (:196-203). A credential-theft prompt on a
+/// route whose qualification is unavailable therefore fails `chat_route_not_qualified`, shows no
+/// refusal, and nothing is posted for inference.
+#[test]
+fn a_policy_prompt_on_an_unqualified_route_fails_like_any_chat() {
+    let fake = FakeGateway::start(Script {
+        qualified: false,
+        ..Script::completed(&["x"])
+    });
+    let chat = service(run_over(http(&fake), Some(serving("run-1"))), None);
+    let sent = chat.send("local", prompt(THEFT, 4)).unwrap();
+    let (tokens, last) = until_done(&chat, &id_of(&sent));
+    assert_eq!(
+        (&last["terminal"], &last["error"]),
+        (&json!("failed"), &json!("chat_route_not_qualified")),
+        "{last}"
+    );
+    assert!(tokens.is_empty(), "the refusal was shown: {tokens:?}");
+    assert_eq!(fake.seen(|s| s.posts.len()), 0, "an inference was posted");
+    // Control: the same prompt on a qualified route gets exactly the refusal, still unposted.
+    fake.script(Script::completed(&["x"]));
+    let sent = chat.send("local-2", prompt(THEFT, 4)).unwrap();
+    let (tokens, last) = until_done(&chat, &id_of(&sent));
+    assert_eq!(last["terminal"], "completed", "{last}");
+    assert_eq!(tokens, [api::prompt_codec::POLICY_REFUSAL]);
+    assert_eq!(
+        fake.seen(|s| s.posts.len()),
+        0,
+        "a policy prompt was posted"
+    );
+}
+/// The run as [`FakeRun`], except that the chat's own worker thread (`a13-chat`) is held at its
+/// FIRST status read (`_work`'s `_run_ended_by_ceiling`, chat.py:344) until the test releases it:
+/// the owner's cancel then deterministically wins before the work reaches the policy answer.
+struct HeldWork {
+    run: Arc<FakeRun>,
+    hold: Mutex<Option<(mpsc::Sender<()>, mpsc::Receiver<()>)>>,
+}
+impl RunRoute for HeldWork {
+    fn status(&self) -> Option<Value> {
+        if std::thread::current().name() == Some("a13-chat") {
+            let held = self.hold.lock().unwrap().take();
+            if let Some((entered, release)) = held {
+                entered.send(()).unwrap();
+                release
+                    .recv_timeout(span(B::WorkerStartup))
+                    .expect("the test never released the chat's work");
+            }
+        }
+        self.run.status()
+    }
+    fn gateway(&self, run_id: &str) -> Option<Arc<dyn RouteGateway>> {
+        self.run.gateway(run_id)
+    }
+    fn model_id(&self) -> Option<String> {
+        self.run.model_id()
+    }
+}
+/// CF-02: a cancel the owner sends before the chat's work reached the gateway is consulted by the
+/// policy answer as by any chat: v0.1.4 remembers it (`request_cancel`, chat.py:166-169), sends
+/// it once the gateway accepted the request (`_arm_cancel`, :156-164), and the backend's first
+/// check ends the request `cancelled` (backend.py:193-194) before `policy_response`. The chat ends
+/// `cancelled` with the owner's code and shows no refusal; nothing is posted.
+#[test]
+fn a_policy_prompt_cancelled_before_its_work_ends_cancelled() {
+    let fake = FakeGateway::start(Script::completed(&["x"]));
+    let (entered_tx, entered) = mpsc::channel();
+    let (release, release_rx) = mpsc::channel();
+    let run = Arc::new(HeldWork {
+        run: run_over(http(&fake), Some(serving("run-1"))),
+        hold: Mutex::new(Some((entered_tx, release_rx))),
+    });
+    let chat = ChatService::new(run, Arc::new(MonotonicClock::default()), None).unwrap();
+    let id = id_of(&chat.send("local", prompt(THEFT, 4)).unwrap());
+    entered
+        .recv_timeout(span(B::WorkerStartup))
+        .expect("the chat's work never started");
+    assert!(
+        matches!(chat.cancel(&id, "chat_cancelled"), Ok(true)),
+        "the cancel was refused"
+    );
+    release.send(()).unwrap();
+    let (tokens, last) = until_done(&chat, &id);
+    assert_eq!(
+        (&last["terminal"], &last["error"]),
+        (&json!("cancelled"), &json!("chat_cancelled")),
+        "{last}"
+    );
+    assert!(tokens.is_empty(), "the refusal was shown: {tokens:?}");
+    assert_eq!(fake.seen(|s| s.posts.len()), 0, "an inference was posted");
+}
+
+// ------------------------- lane CHATFIX patch 2, CF-03: the route's ids of the page's tokens -----
+
+/// CF-03 (REVIEW-laneCHATFIX-astra): the route's gateway streams each token WITH its id
+/// (`token_id` in the SSE token event, `M16Requests`' events); the page shows text only (v0.1.4's
+/// chat events carry no ids). A TEST-ONLY tap on the HTTP gateway
+/// (`HttpRouteGateway::with_token_id_tap`) hands a probe the ids of the SAME request the page
+/// shows, one per token event, in order, while the chat's pieces stay exactly the gateway's text.
+#[test]
+fn the_http_gateways_test_tap_sees_the_route_id_of_each_streamed_token() {
+    let fake = FakeGateway::start(Script::completed(&["Hel", "lo", "!"]));
+    let ids: Arc<Mutex<Vec<Option<u64>>>> = Arc::default();
+    let tap: api::chat_service::TokenIdTap = {
+        let ids = ids.clone();
+        Arc::new(move |id| ids.lock().unwrap().push(id))
+    };
+    let gateway = HttpRouteGateway::new(fake.addr(), fake.bearer()).with_token_id_tap(tap);
+    let chat = service(run_over(Arc::new(gateway), Some(serving("run-1"))), None);
+    let sent = chat.send("local", prompt("hi", 3)).unwrap();
+    let (tokens, last) = until_done(&chat, &id_of(&sent));
+    assert_eq!(last["terminal"], "completed", "{last}");
+    assert_eq!(tokens, ["Hel", "lo", "!"]);
+    let first = fake_route_gateway::FIRST_TOKEN_ID;
+    assert_eq!(
+        *ids.lock().unwrap(),
+        [Some(first), Some(first + 1), Some(first + 2)]
+    );
 }

@@ -237,6 +237,10 @@ struct Page {
 }
 impl Page {
     fn new(fake: &FakeGateway) -> Self {
+        Self::with_config(fake, RunConfig::default())
+    }
+    /// As [`Page::new`], over the run config `config` (its test seams).
+    fn with_config(fake: &FakeGateway, config: RunConfig) -> Self {
         let f = Fixture::new();
         let flags = Arc::new(Flags::default());
         let (entered_tx, entered) = mpsc::channel();
@@ -250,7 +254,6 @@ impl Page {
             entered: entered_tx,
             release: release_rx,
         }));
-        let config = RunConfig::default();
         let run = OwnerRun::install_with(
             f.host.clone(),
             &config,
@@ -457,6 +460,43 @@ fn the_page_chats_through_the_run_route_before_during_and_after_a_run() {
         1,
         "a cancelled chat is not timed"
     );
+    page.close();
+}
+
+/// Lane CHATFIX patch 2, CF-03: the TEST-ONLY token-id tap a run config carries
+/// (`RunConfig::chat_token_id_tap`, for the ten-row gate's model-backed probe) reaches the
+/// production route's gateway (`RunChatRoute::gateway`): a page chat through the serving run's
+/// route hands it the route's id of each token the page shows, in order.
+#[test]
+fn the_run_configs_token_id_tap_sees_the_route_ids_of_a_page_chat() {
+    let fake = FakeGateway::start(Fake::completed(&["Hel", "lo"]));
+    let ids: Arc<Mutex<Vec<Option<u64>>>> = Arc::default();
+    let tap: api::chat_service::TokenIdTap = {
+        let ids = ids.clone();
+        Arc::new(move |id| ids.lock().unwrap().push(id))
+    };
+    let page = Page::with_config(
+        &fake,
+        RunConfig {
+            chat_token_id_tap: Some(tap),
+            ..RunConfig::default()
+        },
+    );
+    page.start();
+    page.serving();
+    let (code, sent) = page.send("hi");
+    assert_eq!(code, 200, "{sent}");
+    let (tokens, last) = page.until_done(&sent["request_id"]);
+    assert_eq!(
+        tokens,
+        ["Hel", "lo"],
+        "the page's pieces are the gateway's text"
+    );
+    assert_eq!(last["terminal"], "completed", "{last}");
+    let first = fake_route_gateway::FIRST_TOKEN_ID;
+    assert_eq!(*ids.lock().unwrap(), [Some(first), Some(first + 1)]);
+    page.stop();
+    page.until("the run stopped", |s| s["state"] == "stopped");
     page.close();
 }
 

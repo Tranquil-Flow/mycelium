@@ -96,7 +96,7 @@ fn run_host(
         let fixture: Value = serde_json::from_str(include_str!("../data/qwen2-oracle.json"))?;
         // The user's plain question, as typed into v0.1.4's chat; the chat edge wraps it.
         let script = probe_script(
-            &serde_json::to_string(crate::chat_template::ORACLE_USER_PROMPT)?,
+            &serde_json::to_string(api::prompt_codec::ORACLE_USER_PROMPT)?,
             &serde_json::to_string(
                 &fixture["tokens"]
                     .as_array()
@@ -237,6 +237,9 @@ pub struct DesktopServices {
     started: std::time::Instant,
     capacity: NonZeroUsize,
 }
+/// The model the development shell's one-Mac native chat serves (its state document's
+/// `Qwen2.5-0.5B-Instruct`): its prompts take that model's codec from the seam.
+const NATIVE_CHAT_MODEL: &str = "Qwen/Qwen2.5-0.5B-Instruct";
 /// `/chat/api/send` over the run's route (chat.py:300-340) for `client` (the page's `local`, or
 /// the relay's `relay:<address>` key, `chat.client_key`): the body checks (`chat_edge`), Quit's
 /// fence, then the service (rate limits per client and for the swarm, one chat at a time under
@@ -655,7 +658,10 @@ impl DesktopServices {
                 let policy = crate::chat_edge::policy_response(&plan.prompt);
                 // Use the native request contract's validation, not an alternate
                 // browser-only generation policy.
-                let prompt = crate::chat_template::qwen2_chat_prompt(&plan.prompt);
+                // The one prompt-codec seam (lane CHATFIX): this path serves Qwen2.5-0.5B.
+                let prompt = api::prompt_codec::PromptCodec::for_model(NATIVE_CHAT_MODEL)?
+                    .chat(&plan.prompt)
+                    .into_string();
                 let document = json!({"protocol":"mycelium.request_gateway.v1","prompt":prompt,"max_new_tokens":tokens,"qualification":self.node.qualification()?});
                 protocol::request::submission(&document).map_err(|e| PublicError::new(400, e.0))?;
                 // The gate is only Quit's fence here, never held across the send's admission

@@ -80,6 +80,11 @@ pub struct RunConfig {
     /// on one machine. The compile port then reads the double's context. The product composition
     /// always leaves this `None`: the packaged app has no host-identity seam.
     pub observe_test_double: Option<ObserveTestDouble>,
+    /// TEST ONLY (lane CHATFIX patch 2, CF-03): put on the run's route gateway
+    /// (`chat::RunChatRoute::gateway`), it sees the route's id of each token the page's chats
+    /// stream (`api::chat_service::TokenIdTap`), for the ten-row gate's model-backed comparison.
+    /// The product composition always leaves this `None`.
+    pub chat_token_id_tap: Option<api::chat_service::TokenIdTap>,
 }
 /// An observe port a TEST supplies in place of the real one (see [`RunConfig::observe_test_double`]).
 pub trait ObserveDouble: ObservePort + Send {

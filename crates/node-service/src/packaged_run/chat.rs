@@ -68,7 +68,12 @@ impl RunRoute for RunChatRoute {
             return None;
         }
         let gateway = (source.read)()?;
-        http_gateway(&gateway).map(|gateway| Arc::new(gateway) as Arc<dyn RouteGateway>)
+        let gateway = http_gateway(&gateway)?;
+        let gateway = match &self.config.chat_token_id_tap {
+            Some(tap) => gateway.with_token_id_tap(tap.clone()),
+            None => gateway,
+        };
+        Some(Arc::new(gateway) as Arc<dyn RouteGateway>)
     }
     /// `app.run_model_contract().model_id` (chat.py:506-511, app.py:850-853: `app_run_model(root)`,
     /// the picker choice or the environment's override).
