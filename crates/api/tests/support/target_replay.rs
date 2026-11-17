@@ -349,3 +349,95 @@ fn replay_local_revocation_and_cancellation_never_become_requeue() {
         pump.close().unwrap();
     }
 }
+
+fn command_state(f: &Fixture, mailbox: &str, command: &str) -> String {
+    rusqlite::Connection::open(f.root.join(mailbox))
+        .unwrap()
+        .query_row(
+            "SELECT state FROM managed_commands WHERE command_id=?1",
+            [command],
+            |r| r.get(0),
+        )
+        .unwrap()
+}
+/// Physical rv41 shape (two Macs, 17 Nov): a run's poll is interrupted after the owner
+/// claimed work, the run ends, and the pump closes with phase `closed`, `pending` null and
+/// the exact signed poll still in `outbound`. v0.1.4 keeps that journal per RUN
+/// (`target_app.py:256` roots the pump at `managed/<run_id>/pump`): the NEXT run's pump
+/// never loads, replays or refuses on it, and only the signer-wide sequence carries over
+/// (`control_sequence.py`). Reopening the SAME run is still refused, as v0.1.4's concurrent
+/// pump refuses a serial outbound it cannot reconcile (`concurrent_pump.py:71-76`).
+#[test]
+#[ignore = "requires pinned real model-free helper"]
+fn replay_next_run_starts_after_interrupted_run_without_replaying_its_outbound() {
+    let old = Fixture::new();
+    let mut pump = old.pump();
+    old.cleanup();
+    old.enqueue(1, "hello");
+    // The owner commits the claim, then the reply is lost to a fatal interruption.
+    fault(&old, "poll", true, "managed_control_command_interrupted");
+    assert_eq!(pump.step(), Err("managed_control_command_interrupted"));
+    pump.record_failure("managed_control_command_interrupted")
+        .unwrap();
+    pump.close().unwrap();
+    drop(pump);
+    let interrupted = state(&old);
+    assert_eq!(interrupted["phase"], "closed");
+    assert!(interrupted["pending"].is_null());
+    assert!(!interrupted["outbound"].is_null());
+    assert_eq!(
+        interrupted["failure"],
+        "managed_control_command_interrupted"
+    );
+    assert_eq!(command_state(&old, "mailbox.sqlite", "hello"), "claimed");
+    let old_requests = old.host.requests.lock().unwrap().clone();
+    assert_eq!(old_requests.len(), 1);
+
+    // Same run: unresolved journal still refused, nothing sent or rewritten.
+    let same = match old.try_pump() {
+        Err(failure) => failure,
+        Ok(_) => panic!("same-run unresolved outbound must not be resumed blindly"),
+    };
+    assert_eq!(same.code(), "control_restart_requires_reconciliation");
+    assert!(!same.owner_retained());
+    drop(same);
+    assert_eq!(state(&old), interrupted);
+    assert!(!old.root.join("stage").exists());
+
+    // The next owner run (fresh run/deployment id) on the same Mac starts.
+    let next = old.next_run("run-2", "deployment-2");
+    let mut pump = next
+        .try_pump()
+        .unwrap_or_else(|failure| panic!("next run refused: {}", failure.code()));
+    let started = state(&next);
+    assert_eq!(started["phase"], "running");
+    assert_eq!(started["binding"], next.scope);
+    assert!(started["outbound"].is_null());
+    assert!(started["pending"].is_null());
+    assert!(started["failure"].is_null());
+    assert_eq!(started["sequence"], interrupted["sequence"]);
+    next.enqueue(1, "hello");
+    assert_eq!(pump.step(), Ok(false));
+    let sent = next.host.requests.lock().unwrap().clone();
+    let stale = protocol::canonical::to_bytes(&interrupted["outbound"]).unwrap();
+    assert!(!sent.contains(&stale), "earlier run's outbound replayed");
+    let first: Value = serde_json::from_slice(&sent[0]).unwrap();
+    assert_eq!(first["statement"]["run_id"], "run-2");
+    assert_eq!(
+        first["statement"]["sequence"].as_u64(),
+        interrupted["sequence"].as_u64().map(|s| s + 1)
+    );
+    assert_eq!(
+        command_state(&next, "mailbox-run-2.sqlite", "hello"),
+        "completed"
+    );
+    // The earlier run's interrupted claim is never executed or acknowledged.
+    assert_eq!(*old.host.requests.lock().unwrap(), old_requests);
+    assert_eq!(command_state(&old, "mailbox.sqlite", "hello"), "claimed");
+    next.enqueue(2, "stop");
+    assert!(pump.step().unwrap());
+    next.cleanup();
+    pump.close().unwrap();
+    assert_eq!(state(&next)["phase"], "closed");
+    assert!(state(&next)["outbound"].is_null());
+}
