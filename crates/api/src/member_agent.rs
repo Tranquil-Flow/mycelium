@@ -746,7 +746,9 @@ impl<H: MemberHost> AgentHost for MemberView<'_, H> {
                 Err(code) => waiting("error", Some(&code), None),
             };
         }
-        let acquisition = current.take().unwrap_or_else(|| unreachable!("checked above"));
+        let acquisition = current
+            .take()
+            .unwrap_or_else(|| unreachable!("checked above"));
         let status = acquisition.status();
         let progress =
             json!({"done_bytes": status.downloaded_bytes, "total_bytes": status.total_bytes});
@@ -1151,6 +1153,7 @@ fn start<H: MemberHost>(
     archive: Vec<u8>,
 ) -> OResult<()> {
     let host = view.host;
+    settle_finished(&**host, &scope)?;
     let lifecycle = host.lifecycle()?;
     let _lifecycle = locked(&lifecycle)?;
     // `false`: the same worker already runs this exact offer, nothing to start.
@@ -1237,6 +1240,48 @@ fn start<H: MemberHost>(
     if let Some(mut worker) = refused {
         worker.close()?;
         return Err(OwnerError("bootstrap_start_fenced"));
+    }
+    Ok(())
+}
+
+/// PR-ASTRA-02: settle an earlier run's FINISHED worker before a new run is admitted.
+///
+/// v0.1.4's bootstrap branch (demo_target.py:495-512 @ f4e366e9) meets `stage_runtime_active`
+/// when the previous run's runtime is still attached, calls `/api/control/stop` (`stop_control`
+/// closes and detaches it, target_app.py:280-284) and stages again. Here the pump thread of an
+/// earlier scope can end by itself on a terminal step error AFTER its own close removed the stage
+/// and ACKed the owner's cleanup: no cleanup request will ever close it again, so its finished
+/// worker would otherwise refuse every later Start. It is settled through the worker's own
+/// close/retry: the first close joins its thread (returning that thread's terminal error once),
+/// the second retries the failure the join retained (`PumpWorker::close`).
+///
+/// Genuine debt still blocks: a RUNNING worker, a worker of this same scope and a start-failure
+/// latch are left to [`start`]'s own refusals, and a worker whose cleanup still fails stays in
+/// the slot and its error is returned.
+fn settle_finished<H: MemberHost>(host: &H, scope: &Value) -> OResult<()> {
+    let lifecycle = host.lifecycle()?;
+    let _lifecycle = locked(&lifecycle)?;
+    let finished = host.slot(|s| {
+        let obsolete = s.failure.is_none()
+            && s.worker
+                .as_ref()
+                .is_some_and(|w| !w.running() && w.scope() != scope);
+        if obsolete {
+            *s.incarnation = Arc::new(());
+            s.worker.take()
+        } else {
+            None
+        }
+    })?;
+    let Some(mut worker) = finished else {
+        return Ok(());
+    };
+    if let Err(ended) = worker.close() {
+        eprintln!("member target settling a finished worker: {}", ended.0);
+        if let Err(error) = worker.close() {
+            host.slot(|s| *s.worker = Some(worker))?;
+            return Err(error);
+        }
     }
     Ok(())
 }
@@ -1642,4 +1687,162 @@ pub fn installed_sidecar() -> Result<PathBuf, Failure> {
         return Err(invalid());
     }
     Ok(path)
+}
+
+#[cfg(test)]
+mod settle_tests {
+    //! PR-ASTRA-02: which slot contents the next run's admission settles, and which still block.
+    use super::*;
+    use std::collections::VecDeque;
+    struct Fake {
+        running: bool,
+        scope: Value,
+        closes: Arc<Mutex<VecDeque<OResult<()>>>>,
+    }
+    impl MemberWorker for Fake {
+        fn running(&self) -> bool {
+            self.running
+        }
+        fn scope(&self) -> &Value {
+            &self.scope
+        }
+        fn close(&mut self) -> OResult<()> {
+            locked(&self.closes)?.pop_front().unwrap_or(Ok(()))
+        }
+    }
+    #[derive(Default)]
+    struct Host {
+        lifecycle: Arc<Mutex<()>>,
+        slot: Mutex<(Option<Fake>, Option<CleanupFailure>, Arc<()>)>,
+    }
+    impl MemberHost for Host {
+        type Worker = Fake;
+        fn state(&self) -> OResult<HostState> {
+            Ok(HostState {
+                root: PathBuf::new(),
+                target: true,
+                running: true,
+                left: false,
+                closed: false,
+            })
+        }
+        fn lease(&self) -> Option<f64> {
+            None
+        }
+        fn resource_check(&self) -> Option<String> {
+            None
+        }
+        fn acquisition(&self) -> Option<Acquisition> {
+            None
+        }
+        fn member_seed_options(&self) -> SeedOptions {
+            SeedOptions::default()
+        }
+        fn installed_sidecar(&self) -> Result<PathBuf, Failure> {
+            Err(Failure::new("ValueError", "test_no_sidecar"))
+        }
+        fn lifecycle(&self) -> OResult<Arc<Mutex<()>>> {
+            Ok(self.lifecycle.clone())
+        }
+        fn slot<R>(&self, f: impl FnOnce(Slot<'_, Self::Worker>) -> R) -> OResult<R> {
+            let mut slot = locked(&self.slot)?;
+            let (worker, failure, incarnation) = &mut *slot;
+            Ok(f(Slot {
+                worker,
+                failure,
+                incarnation,
+                state: self.state()?,
+            }))
+        }
+        fn program(&self, _root: &Path) -> OResult<TrustedBootstrap> {
+            Err(OwnerError("test_no_program"))
+        }
+        fn spawn(
+            &self,
+            _pump: TargetPump<RemoteTarget<Self>>,
+            _fence: TargetFence,
+            _scope: Value,
+        ) -> Self::Worker {
+            unreachable!("settlement never starts a worker")
+        }
+    }
+    fn run(id: &str) -> Value {
+        json!({"run_id": id, "deployment_id": format!("dep-{id}")})
+    }
+    /// A worker in the slot whose closes answer `closes` in order; returns the close script.
+    fn holding(
+        host: &Host,
+        running: bool,
+        scope: Value,
+        closes: Vec<OResult<()>>,
+    ) -> Arc<Mutex<VecDeque<OResult<()>>>> {
+        let script = Arc::new(Mutex::new(VecDeque::from(closes)));
+        locked(&host.slot).unwrap().0 = Some(Fake {
+            running,
+            scope,
+            closes: script.clone(),
+        });
+        script
+    }
+    fn held(host: &Host) -> bool {
+        locked(&host.slot).unwrap().0.is_some()
+    }
+    #[test]
+    fn an_earlier_runs_finished_worker_is_closed_twice_and_leaves_the_slot() {
+        let host = Host::default();
+        // Its thread ended on a terminal error after its own close ACKed the cleanup: the first
+        // close joins and returns that error, the second retries the retained failure.
+        let script = holding(
+            &host,
+            false,
+            run("a"),
+            vec![Err(OwnerError("offer_transfer_not_authorized")), Ok(())],
+        );
+        assert_eq!(settle_finished(&host, &run("b")), Ok(()));
+        assert!(!held(&host));
+        assert!(locked(&script).unwrap().is_empty(), "both closes ran");
+    }
+    #[test]
+    fn genuine_cleanup_debt_stays_in_the_slot_and_still_refuses() {
+        let host = Host::default();
+        let script = holding(
+            &host,
+            false,
+            run("a"),
+            vec![
+                Err(OwnerError("bootstrap_stage_cleanup_unproven")),
+                Err(OwnerError("bootstrap_stage_cleanup_unproven")),
+                Ok(()),
+            ],
+        );
+        assert_eq!(
+            settle_finished(&host, &run("b")),
+            Err(OwnerError("bootstrap_stage_cleanup_unproven"))
+        );
+        assert!(held(&host), "unsettled debt keeps its owner");
+        assert_eq!(locked(&script).unwrap().len(), 1, "two closes, no more");
+    }
+    #[test]
+    fn a_running_worker_a_same_run_worker_and_a_start_failure_are_left_alone() {
+        for (running, scope) in [(true, run("a")), (false, run("b"))] {
+            let host = Host::default();
+            let script = holding(&host, running, scope, vec![Err(OwnerError("never_closed"))]);
+            assert_eq!(settle_finished(&host, &run("b")), Ok(()));
+            assert!(held(&host));
+            assert_eq!(locked(&script).unwrap().len(), 1, "not closed");
+        }
+        let host = Host::default();
+        let script = holding(
+            &host,
+            false,
+            run("a"),
+            vec![Err(OwnerError("never_closed"))],
+        );
+        locked(&host.slot).unwrap().1 = Some(CleanupFailure::from(
+            "control_restart_requires_reconciliation",
+        ));
+        assert_eq!(settle_finished(&host, &run("b")), Ok(()));
+        assert!(held(&host));
+        assert_eq!(locked(&script).unwrap().len(), 1, "not closed");
+    }
 }
