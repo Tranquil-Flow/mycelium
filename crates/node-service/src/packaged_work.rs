@@ -711,10 +711,10 @@ fn relay_ready(
     network: &NetworkChoice,
     hosts: [&LoopbackHost<'_>; 2],
 ) -> std::result::Result<(), &'static str> {
-    if !network
+    if network
         .0
         .as_ref()
-        .is_some_and(|(_, policy)| policy.relay().is_some())
+        .is_none_or(|(_, policy)| policy.relay().is_none())
     {
         return Ok(());
     }
