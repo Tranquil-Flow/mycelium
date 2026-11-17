@@ -476,6 +476,15 @@ fn held_ledger(f: &Fixture) -> fs::File {
     lock.try_lock().unwrap();
     lock
 }
+/// The owner's poll (500 ms): this file's waits are multiples of it (no literal durations).
+fn poll() -> std::time::Duration {
+    std::time::Duration::from_millis(
+        budgets::BudgetId::OwnerPoll
+            .span(budgets::Entries::ZERO)
+            .unwrap()
+            .millis(),
+    )
+}
 fn phase(f: &Fixture, run: &str) -> Value {
     let v: Value = serde_json::from_slice(
         &fs::read(f.root.join("chain-runs/compiler-storage.private.json")).unwrap(),
@@ -485,16 +494,16 @@ fn phase(f: &Fixture, run: &str) -> Value {
 }
 #[test]
 fn a_ledger_wait_ends_at_the_operations_deadline_without_committing() {
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
     let f = Fixture::new();
     let mut receive = f.begin("deadline");
     receive.write_chunk(0, &f.bytes).unwrap();
     let ledger = held_ledger(&f);
     let started = Instant::now();
-    let deadline = started + Duration::from_millis(300);
+    let deadline = started + poll() / 2;
     // The other holder lets go well after the deadline, inside a fresh close allowance.
     let holder = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(1_500));
+        std::thread::sleep(poll() * 3);
         drop(ledger);
     });
     let got = receive.verify(&|| {
@@ -508,7 +517,7 @@ fn a_ledger_wait_ends_at_the_operations_deadline_without_committing() {
     holder.join().unwrap();
     assert_eq!(got.map_err(|e| e.0), Err("member_operation_deadline"));
     assert!(
-        waited < Duration::from_millis(1_000),
+        waited < poll() * 2,
         "the ledger wait outlived the operation's deadline: {waited:?}"
     );
     assert_eq!(phase(&f, "deadline"), "cleanup_required");
@@ -523,7 +532,6 @@ fn a_ledger_freed_after_the_deadline_is_not_committed() {
         Arc,
         atomic::{AtomicBool, Ordering},
     };
-    use std::time::Duration;
     let f = Fixture::new();
     let mut receive = f.begin("late");
     receive.write_chunk(0, &f.bytes).unwrap();
@@ -531,7 +539,7 @@ fn a_ledger_freed_after_the_deadline_is_not_committed() {
     let passed = Arc::new(AtomicBool::new(false));
     let mark = passed.clone();
     let holder = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(200));
+        std::thread::sleep(poll() / 2);
         mark.store(true, Ordering::SeqCst);
         drop(ledger);
     });
