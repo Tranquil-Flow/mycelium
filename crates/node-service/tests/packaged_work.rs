@@ -654,7 +654,7 @@ fn the_owners_portmapping_is_frozen_with_its_run() {
     )
     .unwrap();
     network.begin_owner_run().unwrap();
-    assert!(!portmapping(&*network));
+    assert!(!portmapping(&network));
     // Saved during the run: the running run keeps portmapping off.
     reach::save(
         &root,
@@ -664,10 +664,10 @@ fn the_owners_portmapping_is_frozen_with_its_run() {
         },
     )
     .unwrap();
-    assert!(!portmapping(&*network), "the running run's value is frozen");
+    assert!(!portmapping(&network), "the running run's value is frozen");
     network.end_owner_run();
     network.begin_owner_run().unwrap();
-    assert!(portmapping(&*network), "the next run reads it");
+    assert!(portmapping(&network), "the next run reads it");
     network.end_owner_run();
     network.quit();
     std::fs::remove_dir_all(&root).ok();

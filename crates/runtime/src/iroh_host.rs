@@ -1497,14 +1497,11 @@ impl<'a> LoopbackHost<'a> {
         let task = self.runtime.spawn(async move {
             let closed = weak.closed();
             tokio::pin!(closed);
-            loop {
-                let Some(now) = weak
-                    .upgrade()
-                    .filter(|c| c.close_reason().is_none())
-                    .map(|c| crate::iroh_paths::path_kind(&c))
-                else {
-                    break;
-                };
+            while let Some(now) = weak
+                .upgrade()
+                .filter(|c| c.close_reason().is_none())
+                .map(|c| crate::iroh_paths::path_kind(&c))
+            {
                 log.saw(now);
                 tokio::select! {
                     _ = &mut closed => break,
