@@ -6,6 +6,7 @@
 pub mod coordinator;
 pub mod http;
 pub mod operator;
+pub mod probe;
 pub mod server;
 mod store;
 pub use store::{Described, describe as describe_state};

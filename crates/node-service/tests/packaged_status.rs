@@ -341,3 +341,122 @@ fn the_status_overlay_never_panics_on_a_document_that_is_not_an_object() {
     }
     std::fs::remove_dir_all(&base).unwrap_or_default();
 }
+
+/// RV42 S1 (relay-502 RCA, Q2): the page's status reads the owner's member rows from its seed's
+/// coordinator (`coordinator.members()`). Every managed-control call a joined Mac sends through
+/// the relay takes the authority lock first, so a status that waits on a slow coordinator WHILE
+/// holding the authority stalls those calls too, past the relay's 5 s hop (`502
+/// relay_backend_unavailable` on the joined Mac). Here a coordinator holder that does not return
+/// keeps the status waiting; the authority must stay free for the next caller meanwhile, and the
+/// status, once the coordinator answers, has the same shape as before.
+#[test]
+fn the_status_releases_the_authority_before_it_reads_the_seeds_members() {
+    use std::{sync::mpsc, thread, time::Instant};
+    let hop = macs::millis(B::PyMyceliumA13MacosPublicRelayRelayhandlerForwardTimeoutL115);
+    let base = state_root("status-convoy");
+    let root = private(&base);
+    std::fs::create_dir_all(&root).unwrap();
+    let authority = Arc::new(Mutex::new(
+        api::app_host::Authority::load(root.clone()).unwrap(),
+    ));
+    let created = api::app_host::create_owner_json(
+        &*authority,
+        json!({"storage_bytes": STORAGE}).as_object().unwrap(),
+    );
+    assert!(created.is_ok(), "create: {created:?}");
+    let network = Network::new(&root, NetworkConfig::default());
+    let overlay = |authority: &Mutex<_>, network: &Network| {
+        let mut status = json!({});
+        node_service::packaged_network::status_overlay(&mut status, Some(authority), network);
+        status
+    };
+    let before = overlay(&authority, &network);
+    assert_eq!(
+        before["authority"]["member_count"], 1,
+        "the owner is its swarm's one member: {before}"
+    );
+    let (seed, node) = {
+        let a = authority.lock().unwrap();
+        let node = a.swarm.as_ref().unwrap()["node_id"].as_str().unwrap();
+        (a.seed.clone().unwrap(), node.to_owned())
+    };
+
+    // A coordinator holder that keeps the lock until the test lets it go (a slow member guard).
+    let (held_tx, held_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let holder = thread::spawn(move || {
+        seed.coordinator.with_current_member(&node, |_, _| {
+            held_tx.send(()).unwrap();
+            release_rx.recv().unwrap_or_default();
+            Ok(())
+        })
+    });
+    held_rx.recv_timeout(hop).expect("the coordinator is held");
+
+    // The page's status, on its own thread: it waits on the held coordinator.
+    let (done_tx, done_rx) = mpsc::channel();
+    let status = thread::spawn({
+        let (authority, network) = (authority.clone(), network.clone());
+        move || {
+            let status = overlay(&authority, &network);
+            done_tx.send(()).unwrap();
+            status
+        }
+    });
+    // Seen the status take the authority (it holds it only briefly once fixed): from then on the
+    // test knows the status reached the authority before the next caller asks for it.
+    let seen = Instant::now();
+    while authority.try_lock().is_ok() && seen.elapsed() < hop {
+        thread::yield_now();
+    }
+    assert!(
+        done_rx.try_recv().is_err(),
+        "the status cannot finish while the coordinator is held"
+    );
+
+    // The next caller of the authority (a managed-control call's `pin()`) gets it at once.
+    let (got_tx, got_rx) = mpsc::channel();
+    let next = thread::spawn({
+        let authority = authority.clone();
+        move || {
+            let running = authority.lock().map(|a| a.running).unwrap_or(false);
+            got_tx.send(running).unwrap_or_default();
+        }
+    });
+    let got = got_rx.recv_timeout(hop);
+    let still_waiting = done_rx.try_recv().is_err();
+    release_tx.send(()).unwrap();
+    assert!(holder.join().unwrap().is_ok());
+    let after = status.join().unwrap();
+    next.join().unwrap();
+    assert!(
+        still_waiting,
+        "the status was still waiting on the coordinator"
+    );
+    assert_eq!(
+        got,
+        Ok(true),
+        "the authority was held by a status waiting on the seed's coordinator"
+    );
+
+    // Same document shape as before the coordinator was held, same member rows.
+    fn shape(value: &Value) -> Value {
+        match value {
+            Value::Object(map) => map.iter().map(|(k, v)| (k.clone(), shape(v))).collect(),
+            Value::Array(items) => items.iter().map(shape).collect(),
+            Value::Null => json!("null"),
+            Value::Bool(_) => json!("bool"),
+            Value::Number(_) => json!("number"),
+            Value::String(_) => json!("string"),
+        }
+    }
+    assert_eq!(shape(&after), shape(&before), "{after}");
+    let keys = |v: &Value| v.as_object().unwrap().keys().cloned().collect::<Vec<_>>();
+    assert_eq!(keys(&after), keys(&before));
+    assert_eq!(
+        after["authority"]["members"],
+        before["authority"]["members"]
+    );
+    api::app_host::stop_authority(&*authority);
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+}

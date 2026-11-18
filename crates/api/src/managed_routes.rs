@@ -141,7 +141,14 @@ impl RouteExtension for MailboxRoutes {
         }
         match self.0.admit() {
             Some(admitted) => Ok(Some(Box::new(admitted))),
-            None => Err(SeedError::new("managed_control_capacity_exhausted")),
+            None => {
+                // Log-only probe (RV42 S1 relay-502 RCA): a slot refusal, by route.
+                seed::probe::record(format_args!(
+                    "l11_managed_control_capacity_exhausted path={path} slots={MAX_CONCURRENT_REQUESTS} wall_ms={}",
+                    seed::probe::wall_ms()
+                ));
+                Err(SeedError::new("managed_control_capacity_exhausted"))
+            }
         }
     }
 }

@@ -260,8 +260,21 @@ pub struct SeedRuntime<M: ManagedSlot = Unmanaged> {
     /// The target-side managed-control routes this seed serves to joined members; the owner's
     /// managed owner binds its mailbox here (`crate::managed_routes`).
     pub mailbox_routes: Arc<crate::managed_routes::DispatchSlot>,
+    /// The relay hop's TLS client configuration, built once from `ca_pem`
+    /// ([`Self::hop_client_config`]).
+    hop_tls: std::sync::OnceLock<Option<Arc<rustls::ClientConfig>>>,
 }
 impl<M: ManagedSlot> SeedRuntime<M> {
+    /// The relay hop's verified-TLS client configuration, pinned to this seed's local CA: built on
+    /// the first relayed request and shared by every later one, as v0.1.4 builds its SSL context
+    /// once, in `bind_seed` (public_relay.py:219-226 @ f4e366e9), not per request. `None` when the
+    /// CA does not load or no configuration can be built: the hop then answers every request
+    /// `relay_backend_unavailable`, as it did when it built one per request.
+    pub fn hop_client_config(&self) -> Option<Arc<rustls::ClientConfig>> {
+        self.hop_tls
+            .get_or_init(|| hop_tls_config(&self.ca_pem))
+            .clone()
+    }
     /// How this process reaches its own seed: the local CA, the loopback port, the loopback name.
     pub fn options(&self) -> SeedOptions {
         SeedOptions {
@@ -506,7 +519,24 @@ pub fn run_seed<M: ManagedSlot>(
         managed_closed: Mutex::new(false),
         managed: Mutex::new(None),
         mailbox_routes,
+        hop_tls: std::sync::OnceLock::new(),
     })
+}
+/// The hop's client configuration over `ca_pem` ([`SeedRuntime::hop_client_config`]).
+fn hop_tls_config(ca_pem: &[u8]) -> Option<Arc<rustls::ClientConfig>> {
+    use rustls::{ClientConfig, RootCertStore};
+    use rustls_pki_types::{CertificateDer, pem::PemObject};
+    let mut roots = RootCertStore::empty();
+    for cert in CertificateDer::pem_slice_iter(ca_pem) {
+        roots.add(cert.ok()?).ok()?;
+    }
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let config = ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .ok()?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    Some(Arc::new(config))
 }
 /// `/api/create` on a fresh swarm: `pair_request` -> `approve_pairing(ttl_seconds=120)` ->
 /// `accept_pairing`, all against this Mac's own seed over its pinned local TLS (owner collapse).
@@ -664,40 +694,32 @@ impl<M: ManagedSlot> Authority<M> {
     /// The owner authority this process answers for: a persisted v0.1.x one, else the one-member swarm
     /// record this host creates (a RUNNING member whose lease nothing can lapse: it is this Mac).
     pub fn owner_authority(&self) -> Option<PersistedAuthority> {
+        self.owner_snapshot().map(OwnerSnapshot::resolve)
+    }
+    /// [`Self::owner_authority`] in two steps: what it reads of this state, taken here (under the
+    /// host's authority lock), and the seed's membership, read by [`OwnerSnapshot::resolve`]
+    /// (`coordinator.members()`, the coordinator's own lock), which a caller may run once it has
+    /// released the authority. The page's status does (RV42 S1 relay-502 RCA): waiting on a slow
+    /// coordinator while holding the authority also stalls every managed-control call.
+    pub fn owner_snapshot(&self) -> Option<OwnerSnapshot<M>> {
         if self.target {
             return None;
         }
         if let Some(legacy) = &self.legacy {
-            return Some(legacy.clone());
+            return Some(OwnerSnapshot::Ready(legacy.clone()));
         }
         let record = self.swarm.as_ref()?;
         let node = record["node_id"].as_str()?.to_owned();
+        let swarm_id = record["swarm_id"].as_str()?.to_owned();
         if let Some(seed) = &self.seed {
-            let members = seed
-                .coordinator
-                .members(None)
-                .unwrap_or_default()
-                .iter()
-                .filter_map(|m| {
-                    Some(Member {
-                        node_id: m["node_id"].as_str()?.to_owned(),
-                        generation: m["generation"].as_u64()?,
-                        lifecycle_state: m["lifecycle_state"].as_str()?.to_owned(),
-                        lease_expires_at: m["lease_expires_at"].as_f64()?,
-                    })
-                })
-                .collect::<Vec<_>>();
-            // `coordinator.members()`: a running seed's rows are the membership, and none for this
-            // Mac is `unenrolled` (its own join failed: authority.py:638-664 @ f4e366e9).
-            return Some(PersistedAuthority {
-                swarm_id: record["swarm_id"].as_str()?.to_owned(),
-                target_node_id: node,
-                contribution_enabled: false,
-                members,
+            return Some(OwnerSnapshot::Seeded {
+                swarm_id,
+                node,
+                seed: seed.clone(),
             });
         }
-        Some(PersistedAuthority {
-            swarm_id: record["swarm_id"].as_str()?.to_owned(),
+        Some(OwnerSnapshot::Ready(PersistedAuthority {
+            swarm_id,
             target_node_id: node.clone(),
             contribution_enabled: false,
             members: vec![Member {
@@ -706,7 +728,54 @@ impl<M: ManagedSlot> Authority<M> {
                 lifecycle_state: "RUNNING".into(),
                 lease_expires_at: f64::MAX,
             }],
-        })
+        }))
+    }
+}
+/// What [`Authority::owner_authority`] reads of the authority, before the seed's membership.
+pub enum OwnerSnapshot<M: ManagedSlot = Unmanaged> {
+    /// A persisted v0.1.x authority, or a swarm with no seed running: complete as it is.
+    Ready(PersistedAuthority),
+    /// A swarm whose seed runs: its rows are the membership.
+    Seeded {
+        swarm_id: String,
+        node: String,
+        seed: Arc<SeedRuntime<M>>,
+    },
+}
+impl<M: ManagedSlot> OwnerSnapshot<M> {
+    /// The owner authority: a running seed's membership is read here (`coordinator.members()`).
+    pub fn resolve(self) -> PersistedAuthority {
+        match self {
+            Self::Ready(view) => view,
+            Self::Seeded {
+                swarm_id,
+                node,
+                seed,
+            } => {
+                let members = seed
+                    .coordinator
+                    .members(None)
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|m| {
+                        Some(Member {
+                            node_id: m["node_id"].as_str()?.to_owned(),
+                            generation: m["generation"].as_u64()?,
+                            lifecycle_state: m["lifecycle_state"].as_str()?.to_owned(),
+                            lease_expires_at: m["lease_expires_at"].as_f64()?,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                // `coordinator.members()`: a running seed's rows are the membership, and none for
+                // this Mac is `unenrolled` (its own join failed: authority.py:638-664 @ f4e366e9).
+                PersistedAuthority {
+                    swarm_id,
+                    target_node_id: node,
+                    contribution_enabled: false,
+                    members,
+                }
+            }
+        }
     }
 }
 
@@ -787,14 +856,17 @@ pub trait Cell {
 /// own loop ends with the host), the public seed path for a joining member.
 impl<M: ManagedSlot> Cell for Mutex<Authority<M>> {
     type Managed = M;
+    // Probed (log-only): a wait or hold of a second or more prints its call site (RV42 S1 RCA).
+    #[track_caller]
     fn with<R>(&self, f: impl FnOnce(&mut HostView<'_, M>) -> R) -> R {
-        match self.lock() {
+        match crate::probe::lock(self) {
             Ok(mut authority) => f(&mut HostView::bare(&mut authority)),
             Err(poisoned) => f(&mut HostView::bare(&mut poisoned.into_inner())),
         }
     }
+    #[track_caller]
     fn try_with<R>(&self, f: impl FnOnce(&mut HostView<'_, M>) -> R) -> Option<R> {
-        self.lock()
+        crate::probe::lock(self)
             .ok()
             .map(|mut authority| f(&mut HostView::bare(&mut authority)))
     }

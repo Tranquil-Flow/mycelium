@@ -60,6 +60,8 @@ pub mod process_identity;
 pub mod product_app;
 pub mod product_projector;
 pub mod product_routes;
+/// Log-only lock probes (`seed::probe`), shared with the hosts that lock the authority.
+pub use ::seed::probe;
 pub mod prompt_codec;
 pub mod qr;
 pub mod registry;

@@ -154,6 +154,13 @@ fn lock<T>(cell: &Mutex<T>) -> MutexGuard<'_, T> {
     // Plain values and handles: a panicked holder cannot leave them half-written.
     cell.lock().unwrap_or_else(PoisonError::into_inner)
 }
+/// [`lock`] for the authority, probed (log-only, `api::probe`): a wait or hold of a second or more
+/// prints its call site, as the RV42 S1 relay-502 RCA asks (the status and every managed-control
+/// call queue on this lock).
+#[track_caller]
+fn lock_authority(authority: &Mutex<Authority>) -> api::probe::Probed<'_, Authority> {
+    api::probe::lock_or_poisoned(authority)
+}
 /// A member renewal pass on the wire ([`Network::renew_member`]): ends on every exit, unwinding
 /// included, and wakes a leave waiting for it.
 struct RenewalPass<'a>(&'a Network);
@@ -308,7 +315,7 @@ impl Network {
     /// (app.py:1612-1613) or the authority started again (app.py:1636-1637).
     pub fn bind_seed(&self, authority: &Mutex<Authority>) {
         let (seed, swarm) = {
-            let a = lock(authority);
+            let a = lock_authority(authority);
             (a.seed.clone(), a.owner_authority().is_some())
         };
         lock(&self.relay).bind_seed(joined_member::seed_backend(seed, swarm));
@@ -376,7 +383,7 @@ impl Network {
         body: &serde_json::Map<String, Value>,
     ) -> Result<Json, PublicError> {
         let (seed, root) = {
-            let a = lock(authority);
+            let a = lock_authority(authority);
             (a.seed.clone(), a.root.clone())
         };
         let configured = app_host::configured_public_origin(&self.cell(authority));
@@ -448,7 +455,7 @@ impl Network {
 /// authority and wrote `installation-role.json`: this Mac's authority is the joining target's from now
 /// on (its peer state in the same private root, as the headless launcher keeps it).
 pub fn adopt_target_role(authority: &Mutex<Authority>) {
-    let mut a = lock(authority);
+    let mut a = lock_authority(authority);
     a.target = true;
     a.running = false;
 }
@@ -456,11 +463,11 @@ pub fn adopt_target_role(authority: &Mutex<Authority>) {
 /// `authority.status().get('membership_state')`: the owner authority's, or a joined target's own
 /// (`TargetApplication.status()`, peer.py:395-455), as its status shows it.
 pub fn membership_state(authority: &Mutex<Authority>) -> Option<String> {
-    let target = lock(authority).target;
+    let target = lock_authority(authority).target;
     if !target {
         return app_host::membership_state(authority);
     }
-    target_membership_state(&lock(authority))
+    target_membership_state(&lock_authority(authority))
 }
 /// A joined target's own `membership_state` (`TargetApplication.status()`) over an authority the
 /// caller already holds.
@@ -480,17 +487,19 @@ pub struct PackagedCell<'a> {
 }
 impl Cell for PackagedCell<'_> {
     type Managed = Managed;
+    #[track_caller]
     fn with<R>(&self, f: impl FnOnce(&mut HostView<'_, Managed>) -> R) -> R {
         // The relay's lock is released before the authority's is taken.
         let origin = Origin(self.network.origin());
         let left = self.network.left();
-        let mut authority = lock(self.authority);
+        let mut authority = lock_authority(self.authority);
         f(&mut HostView::new(&mut authority, &origin, false, left))
     }
+    #[track_caller]
     fn try_with<R>(&self, f: impl FnOnce(&mut HostView<'_, Managed>) -> R) -> Option<R> {
         let origin = Origin(self.network.origin());
         let left = self.network.left();
-        let mut authority = self.authority.lock().ok()?;
+        let mut authority = api::probe::lock(self.authority).ok()?;
         Some(f(&mut HostView::new(&mut authority, &origin, false, left)))
     }
     fn member_seed_options(&self) -> SeedOptions {
@@ -509,7 +518,7 @@ impl Endpoint<'_> {
     }
     /// The running seed is closed and opened again on the configured origin.
     fn reopen_seed(&self) -> Result<(), PublicError> {
-        let old = lock(&self.authority).seed.take();
+        let old = lock_authority(&self.authority).seed.take();
         if let Some(old) = old {
             old.close();
             app_host::open_owner_seed(&self.cell())?;
@@ -528,7 +537,7 @@ impl EndpointHost for Endpoint<'_> {
     /// is kept across restarts (`_network_configuration`).
     fn configure_public_endpoint(&mut self, origin: &str, _port: u16) -> Result<(), PublicError> {
         let root = {
-            let mut a = lock(&self.authority);
+            let mut a = lock_authority(&self.authority);
             a.configured_origin = Some(origin.to_owned());
             a.root.clone()
         };
@@ -554,7 +563,7 @@ impl EndpointHost for Endpoint<'_> {
     ) -> Result<Option<Value>, PublicError> {
         let previous = self.configured_public_origin();
         let (seed, root) = {
-            let a = lock(&self.authority);
+            let a = lock_authority(&self.authority);
             (a.seed.clone(), a.root.clone())
         };
         let (Some(previous), Some(seed)) = (previous, seed) else {
@@ -579,11 +588,11 @@ impl EndpointHost for Endpoint<'_> {
         Ok(Some(card))
     }
     fn seed_backend(&self) -> Option<Arc<dyn SeedBackend>> {
-        let a = lock(&self.authority);
+        let a = lock_authority(&self.authority);
         joined_member::seed_backend(a.seed.clone(), a.owner_authority().is_some())
     }
     fn set_running(&mut self) {
-        lock(&self.authority).running = true;
+        lock_authority(&self.authority).running = true;
     }
     /// `_bind_public_routes` (app.py:1070-1079): the pairing windows, the member-report inbox and
     /// the link probe, and the owner's chat (`bind_chat`, :1073-1077, lane CHATS item 2). The
@@ -592,7 +601,7 @@ impl EndpointHost for Endpoint<'_> {
         let authority = self.authority.clone();
         proxy.bind_local(Some(joined_member::public_route::<Managed>(Arc::new(
             move || {
-                let a = lock(&authority);
+                let a = lock_authority(&authority);
                 (a.windows.clone(), a.seed.clone())
             },
         ))));
@@ -604,7 +613,7 @@ impl EndpointHost for Endpoint<'_> {
     }
     fn materialize_pending_windows(&mut self) {
         let (windows, origin, seed) = {
-            let a = lock(&self.authority);
+            let a = lock_authority(&self.authority);
             (
                 a.windows.clone(),
                 a.configured_origin.clone(),
@@ -734,7 +743,7 @@ pub fn resume_leave(
         }
     }
     let (target, root) = {
-        let a = lock(authority);
+        let a = lock_authority(authority);
         (a.target, a.root.clone())
     };
     if !target {
@@ -801,8 +810,15 @@ pub fn status_overlay(status: &mut Value, authority: Option<&Mutex<Authority>>, 
         fast_mode_env: fast_mode_env.as_deref(),
         device_memory_bytes: network.device_memory_bytes(),
     };
-    let a = lock(authority);
-    for (key, value) in app_status::shared(&a, &pending, &facts) {
+    // The authority's fields are read under its lock; the owner's member rows come from the seed's
+    // coordinator (`coordinator.members()`) after the lock is released. Every managed-control call
+    // takes this lock first, so a status waiting on a slow coordinator while holding it stalled the
+    // joined Mac's relayed requests and the page together (RV42 S1 relay-502 RCA).
+    let snapshot = {
+        let a = lock_authority(authority);
+        app_status::shared_snapshot(&a, &pending, &facts)
+    };
+    for (key, value) in snapshot.fields() {
         fields.insert(key.into(), value.to_value());
     }
 }
@@ -871,7 +887,7 @@ impl Backend for PackagedActions {
                 .authority
                 .as_ref()
                 .map_err(|code| PublicError::new(409, code))?;
-            let target = lock(authority).target;
+            let target = lock_authority(authority).target;
             let swarm = app_host::swarm_created(&self.network.cell(authority));
             let allowed = match action {
                 Action::NetworkReconnect => target,
@@ -1093,7 +1109,7 @@ impl PackagedMember {
     }
     fn state(&self) -> api::member_agent::HostState {
         let (root, target, running) = {
-            let a = lock(&self.authority);
+            let a = lock_authority(&self.authority);
             (a.root.clone(), a.target, a.running)
         };
         api::member_agent::HostState {
@@ -1111,7 +1127,7 @@ impl api::member_agent::MemberHost for PackagedMember {
         Ok(PackagedMember::state(self))
     }
     fn lease(&self) -> Option<f64> {
-        let a = lock(&self.authority);
+        let a = lock_authority(&self.authority);
         a.session_view.and_then(|(_, lease)| lease).or_else(|| {
             a.session
                 .as_ref()
@@ -1123,7 +1139,7 @@ impl api::member_agent::MemberHost for PackagedMember {
         if self.network.fenced() {
             return Some("owner_stop".into());
         }
-        let root = lock(&self.authority).root.clone();
+        let root = lock_authority(&self.authority).root.clone();
         (self.seams.resource)(&root).map(str::to_owned)
     }
     fn acquisition(&self) -> Option<api::acquisition::Acquisition> {
@@ -1180,7 +1196,7 @@ impl api::member_agent::MemberHost for PackagedMember {
         // Lock order authority -> work session, as `Network::sync_work_session`. An owner host
         // has no joined Session (`session` is a target's), so it never has a binding here.
         let (root, binding) = {
-            let a = lock(&self.authority);
+            let a = lock_authority(&self.authority);
             let current = a.target && target_membership_state(&a).as_deref() == Some("current");
             let binding = match &a.session {
                 _ if !current => None,
@@ -1216,12 +1232,12 @@ impl api::member_agent::MemberHost for PackagedMember {
     }
     /// `DemoApp._next_periodic_report` lives beside `last_report` in the authority's record.
     fn periodic_report_due(&self) -> bool {
-        lock(&self.authority)
+        lock_authority(&self.authority)
             .recorded
             .periodic_report_due(std::time::Instant::now())
     }
     fn reported(&self, record: Value) {
-        lock(&self.authority)
+        lock_authority(&self.authority)
             .recorded
             .reported(record, std::time::Instant::now());
     }
@@ -1321,7 +1337,7 @@ pub fn member_status(status: &mut Value, authority: Option<&Mutex<Authority>>, n
     let Some(authority) = authority else {
         return;
     };
-    if !lock(authority).target {
+    if !lock_authority(authority).target {
         return;
     }
     let current = membership_state(authority).as_deref() == Some("current");

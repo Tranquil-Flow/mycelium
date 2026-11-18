@@ -264,6 +264,8 @@ struct ProxyShared {
     slots: AtomicUsize,
     trust_client_ip: bool,
     handlers: Mutex<Handlers>,
+    /// Where the relay's log-only probe lines go ([`seed::probe::Recorder::global`]; a test's own).
+    probe: &'static ::seed::probe::Recorder,
 }
 /// Lane B, B12: the relay's fork boundary. A child forked while a socket is open holds its own copy
 /// of that socket until its exec closes it (std marks it close-on-exec, and macOS has no atomic
@@ -307,6 +309,14 @@ pub struct Proxy {
 impl Proxy {
     /// `SeedRelayProxy(port, trust_client_ip).start()`; an `OSError` is the caller's.
     pub fn start(port: u16, trust_client_ip: bool) -> std::io::Result<Arc<Proxy>> {
+        Self::start_in(port, trust_client_ip, ::seed::probe::Recorder::global())
+    }
+    /// [`Proxy::start`] with its probe lines going to `probe` (test seam).
+    fn start_in(
+        port: u16,
+        trust_client_ip: bool,
+        probe: &'static ::seed::probe::Recorder,
+    ) -> std::io::Result<Arc<Proxy>> {
         // B12: no relay spawn lands between the listener's `socket()` and its close-on-exec.
         let listener = {
             let _forks = fork_boundary();
@@ -323,6 +333,7 @@ impl Proxy {
                 chat: None,
                 swarm: None,
             }),
+            probe,
         });
         let accept = shared.clone();
         let handle = thread::Builder::new()
@@ -375,13 +386,45 @@ impl Proxy {
     }
 }
 fn accept_loop(listener: &TcpListener, shared: &Arc<ProxyShared>) {
+    let pause = span(BudgetId::PyFinalMyceliumSeedHttpSelfServerTimeoutL676C8);
+    accept_with(
+        || listener.accept().map(|(stream, _)| stream),
+        shared,
+        pause,
+    );
+}
+/// The accept loop over `accept`. An accept error (EMFILE, ENFILE, ECONNABORTED...) pauses for
+/// `pause` before the next accept, as the seed's own accept loop does (`seed::server`, 50 ms,
+/// mycelium_seed/http.py:676): a persistent error retried at once spins the accept thread hot and
+/// starves the rest of the owner (RV42 S1 relay-502 RCA). The first error of a run and every 100th
+/// after it are logged with their errno.
+fn accept_with(
+    mut accept: impl FnMut() -> std::io::Result<TcpStream>,
+    shared: &Arc<ProxyShared>,
+    pause: Duration,
+) {
+    let mut failing: u64 = 0;
     loop {
-        let Ok((stream, _)) = listener.accept() else {
-            if shared.stop.load(Ordering::SeqCst) {
-                return;
+        let stream = match accept() {
+            Ok(stream) => stream,
+            Err(error) => {
+                if shared.stop.load(Ordering::SeqCst) {
+                    return;
+                }
+                failing += 1;
+                if failing % 100 == 1 {
+                    shared.probe.record(format_args!(
+                        "l11_relay_accept_error errno={} kind={:?} consecutive={failing} wall_ms={}",
+                        error.raw_os_error().unwrap_or(0),
+                        error.kind(),
+                        ::seed::probe::wall_ms()
+                    ));
+                }
+                thread::sleep(pause);
+                continue;
             }
-            continue;
         };
+        failing = 0;
         if shared.stop.load(Ordering::SeqCst) {
             return;
         }
@@ -396,6 +439,11 @@ fn accept_loop(listener: &TcpListener, shared: &Arc<ProxyShared>) {
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
             .is_ok();
         if !acquired {
+            // Log-only probe (RV42 S1 RCA): the public front answers its own 502 for this one.
+            shared.probe.record(format_args!(
+                "l11_relay_slots_exhausted slots={MAX_CONNECTIONS} wall_ms={}",
+                ::seed::probe::wall_ms()
+            ));
             stream.shutdown(Shutdown::Both).unwrap_or(());
             continue;
         }
@@ -403,12 +451,20 @@ fn accept_loop(listener: &TcpListener, shared: &Arc<ProxyShared>) {
         let spawned = thread::Builder::new()
             .name("a13-seed-relay-conn".into())
             .spawn(move || {
+                let _slot = Slot(&conn);
                 handle(&conn, stream);
-                conn.slots.fetch_add(1, Ordering::SeqCst);
             });
         if spawned.is_err() {
             shared.slots.fetch_add(1, Ordering::SeqCst);
         }
+    }
+}
+/// One connection's slot, returned when its thread ends, also by a panic (`slots.release()` in the
+/// handler thread's `finally`, `public_relay.py:71-73`).
+struct Slot<'a>(&'a ProxyShared);
+impl Drop for Slot<'_> {
+    fn drop(&mut self) {
+        self.0.slots.fetch_add(1, Ordering::SeqCst);
     }
 }
 
@@ -693,6 +749,7 @@ fn options(req: &Req, stream: &mut TcpStream) {
     reply(stream, 204, b"", "application/json", false, &SWARM_CORS);
 }
 fn forward(shared: &Arc<ProxyShared>, req: &mut Req, stream: &mut TcpStream) {
+    let started = Instant::now();
     if route_unknown(&req.path) {
         return error_reply(stream, 404, "relay_route_unknown", &[]);
     }
@@ -715,7 +772,10 @@ fn forward(shared: &Arc<ProxyShared>, req: &mut Req, stream: &mut TcpStream) {
     let body = match read_framed(req, Framing::Backend) {
         Ok(body) => body,
         Err(Framed::Invalid) => return error_reply(stream, 400, "relay_frame_invalid", &[]),
-        Err(Framed::Io) => return error_reply(stream, 502, "relay_backend_unavailable", &[]),
+        Err(Framed::Io) => {
+            backend_unavailable_probe(shared, &req.path, "request_read", started);
+            return error_reply(stream, 502, "relay_backend_unavailable", &[]);
+        }
     };
     let backend = lock(&shared.handlers).backend.clone();
     let Some(backend) = backend else {
@@ -742,9 +802,22 @@ fn forward(shared: &Arc<ProxyShared>, req: &mut Req, stream: &mut TcpStream) {
             error_reply(stream, 400, "relay_frame_invalid", &[])
         }
         Err(BackendError::Unavailable) => {
-            error_reply(stream, 502, "relay_backend_unavailable", &[])
+            backend_unavailable_probe(shared, &req.path, "hop", started);
+            error_reply(stream, 502, "relay_backend_unavailable", &[]);
         }
     }
+}
+/// Log-only probe (RV42 S1 relay-502 RCA): the proxy's OWN `502 relay_backend_unavailable`, with
+/// the route (no query: `route_unknown` refused any `?`), what failed (`request_read`: the body from
+/// the public front; `hop`: the verified-TLS hop into the seed, 5 s per step) and the time since the
+/// request head was read. A joined Mac logs every 502 as `code=None`; this line tells the proxy's
+/// own answer from the front's.
+fn backend_unavailable_probe(shared: &ProxyShared, path: &str, stage: &str, started: Instant) {
+    shared.probe.record(format_args!(
+        "l11_relay_backend_unavailable path={path} stage={stage} elapsed_ms={} wall_ms={}",
+        started.elapsed().as_millis(),
+        ::seed::probe::wall_ms()
+    ));
 }
 enum Framed {
     Invalid,
@@ -2105,3 +2178,56 @@ mod member_work_route_tests {
         assert!(route_unknown("/member-work/../seed/identity"));
     }
 }
+
+#[cfg(test)]
+mod accept_pause_tests {
+    //! RV42 S1 (relay-502 RCA): an accept error is retried after a pause, never at once.
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn an_accept_error_pauses_before_the_next_accept() {
+        let shared = Arc::new(ProxyShared {
+            stop: AtomicBool::new(false),
+            slots: AtomicUsize::new(MAX_CONNECTIONS),
+            trust_client_ip: false,
+            handlers: Mutex::new(Handlers {
+                backend: None,
+                local: None,
+                chat: None,
+                swarm: None,
+            }),
+            probe: ::seed::probe::Recorder::global(),
+        });
+        let pause = span(BudgetId::PyFinalMyceliumSeedHttpSelfServerTimeoutL676C8);
+        assert!(pause > Duration::ZERO);
+        let errors = 4;
+        let mut calls: Vec<Instant> = Vec::new();
+        let stop = shared.clone();
+        let started = Instant::now();
+        accept_with(
+            || {
+                calls.push(Instant::now());
+                if calls.len() == errors {
+                    stop.stop.store(true, Ordering::SeqCst);
+                }
+                // EMFILE: the process is out of descriptors; the error persists.
+                Err(std::io::Error::from_raw_os_error(24))
+            },
+            &shared,
+            pause,
+        );
+        assert_eq!(calls.len(), errors, "the loop ends at the stop");
+        for pair in calls.windows(2) {
+            assert!(
+                pair[1].duration_since(pair[0]) >= pause,
+                "an accept error was retried at once: {:?}",
+                pair[1].duration_since(pair[0])
+            );
+        }
+        assert!(started.elapsed() >= pause * u32::try_from(errors - 1).unwrap_or(0));
+    }
+}
+
+#[cfg(test)]
+mod probe_tests;
