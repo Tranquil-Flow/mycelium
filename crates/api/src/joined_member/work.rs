@@ -50,6 +50,9 @@ use std::{
 use transport::{Channel, Clock, ConnectionFence};
 pub type Result<T> = std::result::Result<T, String>;
 
+#[cfg(test)]
+mod tests;
+
 // ---- The serial operation queue (from examples/shard_member/control.rs) ----
 
 /// Operations that block the member for long: each needs its own operation_id.
