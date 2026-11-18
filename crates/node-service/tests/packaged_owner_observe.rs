@@ -1165,3 +1165,101 @@ fn after_stop_a_joined_macs_discovery_reads_answer_empty_and_its_card_stays_idle
     drop(repository);
     std::fs::remove_dir_all(&base).unwrap_or_default();
 }
+
+/// Lane SR round 3, rv44 session 1 run 2 (`qualification/rv44-sessions/a-run-rv44-s1.log`): run 1
+/// served and stopped cleanly; in run 2 the first hello collection completed open, hello and
+/// stop on BOTH Macs (B 0.3 + 16.1 + 14.8 s, the owner's own node 1.3 + 26.6 + 18.0 s) and was
+/// still refused: it took 77 s from its first clock reading (B's open at wall 1795018654442) to
+/// its last (after the owner's stop at 1795018731553), and the captured time must lie within the
+/// 60 s skew of the first (`managed_observation_captured_stale`, runtime/src/observe.rs:395-397;
+/// v0.1.4 managed_observations.py:41,177,262-264 @ f4e366e9, executed in
+/// `runtime/fixtures/observe-oracle.json` cases 36-37: +60.000 s collects, +60.001 s refuses). Run
+/// 1's collection took 20 s. Every retry then sends hello to helpers that already answered their
+/// stop (a stopped helper never takes another command, v0.1.4 managed_runtime.py:322-336 included),
+/// so run 2 never passes observe.
+///
+/// Model-free here: run 1, Stop, run 2 with each Mac's stop in run 2's FIRST collection reached
+/// past half the skew window (the double's hook, before the real stop), as slow as rv44's stops.
+///
+/// Ignored RED: v0.1.4 refuses the same collection and does not recover from it either, so there
+/// is no parity fix on the hello path. The cause to fix is the latency (owner seed coordinator
+/// contention, lane SR round 3 report), outside this lane's mandate (no coordinator change).
+#[test]
+#[ignore = "RED (lane SR round 3): a hello collection over the 60 s captured window is refused as in v0.1.4 and never recovers; the fix is the latency, not the hello path"]
+fn a_second_runs_hello_still_completes_when_its_collection_outlasts_the_captured_window() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let base = state_root("observe-slow-second-collection");
+    let repository = Repository::start();
+    let sidecar = sidecar_file(&base);
+    // Two stops (one per Mac) past half the skew each: the attempt outlasts the window.
+    let stall = millis(B::PyMyceliumA13MacosManagedObservationsMaxSkewSecondsL41) / 2
+        + millis(B::OwnerPoll);
+    let stalls = Arc::new(AtomicU64::new(0));
+    let hook: observe_test_double::StopHook = {
+        let stalls = stalls.clone();
+        Arc::new(move |_stop: observe_test_double::BeforeStop<'_>| {
+            if stalls
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .is_ok()
+            {
+                std::thread::sleep(stall);
+            }
+            false
+        })
+    };
+    let (owner, member) = pair(
+        &base,
+        &repository,
+        RunConfig {
+            sidecar: Some(sidecar),
+            observe_test_double: Some(Arc::new(move |backend| {
+                observe_test_double::HostIdentityTestDouble::with_hook(backend, hook.clone())
+            })),
+            ..RunConfig::default()
+        },
+    );
+    let (code, started) = owner.mac.post("/api/demo/start", json!({}));
+    assert_eq!(code, 200, "{started}");
+    let first = until_within(
+        "run 1 ended",
+        observe_patience() + millis(B::Compile),
+        || owner.mac.status()["owner_run"].clone(),
+        |r| matches!(r["state"].as_str(), Some("failed" | "stopped" | "serving")),
+    );
+    assert_eq!(first["steps"][3]["state"], "done", "{first}");
+    let (code, stopped) = owner.mac.post("/api/demo/stop", json!({}));
+    assert_eq!(code, 200, "{stopped}");
+    stalls.store(2, Ordering::SeqCst);
+    let (code, started) = owner.mac.post("/api/demo/start", json!({}));
+    assert_eq!(code, 200, "{started}");
+    let details = std::cell::RefCell::new(Vec::<Value>::new());
+    let second = until_within(
+        "run 2 passed observe or ended",
+        observe_patience() + millis(B::Collect) + millis(B::Compile) + stall * 2,
+        || {
+            let run = owner.mac.status()["owner_run"].clone();
+            let detail = run["steps"][3]["detail"].clone();
+            if details.borrow().last() != Some(&detail) {
+                details.borrow_mut().push(detail);
+            }
+            run
+        },
+        |r| {
+            r["deployment_id"] != first["deployment_id"]
+                && (r["steps"][3]["state"] == "done"
+                    || matches!(r["state"].as_str(), Some("failed" | "stopped" | "serving")))
+        },
+    );
+    let stop = owner.mac.post("/api/demo/stop", json!({}));
+    let quits = (member.quit(), owner.mac.quit());
+    drop(repository);
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+    assert_eq!(
+        second["steps"][3]["state"],
+        "done",
+        "run 2: {second}; observe details in order: {:?}",
+        details.borrow()
+    );
+    assert_eq!(stop.0, 200, "{}", stop.1);
+    assert_eq!(quits, (Ok(Poll::Verified), Ok(Poll::Verified)));
+}
