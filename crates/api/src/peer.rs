@@ -969,32 +969,69 @@ fn resume(
         MemberError::Contract(code) => Fail::Escaped(translate(root, &code, now())),
         MemberError::Value => Fail::Escaped(translate(root, "peer_operation_failed", now())),
     };
-    let (checkpoint, mut session, envelope) = match checkpoint {
+    // Sign one resume request under `incarnation` and checkpoint it before it is sent.
+    let checkpointed = |incarnation: &str,
+                        restart_count: u64,
+                        previous_generation: u64,
+                        previous_incarnation: &str|
+     -> Step<(Value, Session, Value)> {
+        let message_id = format!("resume-message-{}", (env.random_hex)(16));
+        let mut session = Session::new(node, swarm_id, seed_node, signer, incarnation);
+        let envelope = session
+            .resume_request(
+                signer,
+                now(),
+                &message_id,
+                previous_generation,
+                previous_incarnation,
+                &address,
+            )
+            .map_err(contract_or_membership)?;
+        let record = json!({
+            "protocol": RESUME_PENDING_PROTOCOL,
+            "previous_generation": previous_generation,
+            "previous_incarnation": previous_incarnation,
+            "incarnation": incarnation, "restart_count": restart_count,
+            "resume_message_id": message_id, "resume_envelope": envelope,
+        });
+        private_state::store(&root.join(RESUME_PENDING_FILE), &record, limit)
+            .map_err(|e| escaped(root, authority(e), now()))?;
+        Ok((record, session, envelope))
+    };
+    // DEPARTURE from v0.1.4 (owner ruling, 18 Nov 2026, lane RW): v0.1.4 replays a checkpoint byte
+    // for byte however old it is (`peer.py:896-930` `_load_resume_checkpoint`, `:977-1000`), and the
+    // seed answers a known request id with the acceptance it stored, whose 60 s `expires_at` this
+    // member then refuses (`membership_message_expired`) on every start, forever (one lost answer
+    // wedges the Mac). Here a checkpoint that has expired, or whose replayed acceptance comes back
+    // expired, is replaced by a FRESH request (new message id, current time) under the SAME
+    // checkpointed incarnation, restart count and previous generation/incarnation, checkpointed
+    // before it is sent; the seed's `already_advanced` branch (protocol `seed_coordinator.rs`
+    // `evaluate_resume`) re-issues the generation it committed, without advancing twice. At most one
+    // regeneration per start; a still-valid checkpoint is replayed unchanged; replies are verified
+    // as before. Member side only: no wire format or seed change.
+    let regenerate = |checkpoint: &Value| {
+        checkpointed(
+            checkpoint["incarnation"].as_str().unwrap_or_default(),
+            checkpoint["restart_count"].as_u64().unwrap_or_default(),
+            checkpoint["previous_generation"]
+                .as_u64()
+                .unwrap_or_default(),
+            checkpoint["previous_incarnation"]
+                .as_str()
+                .unwrap_or_default(),
+        )
+    };
+    let mut replayed = false;
+    let (mut checkpoint, mut session, envelope) = match checkpoint {
         None => {
             let restart_count = membership["restart_count"].as_u64().unwrap_or_default() + 1;
             let incarnation = next_incarnation(previous_incarnation, restart_count);
-            let message_id = format!("resume-message-{}", (env.random_hex)(16));
-            let mut session = Session::new(node, swarm_id, seed_node, signer, &incarnation);
-            let envelope = session
-                .resume_request(
-                    signer,
-                    now(),
-                    &message_id,
-                    previous_generation,
-                    previous_incarnation,
-                    &address,
-                )
-                .map_err(contract_or_membership)?;
-            let record = json!({
-                "protocol": RESUME_PENDING_PROTOCOL,
-                "previous_generation": previous_generation,
-                "previous_incarnation": previous_incarnation,
-                "incarnation": incarnation, "restart_count": restart_count,
-                "resume_message_id": message_id, "resume_envelope": envelope,
-            });
-            private_state::store(&root.join(RESUME_PENDING_FILE), &record, limit)
-                .map_err(|e| escaped(root, authority(e), now()))?;
-            (record, session, envelope)
+            checkpointed(
+                &incarnation,
+                restart_count,
+                previous_generation,
+                previous_incarnation,
+            )?
         }
         Some(checkpoint) => {
             let text = |key: &str| checkpoint[key].as_str().unwrap_or_default().to_owned();
@@ -1023,13 +1060,30 @@ fn resume(
             {
                 return Err(Fail::Direct(peer("peer_recovery_invalid")));
             }
-            (Value::Object(checkpoint), session, reproduced)
+            let checkpoint = Value::Object(checkpoint);
+            // `membership::verify`'s own rule: valid while `now <= expires_at`.
+            let expired = reproduced["message"]["expires_at"]
+                .as_f64()
+                .is_none_or(|expires_at| now() > expires_at);
+            if expired {
+                regenerate(&checkpoint)?
+            } else {
+                replayed = true;
+                (checkpoint, session, reproduced)
+            }
         }
     };
     let acceptance = client.resume(&envelope).map_err(seed_failure)?;
-    let accepted = session
-        .accept_resume(&acceptance, now(), key_digest)
-        .map_err(contract_or_membership)?;
+    let accepted = match session.accept_resume(&acceptance, now(), key_digest) {
+        Err(MemberError::Contract(code)) if replayed && code == "membership_message_expired" => {
+            let (fresh, fresh_session, envelope) = regenerate(&checkpoint)?;
+            (checkpoint, session) = (fresh, fresh_session);
+            let acceptance = client.resume(&envelope).map_err(seed_failure)?;
+            session.accept_resume(&acceptance, now(), key_digest)
+        }
+        accepted => accepted,
+    }
+    .map_err(contract_or_membership)?;
     let mut state = membership.clone();
     state.insert("incarnation".into(), checkpoint["incarnation"].clone());
     state.insert(
