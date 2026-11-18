@@ -810,8 +810,15 @@ pub fn status_overlay(status: &mut Value, authority: Option<&Mutex<Authority>>, 
         fast_mode_env: fast_mode_env.as_deref(),
         device_memory_bytes: network.device_memory_bytes(),
     };
-    let a = lock_authority(authority);
-    for (key, value) in app_status::shared(&a, &pending, &facts) {
+    // The authority's fields are read under its lock; the owner's member rows come from the seed's
+    // coordinator (`coordinator.members()`) after the lock is released. Every managed-control call
+    // takes this lock first, so a status waiting on a slow coordinator while holding it stalled the
+    // joined Mac's relayed requests and the page together (RV42 S1 relay-502 RCA).
+    let snapshot = {
+        let a = lock_authority(authority);
+        app_status::shared_snapshot(&a, &pending, &facts)
+    };
+    for (key, value) in snapshot.fields() {
         fields.insert(key.into(), value.to_value());
     }
 }

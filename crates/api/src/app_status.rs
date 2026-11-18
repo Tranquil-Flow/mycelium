@@ -142,8 +142,20 @@ pub fn shared<M: ManagedSlot>(
     pending: &PendingWindows,
     facts: &Facts<'_>,
 ) -> Vec<(&'static str, Json)> {
+    shared_snapshot(c, pending, facts).fields()
+}
+/// [`shared`] taken in two steps, so a host can release its authority lock in between (RV42 S1
+/// relay-502 RCA): every field except the owner's member rows is read here, from the authority;
+/// [`SharedStatus::fields`] then reads those rows from the seed's coordinator
+/// (`coordinator.members()`) and answers exactly what [`shared`] answers. A status that waited on a
+/// slow coordinator while holding the authority stalled every managed-control call behind it.
+pub fn shared_snapshot<M: ManagedSlot>(
+    c: &Authority<M>,
+    pending: &PendingWindows,
+    facts: &Facts<'_>,
+) -> SharedStatus<M> {
     let run = run_model(&c.root, facts);
-    vec![
+    let before = vec![
         // `'role':'not_yet_serving'` (app.py:1263): a constant of the shipped status.
         ("role", "not_yet_serving".into()),
         ("model_contract", model_contract(&run)),
@@ -164,7 +176,10 @@ pub fn shared<M: ManagedSlot>(
         // stopped), never a native worker's; the page enables its member buttons on it
         // (app.js:181-188, 207-209, 231-235).
         ("running", c.running.into()),
-        ("authority", joined_member::authority_status(c)),
+    ];
+    // `authority`: read here, rendered (with the seed's member rows) by `SharedStatus::fields`.
+    let authority = joined_member::authority_status_snapshot(c);
+    let after = vec![
         ("renewal_error", renewal_error(&c.recorded)),
         // B10: v0.1.4's next status key (app.py:1273); the joined Mac's relay line reads it.
         ("recovery_error", recovery_error(&c.recorded)),
@@ -173,5 +188,25 @@ pub fn shared<M: ManagedSlot>(
             "join_flow",
             joined_member::join_flow_status(&c.root, c.target, &c.windows, pending, &c.recorded),
         ),
-    ]
+    ];
+    SharedStatus {
+        before,
+        authority,
+        after,
+    }
+}
+/// The fields of [`shared`], the `authority` one not rendered yet ([`shared_snapshot`]).
+pub struct SharedStatus<M: ManagedSlot> {
+    before: Vec<(&'static str, Json)>,
+    authority: joined_member::AuthorityStatus<M>,
+    after: Vec<(&'static str, Json)>,
+}
+impl<M: ManagedSlot> SharedStatus<M> {
+    /// The fields in the source's key order; the owner's member rows are read here.
+    pub fn fields(self) -> Vec<(&'static str, Json)> {
+        let mut fields = self.before;
+        fields.push(("authority", self.authority.render()));
+        fields.extend(self.after);
+        fields
+    }
 }

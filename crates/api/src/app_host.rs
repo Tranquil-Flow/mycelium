@@ -664,40 +664,32 @@ impl<M: ManagedSlot> Authority<M> {
     /// The owner authority this process answers for: a persisted v0.1.x one, else the one-member swarm
     /// record this host creates (a RUNNING member whose lease nothing can lapse: it is this Mac).
     pub fn owner_authority(&self) -> Option<PersistedAuthority> {
+        self.owner_snapshot().map(OwnerSnapshot::resolve)
+    }
+    /// [`Self::owner_authority`] in two steps: what it reads of this state, taken here (under the
+    /// host's authority lock), and the seed's membership, read by [`OwnerSnapshot::resolve`]
+    /// (`coordinator.members()`, the coordinator's own lock), which a caller may run once it has
+    /// released the authority. The page's status does (RV42 S1 relay-502 RCA): waiting on a slow
+    /// coordinator while holding the authority also stalls every managed-control call.
+    pub fn owner_snapshot(&self) -> Option<OwnerSnapshot<M>> {
         if self.target {
             return None;
         }
         if let Some(legacy) = &self.legacy {
-            return Some(legacy.clone());
+            return Some(OwnerSnapshot::Ready(legacy.clone()));
         }
         let record = self.swarm.as_ref()?;
         let node = record["node_id"].as_str()?.to_owned();
+        let swarm_id = record["swarm_id"].as_str()?.to_owned();
         if let Some(seed) = &self.seed {
-            let members = seed
-                .coordinator
-                .members(None)
-                .unwrap_or_default()
-                .iter()
-                .filter_map(|m| {
-                    Some(Member {
-                        node_id: m["node_id"].as_str()?.to_owned(),
-                        generation: m["generation"].as_u64()?,
-                        lifecycle_state: m["lifecycle_state"].as_str()?.to_owned(),
-                        lease_expires_at: m["lease_expires_at"].as_f64()?,
-                    })
-                })
-                .collect::<Vec<_>>();
-            // `coordinator.members()`: a running seed's rows are the membership, and none for this
-            // Mac is `unenrolled` (its own join failed: authority.py:638-664 @ f4e366e9).
-            return Some(PersistedAuthority {
-                swarm_id: record["swarm_id"].as_str()?.to_owned(),
-                target_node_id: node,
-                contribution_enabled: false,
-                members,
+            return Some(OwnerSnapshot::Seeded {
+                swarm_id,
+                node,
+                seed: seed.clone(),
             });
         }
-        Some(PersistedAuthority {
-            swarm_id: record["swarm_id"].as_str()?.to_owned(),
+        Some(OwnerSnapshot::Ready(PersistedAuthority {
+            swarm_id,
             target_node_id: node.clone(),
             contribution_enabled: false,
             members: vec![Member {
@@ -706,7 +698,54 @@ impl<M: ManagedSlot> Authority<M> {
                 lifecycle_state: "RUNNING".into(),
                 lease_expires_at: f64::MAX,
             }],
-        })
+        }))
+    }
+}
+/// What [`Authority::owner_authority`] reads of the authority, before the seed's membership.
+pub enum OwnerSnapshot<M: ManagedSlot = Unmanaged> {
+    /// A persisted v0.1.x authority, or a swarm with no seed running: complete as it is.
+    Ready(PersistedAuthority),
+    /// A swarm whose seed runs: its rows are the membership.
+    Seeded {
+        swarm_id: String,
+        node: String,
+        seed: Arc<SeedRuntime<M>>,
+    },
+}
+impl<M: ManagedSlot> OwnerSnapshot<M> {
+    /// The owner authority: a running seed's membership is read here (`coordinator.members()`).
+    pub fn resolve(self) -> PersistedAuthority {
+        match self {
+            Self::Ready(view) => view,
+            Self::Seeded {
+                swarm_id,
+                node,
+                seed,
+            } => {
+                let members = seed
+                    .coordinator
+                    .members(None)
+                    .unwrap_or_default()
+                    .iter()
+                    .filter_map(|m| {
+                        Some(Member {
+                            node_id: m["node_id"].as_str()?.to_owned(),
+                            generation: m["generation"].as_u64()?,
+                            lifecycle_state: m["lifecycle_state"].as_str()?.to_owned(),
+                            lease_expires_at: m["lease_expires_at"].as_f64()?,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                // `coordinator.members()`: a running seed's rows are the membership, and none for
+                // this Mac is `unenrolled` (its own join failed: authority.py:638-664 @ f4e366e9).
+                PersistedAuthority {
+                    swarm_id,
+                    target_node_id: node,
+                    contribution_enabled: false,
+                    members,
+                }
+            }
+        }
     }
 }
 

@@ -595,8 +595,25 @@ pub fn target_status<M: ManagedSlot>(c: &Authority<M>) -> Json {
 /// [`target_status`]; a stopped owner's retained membership; else the owner authority's status with
 /// each member's clock offset view (`clock_offset.py` snapshot order), or the no-swarm status.
 pub fn authority_status<M: ManagedSlot>(c: &Authority<M>) -> Json {
+    authority_status_snapshot(c).render()
+}
+/// [`authority_status`] in two steps: what it reads of the authority ([`authority_status_snapshot`],
+/// under the host's authority lock), then the owner's member rows from the seed's coordinator
+/// ([`AuthorityStatus::render`]), which may run after that lock is released (RV42 S1 RCA).
+pub enum AuthorityStatus<M: ManagedSlot> {
+    /// A joined target's status, a stopped owner's retained membership, or the no-swarm status.
+    Done(Json),
+    /// An owner authority, its membership not read yet.
+    Owner {
+        view: crate::app_host::OwnerSnapshot<M>,
+        running: bool,
+        seed: Option<Arc<SeedRuntime<M>>>,
+    },
+}
+/// The part of [`authority_status`] that reads the authority itself; no coordinator call.
+pub fn authority_status_snapshot<M: ManagedSlot>(c: &Authority<M>) -> AuthorityStatus<M> {
     if c.target {
-        return target_status(c);
+        return AuthorityStatus::Done(target_status(c));
     }
     // `authority.stop()`: the seed runtime is closed, the retained membership is all that is left.
     if !c.running && c.legacy.is_none() && c.swarm.is_some() {
@@ -605,46 +622,61 @@ pub fn authority_status<M: ManagedSlot>(c: &Authority<M>) -> Json {
             .ok()
             .flatten()
             .and_then(|state| state.get("membership_generation").and_then(Value::as_u64));
-        return crate::authority_view::retained_status(generation);
+        return AuthorityStatus::Done(crate::authority_view::retained_status(generation));
     }
-    match c.owner_authority() {
-        Some(view) => {
-            let mut status = view.status(c.running, now());
-            if let (Some(seed), Some(Json::Arr(mut members))) =
-                (&c.seed, status.get("members").cloned())
-            {
-                for member in &mut members {
-                    let Some(Json::Str(node)) = member.get("node_id") else {
-                        continue;
-                    };
-                    let clock = seed.clock_offsets.view(node);
-                    if clock["samples"].as_u64().is_some_and(|n| n > 0) {
-                        // clock_offset.py snapshot insertion order; unknown peers retain the old null view.
-                        let fields = [
-                            "offset_seconds",
-                            "rtt_seconds",
-                            "samples",
-                            "age_seconds",
-                            "fresh",
-                            "tolerance_seconds",
-                            "exceeds_tolerance",
-                        ];
-                        member.set(
-                            "clock",
-                            Json::Obj(
-                                fields
-                                    .into_iter()
-                                    .map(|field| (field.to_owned(), Json::from(&clock[field])))
-                                    .collect(),
-                            ),
-                        );
-                    }
+    match c.owner_snapshot() {
+        Some(view) => AuthorityStatus::Owner {
+            view,
+            running: c.running,
+            seed: c.seed.clone(),
+        },
+        None => AuthorityStatus::Done(crate::authority_view::no_swarm_status(c.running)),
+    }
+}
+impl<M: ManagedSlot> AuthorityStatus<M> {
+    /// The status [`authority_status`] answers: an owner's membership is read here.
+    pub fn render(self) -> Json {
+        let (view, running, seed) = match self {
+            Self::Done(status) => return status,
+            Self::Owner {
+                view,
+                running,
+                seed,
+            } => (view.resolve(), running, seed),
+        };
+        let mut status = view.status(running, now());
+        if let (Some(seed), Some(Json::Arr(mut members))) = (&seed, status.get("members").cloned())
+        {
+            for member in &mut members {
+                let Some(Json::Str(node)) = member.get("node_id") else {
+                    continue;
+                };
+                let clock = seed.clock_offsets.view(node);
+                if clock["samples"].as_u64().is_some_and(|n| n > 0) {
+                    // clock_offset.py snapshot insertion order; unknown peers retain the old null view.
+                    let fields = [
+                        "offset_seconds",
+                        "rtt_seconds",
+                        "samples",
+                        "age_seconds",
+                        "fresh",
+                        "tolerance_seconds",
+                        "exceeds_tolerance",
+                    ];
+                    member.set(
+                        "clock",
+                        Json::Obj(
+                            fields
+                                .into_iter()
+                                .map(|field| (field.to_owned(), Json::from(&clock[field])))
+                                .collect(),
+                        ),
+                    );
                 }
-                status.set("members", Json::Arr(members));
             }
-            status
+            status.set("members", Json::Arr(members));
         }
-        None => crate::authority_view::no_swarm_status(c.running),
+        status
     }
 }
 /// `_join_flow_status()` (app.py:1214-1237): the standing disclosure (the join-consent document),
