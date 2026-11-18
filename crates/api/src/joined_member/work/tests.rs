@@ -2,6 +2,9 @@
 //! Result retention regressions through real admission, Work and completion. No model or I/O.
 use super::*;
 
+#[path = "provenance.rs"]
+mod provenance;
+
 struct Fixture {
     dispatcher: Arc<Dispatcher>,
     queue: mpsc::Receiver<Result<Operation>>,
