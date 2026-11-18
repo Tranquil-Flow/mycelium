@@ -536,8 +536,8 @@ impl Store {
             .map_err(|e| sqlite(&e))?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| sqlite(&e))?;
-        read.finish().map_err(|e| sqlite(&e))?;
         if !has_inline_journals(&snapshot) {
+            read.finish().map_err(|e| sqlite(&e))?;
             return Ok(Some(Stored {
                 core: snapshot,
                 renewals,
@@ -558,11 +558,13 @@ impl Store {
             match held.get(&key) {
                 None => renewals.push(row),
                 Some(&at) if renewals[at] == row => {}
-                Some(_) => return refuse("seed_state_corrupt"),
+                Some(_) => keep_committed_renewal(&read, &key)?,
             }
         }
         let known: HashSet<String> = emitted.iter().cloned().collect();
         emitted.extend(journal.emitted.into_iter().filter(|id| !known.contains(id)));
+        // The envelope lookup must see the same read snapshot as the rows it arbitrates.
+        read.finish().map_err(|e| sqlite(&e))?;
         Ok(Some(Stored {
             core,
             renewals,
@@ -754,10 +756,43 @@ fn renewal_key(row: &Value) -> Result<(String, i64, String), SeedError> {
     Ok((text("node_id")?, generation, text("heartbeat_message_id")?))
 }
 
+/// Resolve a DIFFERENT inline renewal under an already stored key (owner SN-01 option A). An rv44 writer
+/// with stale local journals can draw a provisional renewal for an identical heartbeat, then find and answer
+/// the new writer's signed envelope. That committed answer selects the stored row, never the inline one.
+/// Without it, refuse the conflict. Both union paths call this inside their existing transaction.
+///
+/// The envelope table is the signed-answer journal; verification when answering remains in the coordinator.
+/// Its (kind, key) primary key makes this one indexed lookup per conflict, not a history scan. Key encoding is
+/// the same as the coordinator's `renewal_key` and the v0.1.4 import. No member ids or envelope data are logged.
+fn keep_committed_renewal(
+    tx: &Connection,
+    (node, generation, heartbeat): &(String, i64, String),
+) -> Result<(), SeedError> {
+    let committed: bool = tx
+        .prepare_cached(
+            "SELECT EXISTS(SELECT 1 FROM rs_seed_envelopes WHERE kind = 'renewal' AND key = ?)",
+        )
+        .map_err(|e| sqlite(&e))?
+        .query_row([format!("{node}|{generation}|{heartbeat}")], |row| {
+            row.get(0)
+        })
+        .map_err(|e| sqlite(&e))?;
+    if !committed {
+        return refuse("seed_state_corrupt");
+    }
+    // One bounded, non-secret diagnostic per resolved key, including the read-only union. This records the
+    // selection, not a successful commit: the caller's transaction can still roll back for another reason.
+    crate::probe::record(format_args!(
+        "l11_seed_inline_renewal_conflict resolution=committed_row"
+    ));
+    Ok(())
+}
+
 /// Move the inline journals of `document` into their row tables (inside the caller's transaction) and return the
 /// snapshot row without them. The rows join the tables as a union: a renewal under a key not stored yet is added
 /// after every stored row (commit order), a renewal identical to the stored row of its key is kept once, and a
-/// DIFFERENT renewal under a stored key is `seed_state_corrupt` (nothing is written: the caller's transaction rolls
+/// DIFFERENT renewal under a stored key keeps the committed row only when its signed envelope exists
+/// ([`keep_committed_renewal`]); otherwise `seed_state_corrupt` (nothing is written: the caller's transaction rolls
 /// back). A key repeated inside the document keeps its FIRST row, the one the table's lookup answered. An emitted
 /// id already stored stays one row.
 fn install_journals(tx: &Connection, document: &Value) -> Result<Value, SeedError> {
@@ -794,7 +829,7 @@ fn install_journals(tx: &Connection, document: &Value) -> Result<Value, SeedErro
                 let held: Value = serde_json::from_str(&text)
                     .map_err(|_| SeedError::new("seed_state_corrupt"))?;
                 if held != *row {
-                    return refuse("seed_state_corrupt");
+                    keep_committed_renewal(tx, &key)?;
                 }
             }
         }

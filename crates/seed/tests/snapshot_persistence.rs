@@ -816,9 +816,148 @@ fn a_running_seed_moves_an_rv44_writers_inline_rows_to_rows_in_its_next_commit()
     assert_rv44_rows_answered(&w, &process);
 }
 
+/// The same signed H through N, then through stale O. Keep O's coordinator open on its private execution copy
+/// before N migrates the shared database. As in `rv44_process`, only rv44's real commit/merge writes O's state to
+/// the shared database. Copy N's durable core and signed answer to O's execution copy BEFORE its receive: O sees
+/// the current member and verifies/answers N's envelope, but its local renewal/replay tables still lack H.
+fn committed_renewal_survives_stale_rv44_retry(name: &str, reopen_first: bool) {
+    let mut w = World::new(name);
+    let process = rv44_process(&mut w, 0);
+    let shared = w.db();
+    let mut old_connection = connection(&shared);
+    w.file = "rv44-process.sqlite";
+    w.open().unwrap();
+    let old = w.seed.take().unwrap();
+    let old_db = w.db();
+    w.file = "seed.sqlite";
+    w.open().unwrap();
+    assert_rows_shape(&shared);
+
+    w.advance(KEEPALIVE);
+    let heartbeat = w.heartbeat("heartbeat-4", 4, 0);
+    w.ids.lock().unwrap().forced = Some("new-renewal-4".into());
+    assert_eq!(w.receive(&heartbeat).unwrap(), heartbeat["message"]);
+    let answer = w.seed().lease_renewal("node-a", "heartbeat-4").unwrap();
+    assert_eq!(answer["message"]["message_id"], "new-renewal-4");
+    let committed = full_document(&shared);
+    let row_text = || -> String {
+        connection(&shared)
+            .query_row(
+                "SELECT row FROM rs_seed_renewals WHERE node_id = 'node-a' AND generation = 1 \
+                 AND heartbeat_message_id = 'heartbeat-4'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    let committed_bytes = row_text();
+    let signed_before = envelopes(&shared);
+    let signed = signed_before
+        .iter()
+        .find(|(kind, key, _)| kind == "renewal" && key == "node-a|1|heartbeat-4")
+        .unwrap();
+    let c = connection(&old_db);
+    c.execute(
+        "UPDATE rs_seed_table SET snapshot = ? WHERE id = 1",
+        [stored_snapshot_text(&shared)],
+    )
+    .unwrap();
+    c.execute(
+        "INSERT INTO rs_seed_envelopes (kind, key, envelope) VALUES (?, ?, ?)",
+        rusqlite::params![signed.0, signed.1, signed.2],
+    )
+    .unwrap();
+    w.ids.lock().unwrap().forced = Some("old-provisional-4".into());
+    assert_eq!(
+        old.receive_member_message(&heartbeat, HEARTBEAT).unwrap(),
+        heartbeat["message"],
+        "the identical signed request passes stale O's member path"
+    );
+    assert_eq!(
+        old.lease_renewal("node-a", "heartbeat-4")
+            .unwrap()
+            .to_string(),
+        answer.to_string(),
+        "O answers N's already signed envelope, not its provisional row"
+    );
+    let provisional = full_document(&old_db);
+    let rn = &committed["renewals"][3];
+    let ro = &provisional["renewals"][3];
+    for field in [
+        "node_id",
+        "generation",
+        "heartbeat_message_id",
+        "request_digest",
+        "sequence",
+    ] {
+        assert_eq!(rn[field], ro[field], "same request and renewal key");
+    }
+    assert_eq!(ro["renewal"]["message_id"], "old-provisional-4");
+    assert_ne!(rn, ro, "distinct renewal-id draws cause the conflict");
+    // No new envelope: rv44 found and verified N's committed answer.
+    let hybrid = rv44::commit(&mut old_connection, &provisional, &process.baseline, &[]);
+    assert_hybrid(&hybrid, 1);
+    assert_eq!(hybrid["renewals"][0], *ro);
+    assert_eq!(row_text(), committed_bytes);
+    assert_eq!(envelopes(&shared), signed_before);
+
+    let mut expected_emitted = committed["emitted"].as_array().unwrap().clone();
+    expected_emitted.extend(provisional["emitted"].as_array().unwrap().iter().cloned());
+    if reopen_first {
+        w.open()
+            .expect("reopen must keep the committed renewal, not refuse the provisional one");
+    }
+    // In the other case N never closes before this commit: normalize under its write reservation.
+    w.receive(&w.heartbeat("heartbeat-5", 5, 0))
+        .expect("N's next commit must keep running after O's retry");
+    let fifth = w.seed().lease_renewal("node-a", "heartbeat-5").unwrap();
+    expected_emitted.push(fifth["message"]["message_id"].clone());
+    expected_emitted.sort_by_key(Value::to_string);
+    expected_emitted.dedup();
+    for _ in 0..2 {
+        assert_rows_shape(&shared);
+        let document = full_document(&shared);
+        let rows = document["renewals"].as_array().unwrap();
+        assert_eq!(rows.len(), 5, "one renewal per heartbeat, no duplicate");
+        assert_eq!(rows[..4], committed["renewals"].as_array().unwrap()[..]);
+        assert_eq!(
+            row_text(),
+            committed_bytes,
+            "Rn stays byte-identical on disk"
+        );
+        assert_eq!(
+            document["emitted"],
+            json!(expected_emitted),
+            "complete emitted-id union"
+        );
+        assert_eq!(w.receive(&heartbeat).unwrap(), heartbeat["message"]);
+        assert_eq!(
+            w.seed()
+                .lease_renewal("node-a", "heartbeat-4")
+                .unwrap()
+                .to_string(),
+            answer.to_string(),
+            "H's retry still answers N's exact signed envelope"
+        );
+        w.open().expect("the normalized database reopens");
+    }
+    drop(old);
+    drop(old_connection);
+}
+
+#[test]
+fn a_running_seed_keeps_the_committed_row_after_a_stale_rv44_retry() {
+    committed_renewal_survives_stale_rv44_retry("rv44-retry-running", false);
+}
+
+#[test]
+fn a_reopened_seed_keeps_the_committed_row_after_a_stale_rv44_retry() {
+    committed_renewal_survives_stale_rv44_retry("rv44-retry-reopen", true);
+}
+
 /// (SN-01) Moving inline journals to rows is a union: an inline renewal identical to a stored row and an inline
 /// emitted id already stored stay one row each; an inline renewal that CONFLICTS with the stored row of its key
-/// is refused `seed_state_corrupt` with nothing written.
+/// WITHOUT a committed envelope is refused `seed_state_corrupt` with nothing written.
 #[test]
 fn inline_journal_rows_join_the_row_tables_as_a_union_and_a_conflict_is_refused_untouched() {
     let mut w = World::new("rv44-union");
@@ -840,6 +979,16 @@ fn inline_journal_rows_join_the_row_tables_as_a_union_and_a_conflict_is_refused_
     assert_rows_shape(&w.db());
     w.seed = None;
 
+    // Owner round-2 rule: a conflict is genuine when no committed signed answer selects the stored row.
+    // Keep all refusal/unchanged-state assertions; remove only this key's envelope from the fixture.
+    assert_eq!(
+        c.execute(
+            "DELETE FROM rs_seed_envelopes WHERE kind = 'renewal' AND key = 'node-a|1|heartbeat-2'",
+            [],
+        )
+        .unwrap(),
+        1
+    );
     let mut conflicting: Value = serde_json::from_str(&stored_snapshot_text(&w.db())).unwrap();
     let mut row = process.after[0]["renewals"][1].clone();
     row["request_digest"] = json!("0".repeat(64));
