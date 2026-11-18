@@ -260,8 +260,21 @@ pub struct SeedRuntime<M: ManagedSlot = Unmanaged> {
     /// The target-side managed-control routes this seed serves to joined members; the owner's
     /// managed owner binds its mailbox here (`crate::managed_routes`).
     pub mailbox_routes: Arc<crate::managed_routes::DispatchSlot>,
+    /// The relay hop's TLS client configuration, built once from `ca_pem`
+    /// ([`Self::hop_client_config`]).
+    hop_tls: std::sync::OnceLock<Option<Arc<rustls::ClientConfig>>>,
 }
 impl<M: ManagedSlot> SeedRuntime<M> {
+    /// The relay hop's verified-TLS client configuration, pinned to this seed's local CA: built on
+    /// the first relayed request and shared by every later one, as v0.1.4 builds its SSL context
+    /// once, in `bind_seed` (public_relay.py:219-226 @ f4e366e9), not per request. `None` when the
+    /// CA does not load or no configuration can be built: the hop then answers every request
+    /// `relay_backend_unavailable`, as it did when it built one per request.
+    pub fn hop_client_config(&self) -> Option<Arc<rustls::ClientConfig>> {
+        self.hop_tls
+            .get_or_init(|| hop_tls_config(&self.ca_pem))
+            .clone()
+    }
     /// How this process reaches its own seed: the local CA, the loopback port, the loopback name.
     pub fn options(&self) -> SeedOptions {
         SeedOptions {
@@ -506,7 +519,24 @@ pub fn run_seed<M: ManagedSlot>(
         managed_closed: Mutex::new(false),
         managed: Mutex::new(None),
         mailbox_routes,
+        hop_tls: std::sync::OnceLock::new(),
     })
+}
+/// The hop's client configuration over `ca_pem` ([`SeedRuntime::hop_client_config`]).
+fn hop_tls_config(ca_pem: &[u8]) -> Option<Arc<rustls::ClientConfig>> {
+    use rustls::{ClientConfig, RootCertStore};
+    use rustls_pki_types::{CertificateDer, pem::PemObject};
+    let mut roots = RootCertStore::empty();
+    for cert in CertificateDer::pem_slice_iter(ca_pem) {
+        roots.add(cert.ok()?).ok()?;
+    }
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let config = ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .ok()?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    Some(Arc::new(config))
 }
 /// `/api/create` on a fresh swarm: `pair_request` -> `approve_pairing(ttl_seconds=120)` ->
 /// `accept_pairing`, all against this Mac's own seed over its pinned local TLS (owner collapse).

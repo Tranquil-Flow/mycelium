@@ -68,20 +68,13 @@ impl<M: ManagedSlot> SeedBackend for SeedHop<M> {
         content_type: &str,
         body: &[u8],
     ) -> Result<BackendReply, BackendError> {
-        use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
-        use rustls_pki_types::{CertificateDer, ServerName, pem::PemObject};
-        let mut roots = RootCertStore::empty();
-        for cert in CertificateDer::pem_slice_iter(&self.0.ca_pem) {
-            roots
-                .add(cert.map_err(|_| BackendError::Unavailable)?)
-                .map_err(|_| BackendError::Unavailable)?;
-        }
-        let provider = Arc::new(rustls::crypto::ring::default_provider());
-        let config = ClientConfig::builder_with_provider(provider)
-            .with_safe_default_protocol_versions()
-            .map_err(|_| BackendError::Unavailable)?
-            .with_root_certificates(roots)
-            .with_no_client_auth();
+        use rustls::{ClientConnection, StreamOwned};
+        use rustls_pki_types::ServerName;
+        // Built once per seed runtime, as v0.1.4's `bind_seed` builds its SSL context once.
+        let config = self
+            .0
+            .hop_client_config()
+            .ok_or(BackendError::Unavailable)?;
         let timeout = span(BudgetId::PyMyceliumA13MacosPublicRelayRelayhandlerForwardTimeoutL115);
         let tcp = TcpStream::connect_timeout(&self.0.address, timeout)
             .map_err(|_| BackendError::Unavailable)?;
@@ -91,7 +84,7 @@ impl<M: ManagedSlot> SeedBackend for SeedHop<M> {
         let name =
             ServerName::try_from("127.0.0.1".to_owned()).map_err(|_| BackendError::Unavailable)?;
         let connection =
-            ClientConnection::new(Arc::new(config), name).map_err(|_| BackendError::Unavailable)?;
+            ClientConnection::new(config, name).map_err(|_| BackendError::Unavailable)?;
         let mut stream = StreamOwned::new(connection, tcp);
         let head = format!(
             "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",

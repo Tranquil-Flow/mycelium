@@ -129,3 +129,34 @@ fn the_status_snapshot_reads_no_coordinator_and_renders_what_shared_answers() {
     assert_eq!(fields, expected);
     app_host::stop_authority(&*host);
 }
+
+/// The relay's verified-TLS hop into the seed builds its client configuration once per seed
+/// runtime, as v0.1.4's `bind_seed` builds its SSL context once (public_relay.py:219-226), instead
+/// of a CA store and a configuration per relayed request; what the hop answers is unchanged.
+#[test]
+fn the_relay_hop_builds_its_tls_configuration_once_and_still_reaches_the_seed() {
+    use api::{joined_member::SeedHop, relay::SeedBackend};
+    let root = Root::new("hop-tls");
+    let host = owner(&root);
+    let seed = host.lock().unwrap().seed.clone().unwrap();
+    let first = seed.hop_client_config().expect("the seed's local CA loads");
+    let hop = SeedHop(seed.clone());
+    for _ in 0..2 {
+        let reply = hop
+            .request("GET", "/seed/identity", "application/json", b"")
+            .unwrap_or_else(|_| panic!("the hop reaches the seed"));
+        assert_eq!(
+            reply.status,
+            200,
+            "{}",
+            String::from_utf8_lossy(&reply.body)
+        );
+        assert!(reply.content_type.starts_with("application/json"));
+    }
+    let again = seed.hop_client_config().expect("still built");
+    assert!(
+        Arc::ptr_eq(&first, &again),
+        "one configuration per seed runtime, not one per request"
+    );
+    app_host::stop_authority(&*host);
+}
