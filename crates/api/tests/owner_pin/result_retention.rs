@@ -14,6 +14,9 @@ use std::{
 };
 use transport::Channel;
 
+#[path = "result_retention_round2.rs"]
+mod round2;
+
 fn wait() -> Duration {
     Duration::from_millis(B::RouterClose.span(Entries::ZERO).unwrap().millis())
 }
@@ -83,6 +86,9 @@ impl Member {
     fn complete_discard(&mut self) -> Value {
         let operation = self.queue.recv_timeout(wait()).unwrap().unwrap();
         assert_eq!(operation.id, Some(1));
+        self.finish_discard(operation)
+    }
+    fn finish_discard(&mut self, operation: work::Operation) -> Value {
         assert_eq!(operation.request["command"], "discard");
         operation.check().unwrap();
         self.executions += 1;
