@@ -131,7 +131,8 @@ impl<H: ChainHost> ObservePort for Observation<H> {
             .offers()
     }
     fn collect(&mut self) -> Result<(), PortError> {
-        lock(&self.0)?.collect()
+        let mut adapter = lock(&self.0)?;
+        collect_logged(&mut *adapter)
     }
     fn observed_hosts(&mut self) -> Vec<Option<String>> {
         self.0
@@ -142,6 +143,32 @@ impl<H: ChainHost> ObservePort for Observation<H> {
     fn retire_bootstrap(&mut self) -> Result<(), PortError> {
         lock(&self.0)?.retire_bootstrap()
     }
+}
+
+/// One hello collection attempt of `adapter`'s run, with its outcome on the log
+/// ([`crate::hello_probe::Collection`], lane SR round 3): every attempt's final code, including a
+/// refusal that came after every open, hello and stop of it succeeded. The result is unchanged.
+pub fn collect_logged<H, C, T>(
+    adapter: &mut runtime::observe_owner::ObserveAdapter<H, C, T>,
+) -> Result<(), PortError>
+where
+    H: runtime::observe_owner::ObservationRebuild,
+    C: FnMut() -> f64,
+    T: FnMut() -> String,
+{
+    let run = adapter.context().map(|c| c.run_id.clone());
+    if let Some(run) = &run {
+        crate::hello_probe::Collection::begin(run);
+    }
+    let result = adapter.collect();
+    if let Some(run) = &run {
+        let code = result
+            .as_ref()
+            .err()
+            .map(|e| e.code_or("observation_collect_failed"));
+        crate::hello_probe::Collection::end(run, code.as_deref());
+    }
+    result
 }
 
 /// The observe step's outcome as the compile port reads it: the exact context that completed

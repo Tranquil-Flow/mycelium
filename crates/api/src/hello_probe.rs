@@ -163,6 +163,106 @@ impl PumpProbe {
     }
 }
 
+/// Lane SR round 3 (review SR2-01): the owner's hello COLLECTION attempts. One attempt covers every
+/// Mac and has no partial result; its refusal can come after every open, hello and stop of it
+/// succeeded (native identity, distinct hosts / boots, current membership, or the captured-time
+/// window `managed_observation_captured_stale`, whose 60 s skew bound counts from the attempt's
+/// first clock reading: managed_observations.py:41,177,262-264 @ f4e366e9). rv44 session 1 run 2:
+/// attempt 1 completed open/hello/stop for both Macs and still failed, and nothing logged why.
+///
+/// [`Collection::begin`] / [`Collection::end`] wrap one attempt; `end` records, for EVERY attempt,
+///
+/// ```text
+/// l11_hello_collect wall_ms=<ms> node=<last node reached> run=<run> collection=<n> op=validate outcome=<ok|code> reached=<op> collect_ms=<ms>
+/// ```
+///
+/// and, whenever the attempt's refusal differs from the previous attempt's (the observe step's
+/// `observing hosts (retrying after <code>)`, of which the page shows only the last),
+/// `l11_hello_collect_retry wall_ms=<ms> run=<run> collection=<n> reason=<code> previous=<code|->`.
+/// The per-node lines carry the same `collection=<n>`. One owner collects per process; the state is
+/// keyed by run, so a new run starts again at 1. Log-only.
+#[derive(Default)]
+struct Attempts {
+    run: String,
+    attempt: u64,
+    started: Option<std::time::Instant>,
+    node: String,
+    reached: &'static str,
+    last_refusal: Option<String>,
+}
+static COLLECTION: Mutex<Option<Attempts>> = Mutex::new(None);
+
+/// The owner's hello collection attempts on the log (see [`Attempts`]).
+pub struct Collection;
+impl Collection {
+    /// A collection attempt of `run` starts.
+    pub fn begin(run: &str) {
+        if let Ok(mut slot) = COLLECTION.lock() {
+            let state = slot.get_or_insert_with(Attempts::default);
+            if state.run != run {
+                *state = Attempts {
+                    run: run.to_owned(),
+                    ..Attempts::default()
+                };
+            }
+            state.attempt = state.attempt.saturating_add(1);
+            state.started = Some(std::time::Instant::now());
+            state.node = "-".into();
+            state.reached = "begin";
+        }
+    }
+    /// The current attempt of `run` (`0` when none began).
+    pub fn attempt(run: &str) -> u64 {
+        COLLECTION
+            .lock()
+            .ok()
+            .and_then(|slot| {
+                slot.as_ref()
+                    .filter(|s| s.run == run)
+                    .map(|state| state.attempt)
+            })
+            .unwrap_or(0)
+    }
+    /// The attempt reached `op` on `node` (`open`, `hello`, `stop`, `binding_current`).
+    pub fn reached(run: &str, node: &str, op: &'static str) {
+        if let Ok(mut slot) = COLLECTION.lock()
+            && let Some(state) = slot.as_mut().filter(|s| s.run == run)
+        {
+            state.node = node.to_owned();
+            state.reached = op;
+        }
+    }
+    /// The attempt of `run` ended with `refusal` (`None`: collected).
+    pub fn end(run: &str, refusal: Option<&str>) {
+        let Ok(mut slot) = COLLECTION.lock() else {
+            return;
+        };
+        let Some(state) = slot.as_mut().filter(|s| s.run == run) else {
+            return;
+        };
+        let outcome = refusal.unwrap_or("ok");
+        let elapsed = state.started.map_or(0, |at| at.elapsed().as_millis());
+        record(format_args!(
+            "l11_hello_collect wall_ms={} node={} run={run} collection={} op=validate outcome={outcome} reached={} collect_ms={elapsed}",
+            wall_ms(),
+            short(&serde_json::json!(state.node)),
+            state.attempt,
+            state.reached,
+        ));
+        if let Some(code) = refusal
+            && state.last_refusal.as_deref() != Some(code)
+        {
+            record(format_args!(
+                "l11_hello_collect_retry wall_ms={} run={run} collection={} reason={code} previous={}",
+                wall_ms(),
+                state.attempt,
+                state.last_refusal.as_deref().unwrap_or("-"),
+            ));
+            state.last_refusal = Some(code.to_owned());
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,5 +297,96 @@ mod tests {
         assert_eq!(short(&json!(null)), "-");
         assert!(expires_in(&json!({}), 1.0).is_nan());
         assert_eq!(expires_in(&json!({"expires_at": 10.0}), 4.0), 6.0);
+    }
+
+    fn secs(n: u64) -> std::time::Duration {
+        std::time::Duration::from_secs(n)
+    }
+
+    /// Review SR2-01: the collection attempt counts per run, and a new run starts again at 1.
+    #[test]
+    fn collection_attempts_count_per_run() {
+        let (first, second) = ("sr3-test-run-one", "sr3-test-run-two");
+        Collection::begin(first);
+        Collection::reached(first, "node-a", "open");
+        Collection::end(first, Some("managed_observation_captured_stale"));
+        Collection::begin(first);
+        assert_eq!(Collection::attempt(first), 2);
+        Collection::end(first, None);
+        Collection::begin(second);
+        assert_eq!(Collection::attempt(second), 1);
+        assert_eq!(
+            Collection::attempt(first),
+            0,
+            "only the current run is remembered"
+        );
+        Collection::end(first, Some("ignored"));
+    }
+
+    struct Lines(std::sync::mpsc::Sender<String>);
+    impl seed::probe::Sink for Lines {
+        fn write_line(&mut self, line: &[u8]) -> std::io::Result<()> {
+            self.0
+                .send(String::from_utf8_lossy(line).into_owned())
+                .map_err(|_| std::io::Error::other("closed"))
+        }
+    }
+
+    /// Review SR2-02: at the longest run id the protocol admits (`RUN_ID_RE`, 103 characters) and
+    /// 24-character node / offer ids, a refusal naming EVERY binding field still fits one probe
+    /// line whole, through the real recorder. Same layouts as `owner_observation::bootstrap`,
+    /// `target::stage_ack_line` and [`Collection::end`].
+    #[test]
+    fn the_longest_hello_reason_lines_are_not_cut() {
+        let run = format!("a{}-qwen-20261118T161640Z", "b".repeat(80));
+        assert_eq!(run.len(), 103);
+        let node = "remote-mac-ae10921ca8114f";
+        let offer = "stage-0123456789abcdef0123";
+        let fields = [
+            "target_node_id",
+            "target_endpoint_id",
+            "target_key_digest",
+            "membership_generation",
+            "member_incarnation",
+            "run_id",
+            "deployment_id",
+        ];
+        let expected: serde_json::Value =
+            fields.iter().map(|f| (f.to_string(), json!(1))).collect();
+        let why = format!("binding_mismatch:{}", mismatched(&expected, &json!({})));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let recorder = seed::probe::Recorder::with_sink(4, Box::new(Lines(tx)));
+        recorder.record(format_args!(
+            "l11_hello_owner_bootstrap wall_ms={} node={} run={run} offer={} outcome=offer_response_invalid reason={why} offer_expires_in_s={:.1}",
+            wall_ms(),
+            short(&json!(node)),
+            short(&json!(offer)),
+            -12345.6_f64,
+        ));
+        recorder.record(format_args!(
+            "l11_hello_stage_ack wall_ms={} side=member node={} run={run} offer={} removed=false outcome=offer_response_invalid reason=answer_binding:{}",
+            wall_ms(),
+            short(&json!(node)),
+            short(&json!(offer)),
+            mismatched(&expected, &json!({})),
+        ));
+        recorder.record(format_args!(
+            "l11_hello_collect wall_ms={} node={} run={run} collection=18446744073709551615 op=validate outcome=managed_observation_captured_stale reached=binding_current collect_ms=340282366920938463463374607431768211455",
+            wall_ms(),
+            short(&json!(node)),
+        ));
+        for _ in 0..3 {
+            let line = rx
+                .recv_timeout(secs(10))
+                .expect("the recorder wrote the line");
+            assert!(!line.ends_with("...\n"), "cut: {line}");
+            assert!(line.len() < seed::probe::LINE_BYTES, "{}", line.len());
+            assert!(line.contains(&run), "{line}");
+            if line.contains("reason=") {
+                for field in fields {
+                    assert!(line.contains(field), "{field} lost: {line}");
+                }
+            }
+        }
     }
 }
