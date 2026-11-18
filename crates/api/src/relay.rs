@@ -451,12 +451,20 @@ fn accept_with(
         let spawned = thread::Builder::new()
             .name("a13-seed-relay-conn".into())
             .spawn(move || {
+                let _slot = Slot(&conn);
                 handle(&conn, stream);
-                conn.slots.fetch_add(1, Ordering::SeqCst);
             });
         if spawned.is_err() {
             shared.slots.fetch_add(1, Ordering::SeqCst);
         }
+    }
+}
+/// One connection's slot, returned when its thread ends, also by a panic (`slots.release()` in the
+/// handler thread's `finally`, `public_relay.py:71-73`).
+struct Slot<'a>(&'a ProxyShared);
+impl Drop for Slot<'_> {
+    fn drop(&mut self) {
+        self.0.slots.fetch_add(1, Ordering::SeqCst);
     }
 }
 
