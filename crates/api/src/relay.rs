@@ -375,13 +375,45 @@ impl Proxy {
     }
 }
 fn accept_loop(listener: &TcpListener, shared: &Arc<ProxyShared>) {
+    let pause = span(BudgetId::PyFinalMyceliumSeedHttpSelfServerTimeoutL676C8);
+    accept_with(
+        || listener.accept().map(|(stream, _)| stream),
+        shared,
+        pause,
+    );
+}
+/// The accept loop over `accept`. An accept error (EMFILE, ENFILE, ECONNABORTED...) pauses for
+/// `pause` before the next accept, as the seed's own accept loop does (`seed::server`, 50 ms,
+/// mycelium_seed/http.py:676): a persistent error retried at once spins the accept thread hot and
+/// starves the rest of the owner (RV42 S1 relay-502 RCA). The first error of a run and every 100th
+/// after it are logged with their errno.
+fn accept_with(
+    mut accept: impl FnMut() -> std::io::Result<TcpStream>,
+    shared: &Arc<ProxyShared>,
+    pause: Duration,
+) {
+    let mut failing: u64 = 0;
     loop {
-        let Ok((stream, _)) = listener.accept() else {
-            if shared.stop.load(Ordering::SeqCst) {
-                return;
+        let stream = match accept() {
+            Ok(stream) => stream,
+            Err(error) => {
+                if shared.stop.load(Ordering::SeqCst) {
+                    return;
+                }
+                failing += 1;
+                if failing % 100 == 1 {
+                    eprintln!(
+                        "l11_relay_accept_error errno={} kind={:?} consecutive={failing} wall_ms={}",
+                        error.raw_os_error().unwrap_or(0),
+                        error.kind(),
+                        ::seed::probe::wall_ms()
+                    );
+                }
+                thread::sleep(pause);
+                continue;
             }
-            continue;
         };
+        failing = 0;
         if shared.stop.load(Ordering::SeqCst) {
             return;
         }
@@ -2125,5 +2157,54 @@ mod member_work_route_tests {
         assert!(!route_unknown("/member-work/v1/register"));
         assert!(route_unknown("/member-work"));
         assert!(route_unknown("/member-work/../seed/identity"));
+    }
+}
+
+#[cfg(test)]
+mod accept_pause_tests {
+    //! RV42 S1 (relay-502 RCA): an accept error is retried after a pause, never at once.
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn an_accept_error_pauses_before_the_next_accept() {
+        let shared = Arc::new(ProxyShared {
+            stop: AtomicBool::new(false),
+            slots: AtomicUsize::new(MAX_CONNECTIONS),
+            trust_client_ip: false,
+            handlers: Mutex::new(Handlers {
+                backend: None,
+                local: None,
+                chat: None,
+                swarm: None,
+            }),
+        });
+        let pause = span(BudgetId::PyFinalMyceliumSeedHttpSelfServerTimeoutL676C8);
+        assert!(pause > Duration::ZERO);
+        let errors = 4;
+        let mut calls: Vec<Instant> = Vec::new();
+        let stop = shared.clone();
+        let started = Instant::now();
+        accept_with(
+            || {
+                calls.push(Instant::now());
+                if calls.len() == errors {
+                    stop.stop.store(true, Ordering::SeqCst);
+                }
+                // EMFILE: the process is out of descriptors; the error persists.
+                Err(std::io::Error::from_raw_os_error(24))
+            },
+            &shared,
+            pause,
+        );
+        assert_eq!(calls.len(), errors, "the loop ends at the stop");
+        for pair in calls.windows(2) {
+            assert!(
+                pair[1].duration_since(pair[0]) >= pause,
+                "an accept error was retried at once: {:?}",
+                pair[1].duration_since(pair[0])
+            );
+        }
+        assert!(started.elapsed() >= pause * u32::try_from(errors - 1).unwrap_or(0));
     }
 }
