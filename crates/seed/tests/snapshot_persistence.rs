@@ -39,6 +39,8 @@ const MAX_CHANGED_PAGES: usize = 64;
 const MAX_SNAPSHOT_ROW_BYTES: usize = 64 * 1024;
 /// The busy timeout of the test coordinators (v0.1.4 waits 30 s): a held write lock answers quickly.
 const BUSY_MS: u64 = 300;
+/// The seed key of the fixture seed.
+const SEED_SECRET: [u8; 32] = [9; 32];
 
 fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
@@ -55,6 +57,9 @@ struct World {
     ids: Arc<Mutex<Ids>>,
     member: Identity,
     seed: Option<Coordinator>,
+    /// The database file the next [`World::open`] opens (`seed.sqlite`, the shared database, unless a test
+    /// points it elsewhere).
+    file: &'static str,
 }
 
 impl World {
@@ -76,22 +81,28 @@ impl World {
             })),
             member: Identity::from_secret("endpoint-node-a", &[7; 32]).unwrap(),
             seed: None,
+            file: "seed.sqlite",
         };
         world.open().unwrap();
         world
     }
 
     fn db(&self) -> PathBuf {
-        self.dir.join("seed.sqlite")
+        self.dir.join(self.file)
     }
 
     fn open(&mut self) -> Result<(), seed::SeedError> {
+        self.open_as(SEED_SECRET)
+    }
+
+    /// Open with the seed key of `seed_secret` (another key than [`SEED_SECRET`] is another seed identity).
+    fn open_as(&mut self, seed_secret: [u8; 32]) -> Result<(), seed::SeedError> {
         self.seed = None;
         let clock = self.clock.clone();
         let ids = self.ids.clone();
         let coordinator = Coordinator::open_with_busy_timeout(
             &self.db(),
-            Identity::from_secret("seed-endpoint", &[9; 32]).unwrap(),
+            Identity::from_secret("seed-endpoint", &seed_secret).unwrap(),
             Options::new("swarm-fixture", "seed-node", "seed-boot").unwrap(),
             Box::new(move || f64::from_bits(clock.load(Ordering::SeqCst))),
             Box::new(move || {
@@ -178,6 +189,9 @@ impl Drop for World {
         fs::remove_dir_all(&self.dir).unwrap_or(());
     }
 }
+
+#[path = "support/rv44_merge.rs"]
+mod rv44;
 
 fn connection(db: &Path) -> rusqlite::Connection {
     rusqlite::Connection::open(db).unwrap()
@@ -557,5 +571,318 @@ fn a_heartbeat_over_sixteen_thousand_stored_renewals_writes_only_its_own_rows() 
     assert!(
         worst <= MAX_CHANGED_PAGES,
         "one heartbeat changed {worst} pages of the database (bound {MAX_CHANGED_PAGES}): the history is rewritten per message"
+    );
+}
+
+/// The renewal rows of the row table, in commit order.
+fn renewal_rows(db: &Path) -> Vec<Value> {
+    let c = connection(db);
+    if !table_exists(&c, "rs_seed_renewals") {
+        return Vec::new();
+    }
+    c.prepare("SELECT row FROM rs_seed_renewals ORDER BY ordinal")
+        .unwrap()
+        .query_map([], |r| r.get::<_, String>(0))
+        .unwrap()
+        .map(|t| serde_json::from_str(&t.unwrap()).unwrap())
+        .collect()
+}
+
+/// Every stored signed envelope as (kind, key, envelope text).
+fn envelopes(db: &Path) -> Vec<(String, String, String)> {
+    connection(db)
+        .prepare("SELECT kind, key, envelope FROM rs_seed_envelopes ORDER BY kind, key")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
+/// An rv44 seed process (m4/main 7b2c8472) open on the shared database while this build migrates it.
+struct Rv44 {
+    /// The stored row when it opened: the whole table as one document (its first commit's baseline).
+    baseline: Value,
+    /// The table it holds in memory after each of its member messages (`SeedTable::snapshot()`).
+    after: Vec<Value>,
+    /// The renewal envelopes it signed for each message.
+    envelopes: Vec<Vec<(String, String, String)>>,
+    /// Each message: heartbeat id, the heartbeat envelope, the lease renewal it answered.
+    messages: Vec<(String, Value, Value)>,
+}
+
+/// The shared database with three committed heartbeats, kept as every Rust seed up to 7b2c8472 kept it (one
+/// snapshot row), and an rv44 process open on it that receives `count` further heartbeats of node-a. The member
+/// message semantics are unchanged since 7b2c8472, so the table that process holds after each message (and the
+/// renewal it signs) is computed by this build on a PRIVATE copy of the legacy database; the shared database is
+/// written only through [`rv44::commit`], rv44's own commit and merge.
+fn rv44_process(w: &mut World, count: u64) -> Rv44 {
+    w.join();
+    for sequence in 1..=3u64 {
+        w.advance(KEEPALIVE);
+        w.receive(&w.heartbeat(&format!("heartbeat-{sequence}"), sequence, 0))
+            .unwrap();
+    }
+    w.seed = None;
+    to_legacy(&w.db());
+    let baseline: Value = serde_json::from_str(&stored_snapshot_text(&w.db())).unwrap();
+    fs::copy(w.db(), w.dir.join("rv44-process.sqlite")).unwrap();
+    w.file = "rv44-process.sqlite";
+    w.open().unwrap();
+    let mut process = Rv44 {
+        baseline,
+        after: Vec::new(),
+        envelopes: Vec::new(),
+        messages: Vec::new(),
+    };
+    for sequence in 4..4 + count {
+        w.advance(KEEPALIVE);
+        let id = format!("heartbeat-{sequence}");
+        let envelope = w.heartbeat(&id, sequence, 0);
+        let signed_before = envelopes(&w.db());
+        w.receive(&envelope).unwrap();
+        let renewal = w.seed().lease_renewal("node-a", &id).unwrap();
+        process.after.push(full_document(&w.db()));
+        process.envelopes.push(
+            envelopes(&w.db())
+                .into_iter()
+                .filter(|e| !signed_before.contains(e))
+                .collect(),
+        );
+        process.messages.push((id, envelope, renewal));
+    }
+    w.seed = None;
+    w.file = "seed.sqlite";
+    process
+}
+
+/// rv44's member messages committed to the shared database, one after the other, as that process does (each
+/// commit's baseline is the table it committed before).
+fn rv44_commits(db: &Path, process: &Rv44, count: usize) -> Value {
+    let mut c = connection(db);
+    let mut baseline = &process.baseline;
+    for (current, signed) in process.after.iter().zip(&process.envelopes).take(count) {
+        rv44::commit(&mut c, current, baseline, signed);
+        baseline = current;
+    }
+    serde_json::from_str(&stored_snapshot_text(db)).unwrap()
+}
+
+/// What rv44 committed is this build's history too: its signed renewals are answered byte for byte, its
+/// heartbeats' retries are answered, a changed retry is refused, and its renewal ids are emitted ids.
+fn assert_rv44_rows_answered(w: &World, process: &Rv44) {
+    for (id, envelope, renewal) in &process.messages {
+        assert_eq!(
+            &w.seed().lease_renewal("node-a", id).unwrap(),
+            renewal,
+            "rv44's renewal of {id} is answered byte for byte"
+        );
+        assert_eq!(
+            w.receive(envelope).unwrap()["message_id"],
+            id.as_str(),
+            "a retry of rv44's {id} is answered"
+        );
+    }
+    let changed = w.heartbeat(&process.messages[0].0, 4, 1);
+    assert_eq!(
+        w.receive(&changed).unwrap_err().code,
+        "seed_heartbeat_retry_mismatch"
+    );
+    let used = process.messages.last().unwrap().2["message"]["message_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    w.ids.lock().unwrap().forced = Some(used);
+    w.advance(KEEPALIVE);
+    let next = w.heartbeat(&format!("heartbeat-after-{}", w.now()), 100, 0);
+    assert_eq!(
+        w.receive(&next).unwrap_err().code,
+        "seed_message_id_reused",
+        "rv44's renewal id is an emitted id of this build"
+    );
+}
+
+fn assert_hybrid(stored: &Value, inline_renewals: usize) {
+    assert_eq!(
+        stored["journals"], "rows.v1",
+        "rv44's merge keeps the migrated row's marker"
+    );
+    assert_eq!(
+        stored["renewals"].as_array().map(Vec::len),
+        Some(inline_renewals),
+        "and adds its new renewals inline"
+    );
+    assert!(stored["emitted"].is_array(), "and its emitted ids inline");
+}
+
+fn assert_rows_shape(db: &Path) {
+    let stored: Value = serde_json::from_str(&stored_snapshot_text(db)).unwrap();
+    assert_eq!(stored["journals"], "rows.v1");
+    assert!(
+        stored.get("renewals").is_none() && stored.get("emitted").is_none(),
+        "the inline journals left the snapshot row"
+    );
+}
+
+/// (SN-01, open) An rv44 seed process that was already open when this build migrated the shared database keeps
+/// committing member messages with its own merge, which leaves the migrated row's marker AND inline journals.
+/// This build reopens that database with every row both writers committed: the renewal history in commit order
+/// and byte for byte, once each, retries answered, and the emitted-id set.
+#[test]
+fn an_rv44_writer_open_across_the_migration_loses_no_row_and_the_seed_reopens() {
+    let mut w = World::new("rv44-reopen");
+    let process = rv44_process(&mut w, 2);
+    // This build opens the shared database (the rv44 process holds it open) and migrates it.
+    w.open().unwrap();
+    w.seed = None;
+    assert_rows_shape(&w.db());
+    assert_eq!(renewal_rows(&w.db()).len(), 3);
+    let hybrid = rv44_commits(&w.db(), &process, 2);
+    assert_hybrid(&hybrid, 2);
+
+    w.open()
+        .expect("this build reopens the database the rv44 writer left");
+    let expected = process.after.last().unwrap();
+    assert_eq!(
+        &full_document(&w.db()),
+        expected,
+        "every row of both writers, in commit order, once"
+    );
+    assert_rows_shape(&w.db());
+    assert_rv44_rows_answered(&w, &process);
+    w.seed = None;
+    w.open().unwrap();
+    assert_eq!(
+        renewal_rows(&w.db())[..],
+        expected["renewals"].as_array().unwrap()[..]
+    );
+    assert_rv44_rows_answered(&w, &process);
+}
+
+/// (SN-01, commit) This build is still open when the rv44 writer commits: its guarded readers take the snapshot
+/// row without the inline journals, and its next commit moves them to rows inside its own transaction.
+#[test]
+fn a_running_seed_moves_an_rv44_writers_inline_rows_to_rows_in_its_next_commit() {
+    let mut w = World::new("rv44-commit");
+    let process = rv44_process(&mut w, 1);
+    w.open().unwrap();
+    let hybrid = rv44_commits(&w.db(), &process, 1);
+    assert_hybrid(&hybrid, 1);
+    // rv44 renewed node-a's lease, so this process's view of the member is stale (not corrupt).
+    assert_eq!(
+        w.seed()
+            .with_current_member("node-a", |_, _| Ok(()))
+            .unwrap_err()
+            .code,
+        "seed_state_member_stale"
+    );
+    w.advance(KEEPALIVE);
+    w.receive(&w.heartbeat("heartbeat-5", 5, 0)).unwrap();
+    let fifth = w.seed().lease_renewal("node-a", "heartbeat-5").unwrap();
+    assert_rows_shape(&w.db());
+    let rows = renewal_rows(&w.db());
+    let ids: Vec<&str> = rows
+        .iter()
+        .map(|r| r["heartbeat_message_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            "heartbeat-1",
+            "heartbeat-2",
+            "heartbeat-3",
+            "heartbeat-4",
+            "heartbeat-5"
+        ]
+    );
+    assert_eq!(
+        rows[..4],
+        process.after[0]["renewals"].as_array().unwrap()[..],
+        "rv44's renewal row byte for byte, after the migrated ones"
+    );
+    let emitted = full_document(&w.db())["emitted"].clone();
+    for id in process.after[0]["emitted"].as_array().unwrap() {
+        assert!(
+            emitted.as_array().unwrap().contains(id),
+            "emitted id {id} kept"
+        );
+    }
+    w.seed = None;
+    w.open().unwrap();
+    assert_eq!(
+        w.seed().lease_renewal("node-a", "heartbeat-5").unwrap(),
+        fifth
+    );
+    assert_rv44_rows_answered(&w, &process);
+}
+
+/// (SN-01) Moving inline journals to rows is a union: an inline renewal identical to a stored row and an inline
+/// emitted id already stored stay one row each; an inline renewal that CONFLICTS with the stored row of its key
+/// is refused `seed_state_corrupt` with nothing written.
+#[test]
+fn inline_journal_rows_join_the_row_tables_as_a_union_and_a_conflict_is_refused_untouched() {
+    let mut w = World::new("rv44-union");
+    let process = rv44_process(&mut w, 1);
+    w.open().unwrap();
+    w.seed = None;
+    // The rv44 commit, with the migrated renewals repeated inline as well (every renewal and emitted id inline).
+    let mut hybrid = rv44_commits(&w.db(), &process, 1);
+    hybrid["renewals"] = process.after[0]["renewals"].clone();
+    hybrid["emitted"] = process.after[0]["emitted"].clone();
+    let c = connection(&w.db());
+    c.execute(
+        "UPDATE rs_seed_table SET snapshot = ? WHERE id = 1",
+        [hybrid.to_string()],
+    )
+    .unwrap();
+    w.open().unwrap();
+    assert_eq!(full_document(&w.db()), process.after[0]);
+    assert_rows_shape(&w.db());
+    w.seed = None;
+
+    let mut conflicting: Value = serde_json::from_str(&stored_snapshot_text(&w.db())).unwrap();
+    let mut row = process.after[0]["renewals"][1].clone();
+    row["request_digest"] = json!("0".repeat(64));
+    conflicting["renewals"] = json!([row]);
+    conflicting["emitted"] = json!([]);
+    c.execute(
+        "UPDATE rs_seed_table SET snapshot = ? WHERE id = 1",
+        [conflicting.to_string()],
+    )
+    .unwrap();
+    let (text, rows) = (stored_snapshot_text(&w.db()), renewal_rows(&w.db()));
+    assert_eq!(w.open().unwrap_err().code, "seed_state_corrupt");
+    assert_eq!(stored_snapshot_text(&w.db()), text, "nothing written");
+    assert_eq!(renewal_rows(&w.db()), rows, "nothing written");
+}
+
+/// (SN-01, admission) A legacy database whose identity binding refuses this seed is left exactly as it was: the
+/// migration runs only after the binding is checked.
+#[test]
+fn an_identity_mismatch_leaves_a_legacy_snapshot_untouched() {
+    let mut w = World::new("identity-first");
+    w.join();
+    for sequence in 1..=2u64 {
+        w.advance(KEEPALIVE);
+        w.receive(&w.heartbeat(&format!("heartbeat-{sequence}"), sequence, 0))
+            .unwrap();
+    }
+    w.seed = None;
+    to_legacy(&w.db());
+    let legacy = stored_snapshot_text(&w.db());
+    assert_eq!(
+        w.open_as([8; 32]).unwrap_err().code,
+        "seed_state_identity_mismatch"
+    );
+    assert_eq!(
+        stored_snapshot_text(&w.db()),
+        legacy,
+        "a refused open does not migrate"
+    );
+    assert!(renewal_rows(&w.db()).is_empty());
+    w.open().unwrap();
+    assert_eq!(
+        full_document(&w.db()),
+        serde_json::from_str::<Value>(&legacy).unwrap()
     );
 }
