@@ -1,17 +1,28 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! Durable seed state on one sqlite file (`SqliteInviteRegistry` + `SqliteSeedState` of v0.1.4, reduced to what
 //! this slice commits): the consumed-invite table with v0.1.4's exact DDL, the identity binding
-//! (`bind_identity`, `seed_state_identity_mismatch`), one snapshot of the member table, and the exact signed
-//! acceptances / renewals the seed answered with (a retry must receive the same bytes).
+//! (`bind_identity`, `seed_state_identity_mismatch`), the member table, and the exact signed acceptances /
+//! renewals the seed answered with (a retry must receive the same bytes).
 //!
 //! The row tables of v0.1.4 (`seed_members`, `seed_join_acceptances`, ...) are created and migrated exactly as
-//! v0.1.4 does on every open ([`crate::v014::initialize`]); the Rust store itself keeps one snapshot of the member
-//! table in `rs_seed_table`. A database whose v0.1.4 tables hold state and that has no Rust snapshot yet is
-//! IMPORTED once, in one transaction (round 14); after that the Rust tables are authoritative and the v0.1.4 row
-//! tables are no longer written (a v0.1.4 seed must not be started on an imported state root).
+//! v0.1.4 does on every open ([`crate::v014::initialize`]); the Rust store itself keeps the member table as
+//! - `rs_seed_table`: one small snapshot of everything except the two append-only journals
+//!   ([`SeedTable::core_snapshot`], marked `"journals": "rows.v1"`);
+//! - `rs_seed_renewals`: one row per committed heartbeat renewal, in commit order (v0.1.4
+//!   `seed_heartbeat_renewals`, one INSERT per heartbeat in `commit_heartbeat_renewal`, never pruned);
+//! - `rs_seed_emitted`: one row per emitted message id (v0.1.4 `seed_emitted_messages`, never pruned).
+//!
+//! So a member message writes its own rows plus the small snapshot, never the history (lane SN: the single
+//! snapshot that also carried both journals reached 15.6 MB and was rewritten under the coordinator lock on every
+//! message). A database whose snapshot still carries the journals inline (every Rust seed up to m4/main 7b2c8472)
+//! is MIGRATED once at open, in one transaction. A database whose v0.1.4 tables hold state and that has no Rust
+//! snapshot yet is IMPORTED once, in one transaction (round 14); after that the Rust tables are authoritative and
+//! the v0.1.4 row tables are no longer written (a v0.1.4 seed must not be started on an imported state root).
+//! An older Rust seed refuses the migrated database (`seed_state_corrupt`: its snapshot lacks the journals)
+//! rather than reading it without its history.
 use crate::{coordinator::SeedError, v014};
 use budgets::{BudgetId, Entries};
-use protocol::seed_members::SeedTable;
+use protocol::seed_members::{JOURNALS_KEY, JOURNALS_ROWS_V1, Journal, SeedTable};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use serde_json::Value;
 use std::{
@@ -20,6 +31,9 @@ use std::{
     path::Path,
     time::Duration,
 };
+
+#[cfg(test)]
+mod real_copy_bench;
 
 const OWNER_DIR_MODE: u32 = 0o700;
 const OWNER_FILE_MODE: u32 = 0o600;
@@ -255,13 +269,51 @@ impl Store {
                      key TEXT NOT NULL,
                      envelope TEXT NOT NULL,
                      PRIMARY KEY (kind, key)
+                 ) WITHOUT ROWID;
+                 CREATE TABLE IF NOT EXISTS rs_seed_renewals (
+                     ordinal INTEGER PRIMARY KEY,
+                     node_id TEXT NOT NULL,
+                     generation INTEGER NOT NULL,
+                     heartbeat_message_id TEXT NOT NULL,
+                     row TEXT NOT NULL,
+                     UNIQUE (node_id, generation, heartbeat_message_id)
+                 );
+                 CREATE TABLE IF NOT EXISTS rs_seed_emitted (
+                     message_id TEXT PRIMARY KEY NOT NULL
                  ) WITHOUT ROWID;",
             )
             .map_err(|e| sqlite(&e))?;
         let mut store = Self { connection };
         store.import_v014()?;
+        store.migrate_single_snapshot()?;
         store.bind(binding)?;
         Ok(store)
+    }
+
+    /// The one-time migration of a snapshot that still carries both journals inline: its renewal rows (in order)
+    /// and emitted ids move to their row tables and the snapshot row is rewritten without them, in ONE
+    /// transaction (a failure anywhere leaves the old snapshot as it was; the next open migrates again).
+    fn migrate_single_snapshot(&mut self) -> Result<(), SeedError> {
+        match read_snapshot(&self.connection)? {
+            Some(snapshot) if !is_core(&snapshot) => {}
+            _ => return Ok(()),
+        }
+        let tx = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(|e| sqlite(&e))?;
+        // Another process may have migrated between the read and the reservation.
+        if let Some(snapshot) = read_snapshot(&tx)?
+            && !is_core(&snapshot)
+        {
+            let core = install_journals(&tx, &snapshot)?;
+            tx.execute(
+                "UPDATE rs_seed_table SET snapshot = ? WHERE id = 1",
+                [core.to_string()],
+            )
+            .map_err(|e| sqlite(&e))?;
+        }
+        tx.commit().map_err(|e| sqlite(&e))
     }
 
     /// The one-time import of a v0.1.4 database (see the module documentation).
@@ -297,9 +349,10 @@ impl Store {
                 )
                 .map_err(|e| sqlite(&e))?;
             }
+            let core = install_journals(&tx, &imported.snapshot)?;
             tx.execute(
                 "INSERT INTO rs_seed_table (id, snapshot) VALUES (1, ?)",
-                [imported.snapshot.to_string()],
+                [core.to_string()],
             )
             .map_err(|e| sqlite(&e))?;
         }
@@ -372,6 +425,7 @@ impl Store {
     pub fn commit_rotation_completion(
         &mut self,
         snapshot: &Value,
+        journal: &Journal,
         new_seed_key_digest: &str,
         authority_generation: u64,
     ) -> Result<(), SeedError> {
@@ -379,6 +433,12 @@ impl Store {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|e| sqlite(&e))?;
+        if let Some(stored) = read_snapshot(&tx)?
+            && !is_core(&stored)
+        {
+            install_journals(&tx, &stored)?;
+        }
+        append_journal(&tx, journal, Rows::Replace).map_err(|e| sqlite(&e))?;
         tx.execute(
             "UPDATE seed_metadata SET value = ? WHERE key = 'seed_key_digest'",
             [new_seed_key_digest],
@@ -430,18 +490,51 @@ impl Store {
         }
     }
 
-    pub fn load_snapshot(&self) -> Result<Option<Value>, SeedError> {
-        let text: Option<String> = self
+    /// The stored snapshot row (the small part of the table; the members `_ensure_current_member` reads).
+    pub fn load_core(&self) -> Result<Option<Value>, SeedError> {
+        read_snapshot(&self.connection)
+    }
+
+    /// The whole durable table: the snapshot row with the renewal rows (commit order) and the emitted ids. A
+    /// snapshot that still carries its journals inline is split in memory.
+    pub fn load_table(&self) -> Result<Option<Stored>, SeedError> {
+        let Some(snapshot) = read_snapshot(&self.connection)? else {
+            return Ok(None);
+        };
+        if !is_core(&snapshot) {
+            let (core, journal) = split(&snapshot)?;
+            return Ok(Some(Stored {
+                core,
+                renewals: journal.renewals,
+                emitted: journal.emitted,
+            }));
+        }
+        let corrupt = |_| SeedError::new("seed_state_corrupt");
+        let mut statement = self
             .connection
-            .query_row(
-                "SELECT snapshot FROM rs_seed_table WHERE id = 1",
-                [],
-                |row| row.get(0),
-            )
-            .optional()
+            .prepare("SELECT row FROM rs_seed_renewals ORDER BY ordinal")
             .map_err(|e| sqlite(&e))?;
-        text.map(|t| serde_json::from_str(&t).map_err(|_| SeedError::new("seed_state_corrupt")))
-            .transpose()
+        let renewals = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| sqlite(&e))?
+            .map(|text| {
+                serde_json::from_str::<Value>(&text.map_err(|e| sqlite(&e))?).map_err(corrupt)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut statement = self
+            .connection
+            .prepare("SELECT message_id FROM rs_seed_emitted")
+            .map_err(|e| sqlite(&e))?;
+        let emitted = statement
+            .query_map([], |row| row.get::<_, String>(0))
+            .map_err(|e| sqlite(&e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| sqlite(&e))?;
+        Ok(Some(Stored {
+            core: snapshot,
+            renewals,
+            emitted,
+        }))
     }
 
     pub fn load_envelope(&self, kind: &str, key: &str) -> Result<Option<Value>, SeedError> {
@@ -468,19 +561,22 @@ impl Store {
         tx.commit().map_err(|e| sqlite(&e))
     }
 
-    /// One atomic commit: the snapshot, the consumed invite (a replay is `invite_replayed`) and the exact
-    /// signed envelopes.
+    /// One atomic commit: the snapshot row, the journal rows this operation recorded, the consumed invite (a
+    /// replay is `invite_replayed`) and the exact signed envelopes.
     ///
-    /// `baseline` is the snapshot this process last committed or loaded: another process may have committed
+    /// `baseline` is the snapshot row this process last committed or loaded: another process may have committed
     /// since (an operator revoking a member while the seed runs, a second seed process). Only the rows this
     /// operation changed relative to the baseline are written over what the database holds now
     /// ([`merge_snapshot`]); a member row that would move backwards, or a member another process already
-    /// added, is `seed_state_member_conflict` as v0.1.4's conditional `save_member` refuses.
-    /// Returns the snapshot now durable.
+    /// added, is `seed_state_member_conflict` as v0.1.4's conditional `save_member` refuses. The journals are
+    /// rows, so this operation's renewals and emitted ids are simply added (a renewal another process committed
+    /// under the same key is replaced, an emitted id already present is kept), as the single snapshot merged them.
+    /// Returns the snapshot row now durable.
     pub fn commit(
         &mut self,
         snapshot: &Value,
         baseline: &Value,
+        journal: &Journal,
         consume: Option<&Consume<'_>>,
         envelopes: &[Envelope<'_>],
     ) -> Result<Value, SeedError> {
@@ -488,17 +584,11 @@ impl Store {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|e| sqlite(&e))?;
-        let stored: Option<String> = tx
-            .query_row(
-                "SELECT snapshot FROM rs_seed_table WHERE id = 1",
-                [],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(|e| sqlite(&e))?;
-        let durable: Option<Value> = stored
-            .map(|t| serde_json::from_str(&t).map_err(|_| SeedError::new("seed_state_corrupt")))
-            .transpose()?;
+        let durable = match read_snapshot(&tx)? {
+            // Written by an older Rust seed after this one opened: move its journals to rows first.
+            Some(stored) if !is_core(&stored) => Some(install_journals(&tx, &stored)?),
+            other => other,
+        };
         let writes = match &durable {
             // v0.1.4 answers every refused conditional `save_member` (heartbeat, join, resume, advance) alike.
             Some(d) if d != baseline => merge_snapshot(d, baseline, snapshot)
@@ -528,6 +618,7 @@ impl Store {
             )
             .map_err(|err| conflict(&err))?;
         }
+        append_journal(&tx, journal, Rows::Replace).map_err(|e| conflict(&e))?;
         tx.execute(
             "INSERT OR REPLACE INTO rs_seed_table (id, snapshot) VALUES (1, ?)",
             [writes.to_string()],
@@ -536,6 +627,106 @@ impl Store {
         tx.commit().map_err(|e| conflict(&e))?;
         Ok(writes)
     }
+}
+
+/// The whole durable table as [`Store::load_table`] reads it.
+pub struct Stored {
+    pub core: Value,
+    pub renewals: Vec<Value>,
+    pub emitted: Vec<String>,
+}
+
+fn read_snapshot(connection: &Connection) -> Result<Option<Value>, SeedError> {
+    let text: Option<String> = connection
+        .query_row(
+            "SELECT snapshot FROM rs_seed_table WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| sqlite(&e))?;
+    text.map(|t| serde_json::from_str(&t).map_err(|_| SeedError::new("seed_state_corrupt")))
+        .transpose()
+}
+
+/// Whether a stored snapshot row keeps its journals as rows (else it carries them inline).
+fn is_core(snapshot: &Value) -> bool {
+    snapshot.get(JOURNALS_KEY).is_some()
+}
+
+/// A snapshot with its journals inline, as the snapshot row (journals removed, marked) and the journal rows. The
+/// document must restore as a table (the same check an open of the single snapshot made): else
+/// `seed_state_corrupt`, nothing written.
+fn split(document: &Value) -> Result<(Value, Journal), SeedError> {
+    let corrupt = || SeedError::new("seed_state_corrupt");
+    SeedTable::restore(document, Box::new(String::new)).map_err(|_| corrupt())?;
+    let mut core = document.as_object().cloned().ok_or_else(corrupt)?;
+    let renewals = match core.remove("renewals") {
+        Some(Value::Array(rows)) => rows,
+        _ => return Err(corrupt()),
+    };
+    let emitted = match core.remove("emitted") {
+        Some(Value::Array(ids)) => ids
+            .into_iter()
+            .map(|id| match id {
+                Value::String(id) => Ok(id),
+                _ => Err(corrupt()),
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => return Err(corrupt()),
+    };
+    core.insert(JOURNALS_KEY.into(), Value::from(JOURNALS_ROWS_V1));
+    Ok((Value::Object(core), Journal { renewals, emitted }))
+}
+
+/// Move the inline journals of `document` into their row tables (inside the caller's transaction) and return the
+/// snapshot row without them. A renewal key repeated in the document keeps its FIRST row, the one the table's
+/// lookup answered.
+fn install_journals(tx: &Connection, document: &Value) -> Result<Value, SeedError> {
+    let (core, journal) = split(document)?;
+    append_journal(tx, &journal, Rows::KeepFirst).map_err(|e| sqlite(&e))?;
+    Ok(core)
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Rows {
+    /// A commit: a renewal row under a key already stored replaces it (the single snapshot's merge did).
+    Replace,
+    /// A migration: the first row of a key stays.
+    KeepFirst,
+}
+
+/// Insert journal rows: each renewal row under its key `(node_id, generation, heartbeat_message_id)` after every
+/// row already stored, each emitted id once.
+fn append_journal(tx: &Connection, journal: &Journal, rows: Rows) -> Result<(), rusqlite::Error> {
+    let insert = match rows {
+        Rows::Replace => {
+            "INSERT INTO rs_seed_renewals (node_id, generation, heartbeat_message_id, row) VALUES (?, ?, ?, ?) \
+             ON CONFLICT (node_id, generation, heartbeat_message_id) DO UPDATE SET row = excluded.row"
+        }
+        Rows::KeepFirst => {
+            "INSERT OR IGNORE INTO rs_seed_renewals (node_id, generation, heartbeat_message_id, row) \
+             VALUES (?, ?, ?, ?)"
+        }
+    };
+    let mut statement = tx.prepare_cached(insert)?;
+    for row in &journal.renewals {
+        // `SeedTable::restore` checked the key fields; a generation beyond SQLite's integer range cannot occur.
+        let generation = i64::try_from(row["generation"].as_u64().unwrap_or_default())
+            .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(1, i64::MAX))?;
+        statement.execute(params![
+            row["node_id"].as_str().unwrap_or_default(),
+            generation,
+            row["heartbeat_message_id"].as_str().unwrap_or_default(),
+            row.to_string()
+        ])?;
+    }
+    let mut statement =
+        tx.prepare_cached("INSERT OR IGNORE INTO rs_seed_emitted (message_id) VALUES (?)")?;
+    for id in &journal.emitted {
+        statement.execute([id])?;
+    }
+    Ok(())
 }
 
 /// The identity of a row of one snapshot array (the key the v0.1.4 table is unique on).
@@ -548,12 +739,6 @@ fn row_key(array: &str, row: &Value) -> String {
             field("node_id"),
             field("generation"),
             field("message_id")
-        ),
-        "renewals" => format!(
-            "{}|{}|{}",
-            field("node_id"),
-            field("generation"),
-            field("heartbeat_message_id")
         ),
         "rotations" => field("authority_generation"),
         "acks" => format!(
@@ -580,14 +765,14 @@ fn member_may_replace(stored: &Value, new: &Value) -> bool {
                     >= stored["last_heartbeat_sequence"].as_u64()))
 }
 
-/// Write `current`'s changes relative to `baseline` over `durable` (what the database holds now). `Err(())`
+/// Write `current`'s changes relative to `baseline` over `durable` (what the database holds now; snapshot rows,
+/// the journals are rows of their own). `Err(())`
 /// when a changed member row may not replace the stored one, or a member this process adds already exists.
 fn merge_snapshot(durable: &Value, baseline: &Value, current: &Value) -> Result<Value, ()> {
     let mut merged = durable.clone();
     for array in [
         "members",
         "replay",
-        "renewals",
         "join_rows",
         "resume_rows",
         "assignments",
@@ -628,14 +813,6 @@ fn merge_snapshot(durable: &Value, baseline: &Value, current: &Value) -> Result<
     }
     let generation = |v: &Value| v["authority_generation"].as_u64().unwrap_or(1);
     merged["authority_generation"] = Value::from(generation(durable).max(generation(current)));
-    let mut emitted: Vec<Value> = durable["emitted"].as_array().cloned().unwrap_or_default();
-    for id in current["emitted"].as_array().into_iter().flatten() {
-        if !emitted.contains(id) {
-            emitted.push(id.clone());
-        }
-    }
-    emitted.sort_by_key(|v| v.as_str().map(str::to_owned));
-    merged["emitted"] = Value::Array(emitted);
     Ok(merged)
 }
 
