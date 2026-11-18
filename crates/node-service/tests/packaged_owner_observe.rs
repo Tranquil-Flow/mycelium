@@ -968,3 +968,200 @@ fn a_joined_macs_reach_refusal_fails_the_owners_collect_promptly_by_name() {
     drop(repository);
     std::fs::remove_dir_all(&base).unwrap_or_default();
 }
+
+/// POST one discovery-scope staging read (`/managed-control/staging/read` or
+/// `/managed-control/staging/cleanup/read`, the reads a joined Mac's standing loop and agent make on
+/// every pass) for the joined Mac's own binding, signed by `signer`; the owner's signed answer's
+/// statement or the seed's code.
+fn post_discovery_read(
+    membership: &serde_json::Map<String, Value>,
+    seams: &JoinSeams,
+    own: &protocol::identity::Identity,
+    signer: &protocol::identity::Identity,
+    path: &str,
+    fields: Value,
+) -> Result<Value, String> {
+    let text = |k: &str| membership[k].as_str().unwrap().to_owned();
+    let records: Vec<Value> = membership["seed_key_records"].as_array().unwrap().clone();
+    let client = api::seed::SeedClient::new(
+        &text("seed_url"),
+        &text("swarm_id"),
+        &text("seed_key_digest"),
+        &records,
+        &seams.member_seed,
+    )
+    .unwrap();
+    let now = api::app_host::now();
+    let nonce = || api::app_host::hex(&api::app_host::random(16).unwrap());
+    let mut statement = json!({
+        "swarm_id": text("swarm_id"),
+        "target_node_id": text("node_id"),
+        "target_endpoint_id": own.endpoint_id(),
+        "target_key_digest": own.verification_key_digest(),
+        "membership_generation": membership["membership_generation"],
+        "member_incarnation": membership["incarnation"],
+        "run_id": "stage-discovery", "deployment_id": "stage-discovery",
+        "request_id": nonce(), "sequence": 1, "nonce": nonce(),
+        "issued_at": now, "expires_at": now + 30.0,
+    });
+    for (k, v) in fields.as_object().unwrap() {
+        statement[k] = v.clone();
+    }
+    let envelope = json!({
+        "protocol": protocol::managed::SIGNED_ENVELOPE_PROTOCOL,
+        "signature": signer.sign(&statement).unwrap(),
+        "verification_key": signer.public_key_record(),
+        "statement": statement,
+    });
+    client
+        .post(path, &envelope)
+        .map(|reply| reply["statement"].clone())
+        .map_err(|e| e.code)
+}
+
+/// Lane CS (rv42 session 1, `RV42-S1-RELAY-502-RCA.md` Q5): after the owner's Stop, Mac B's card
+/// read `idle`, then `error` (`managed_control_remote_error`). Once the ended run's announcement is
+/// refreshed to `idle` (`ensure_exchange`, on the owner's status read), the joined Mac's next
+/// report carries no descriptor (its descriptor names the ended run), and its next discovery-scope
+/// reads (`/managed-control/staging/read` from the standing acceptor, `/staging/cleanup/read`
+/// from the agent's `_cleanup_if_requested`) were answered 400 `managed_control_run_invalid`:
+/// `guarded` took the reported descriptor's key for every call, and there was none. v0.1.4 @
+/// f4e366e9 checks these reads against the CURRENT membership alone (`read_offer` /
+/// `cleanup_state`, managed_offers.py:219-226, 314-322 -> `_verify_target` -> `_member_guard`,
+/// managed_control.py:910-995: node, endpoint, key digest, generation, incarnation, and the
+/// envelope's own signature by the key whose digest the membership pins) and answers the empty
+/// result (`offer: null`), so `pending_cleanup()` is `None` and the agent's card reads `idle`
+/// (demo_target.py:437-445, `_set('idle')`: detail, progress and error_http `None`), which a
+/// joined Mac with a current membership shows as `joined` (`target_status`, demo_app.py:180-195).
+/// Unchanged: a discovery read signed by another key is refused by the membership's key pin, and
+/// a RUN-scoped call still needs the run's reported descriptor.
+#[test]
+fn after_stop_a_joined_macs_discovery_reads_answer_empty_and_its_card_stays_idle() {
+    let base = state_root("observe-after-stop-card");
+    let repository = Repository::start();
+    let sidecar = sidecar_file(&base);
+    let (owner, member) = pair(
+        &base,
+        &repository,
+        RunConfig {
+            sidecar: Some(sidecar),
+            observe_test_double: Some(Arc::new(observe_test_double::HostIdentityTestDouble::over)),
+            ..RunConfig::default()
+        },
+    );
+    let (code, started) = owner.mac.post("/api/demo/start", json!({}));
+    assert_eq!(code, 200, "{started}");
+    let run = until_within(
+        "the run ended",
+        observe_patience() + millis(B::Compile),
+        || owner.mac.status()["owner_run"].clone(),
+        |r| matches!(r["state"].as_str(), Some("failed" | "stopped" | "serving")),
+    );
+    assert_eq!(
+        run["steps"][3]["state"], "done",
+        "observe bound the owner's mailbox: {run}"
+    );
+    let (code, stopped) = owner.mac.post("/api/demo/stop", json!({}));
+    println!("lane CS Stop: {code} {stopped}");
+    // The page's status read refreshes the ended run's announcement to `idle`; the joined Mac's
+    // tick that reads it reports (with no descriptor) before its card shows that phase.
+    let standing = millis(B::PyMyceliumA13MacosAppDemoappStandingLoopSelfClosedWaitL1203);
+    let card = || {
+        owner.mac.status();
+        let c = member.status()["demo_target"].clone();
+        json!({"state": c["state"], "detail": c["detail"], "progress": c["progress"],
+            "error_http": c["error_http"], "phase": c["phase"], "run_id": c["run_id"]})
+    };
+    until_within(
+        "the joined Mac's card reads the idle announcement",
+        standing * 10,
+        card,
+        |c| c["phase"] == "idle",
+    );
+    // The card over the next standing passes (each makes both discovery reads).
+    let mut cards: Vec<Value> = Vec::new();
+    let window = Instant::now() + standing * 4;
+    while Instant::now() < window {
+        let seen = card();
+        if cards.last() != Some(&seen) {
+            cards.push(seen);
+        }
+        std::thread::sleep(millis(B::OwnerPoll) / 5);
+    }
+
+    let root = private(&member.state);
+    let membership = api::peer::load_membership_state(&root).unwrap().unwrap();
+    let (own, _, _) = api::app_host::identity(&root).unwrap();
+    let stranger = protocol::identity::Identity::from_secret(
+        "stranger-endpoint",
+        &api::app_host::random(32).unwrap().try_into().unwrap(),
+    )
+    .unwrap();
+    let cleanup_read =
+        json!({"protocol": "mycelium.managed_stage_cleanup_read.v1", "offer_id": null});
+    let read = |signer: &protocol::identity::Identity, path: &str, fields: &Value| {
+        post_discovery_read(
+            &membership,
+            &owner.seams,
+            &own,
+            signer,
+            path,
+            fields.clone(),
+        )
+    };
+    let cleanup = read(&own, "/managed-control/staging/cleanup/read", &cleanup_read);
+    let stage = read(
+        &own,
+        "/managed-control/staging/read",
+        &json!({"protocol": "mycelium.managed_stage_read.v1", "offer_id": null, "offset": 0}),
+    );
+    let foreign = read(
+        &stranger,
+        "/managed-control/staging/cleanup/read",
+        &cleanup_read,
+    );
+    // A run-scoped call for the ended run: there is no descriptor to bind it to.
+    let run_scoped = post_discovery_read(
+        &membership,
+        &owner.seams,
+        &own,
+        &own,
+        "/managed-control/poll",
+        json!({"protocol": "mycelium.managed_control.target_poll.v1",
+            "run_id": run["run_id"], "deployment_id": run["deployment_id"]}),
+    );
+    let pick = |answer: &Result<Value, String>, keys: &[&str]| match answer {
+        Ok(s) => Value::Object(
+            keys.iter()
+                .map(|k| ((*k).to_owned(), s[*k].clone()))
+                .collect(),
+        ),
+        Err(code) => json!(code),
+    };
+    // `_set('idle')` under the idle announcement, shown as `joined` (demo_app.py:193-194).
+    let idle = json!({"state": "joined", "detail": null, "progress": null, "error_http": null,
+        "phase": "idle", "run_id": null});
+    assert_eq!(
+        json!({
+            "cleanup_read": pick(&cleanup, &["protocol", "run_id", "offer", "ack"]),
+            "stage_read": pick(&stage, &["protocol", "run_id", "offer", "offset", "data"]),
+            "foreign_key": pick(&foreign, &[]),
+            "run_scoped": pick(&run_scoped, &[]),
+            "cards": cards,
+        }),
+        json!({
+            "cleanup_read": {"protocol": "mycelium.managed_stage_cleanup_state.v1",
+                "run_id": "stage-discovery", "offer": null, "ack": null},
+            "stage_read": {"protocol": "mycelium.managed_stage_bytes.v1",
+                "run_id": "stage-discovery", "offer": null, "offset": 0, "data": null},
+            "foreign_key": "managed_control_key_pin_mismatch",
+            "run_scoped": "managed_control_run_binding_mismatch",
+            "cards": [idle],
+        }),
+        "after Stop"
+    );
+    assert_eq!(member.quit(), Ok(Poll::Verified));
+    assert_eq!(owner.mac.quit(), Ok(Poll::Verified));
+    drop(repository);
+    std::fs::remove_dir_all(&base).unwrap_or_default();
+}

@@ -203,11 +203,14 @@ impl<H: ChainHost> PinnedHost<H> {
     }
     /// Core is never held through coordinator, mailbox or transport operations.
     /// Fresh binding is synchronized only under CURRENT coordinator authority.
+    /// `envelope_key` is the `verification_key` of a joined Mac's own discovery-scope staging call
+    /// (`None` for every other call): see [`call_key`].
     fn guarded<T>(
         &self,
         node: &str,
         run: &Value,
         deployment: &Value,
+        envelope_key: Option<&Value>,
         f: impl FnOnce(&mut Mailbox, &Value, f64) -> OResult<T>,
     ) -> OResult<T> {
         let seed = self.pin()?;
@@ -222,11 +225,13 @@ impl<H: ChainHost> PinnedHost<H> {
             return Err(OwnerError("managed_control_run_binding_mismatch"));
         }
         let snapshot = self.member(node)?;
-        let key = descriptor_key(
+        let key = call_key(
             &card,
             &snapshot,
             seed.coordinator.swarm_id(),
             self.wall_seconds(),
+            discovery,
+            envelope_key,
         )?;
         let expected = binding(&snapshot, run, deployment)?;
         let result = {
@@ -310,6 +315,38 @@ impl<H: ChainHost> PinnedHost<H> {
         }
         protocol::strict::object(&reply, protocol::managed::MAX_FRAME_BYTES)
             .map_err(|_| OwnerError("managed_control_json_invalid"))
+    }
+}
+/// The key `guarded` binds the mailbox to for one call: the reported descriptor's
+/// ([`descriptor_key`]), except for a joined Mac's own discovery-scope staging call while no
+/// descriptor is reported for it (lane CS, rv42 session 1: after Stop the idle announcement's
+/// report carries none, and every staging / cleanup read was refused `managed_control_run_invalid`,
+/// so the card read `error`). Those reads are scoped to the membership, not to a run: v0.1.4
+/// answers them under the CURRENT membership alone (`read_offer` / `acknowledge_stage` /
+/// `cleanup_state`, managed_offers.py:219-226, 259-263, 314-322 @ f4e366e9 -> `_verify_target`,
+/// managed_control.py:968-995), verifying the envelope with its own key once that key's digest is
+/// the one the membership pins. The same pin here; the mailbox then checks the statement's binding
+/// against the member record, the signer endpoint and the signature with exactly this key
+/// (`Mailbox::dispatch_stage`). A run-scoped call, an owner-originated call, and a discovery call
+/// while a descriptor IS reported keep the descriptor's key.
+fn call_key(
+    card: &Value,
+    member: &Value,
+    swarm: &str,
+    now: f64,
+    discovery: bool,
+    envelope_key: Option<&Value>,
+) -> OResult<Value> {
+    match envelope_key {
+        Some(key) if discovery && card.is_null() => {
+            if !member["verification_key_digest"].is_string()
+                || key["verification_key_digest"] != member["verification_key_digest"]
+            {
+                return Err(OwnerError("managed_control_key_pin_mismatch"));
+            }
+            Ok(key.clone())
+        }
+        _ => descriptor_key(card, member, swarm, now),
     }
 }
 /// The verification key a member's reported installation descriptor names, which a managed-control
@@ -527,15 +564,16 @@ impl<H: ChainHost> Backend<H> {
                 .ok_or(OwnerError("invalid_control_call"))?;
             // Entropy and parsing happen before the coordinator transaction.
             let token = nonce()?;
+            let stage = statement["protocol"]
+                .as_str()
+                .is_some_and(|p| p.starts_with("mycelium.managed_stage_"));
             let result = dispatch_host.guarded(
                 node,
                 &statement["run_id"],
                 &statement["deployment_id"],
+                stage.then_some(&value["verification_key"]),
                 |mailbox, _, now| {
-                    if statement["protocol"]
-                        .as_str()
-                        .is_some_and(|p| p.starts_with("mycelium.managed_stage_"))
-                    {
+                    if stage {
                         mailbox.dispatch_stage(raw, || now).map_err(owner_error)
                     } else {
                         mailbox
@@ -586,6 +624,7 @@ impl<H: ChainHost> Backend<H> {
             node,
             &offer.raw["run_id"],
             &offer.raw["deployment_id"],
+            None,
             |mailbox, _, now| f(mailbox, now),
         )
     }
@@ -1078,6 +1117,7 @@ impl<H: ChainHost> ObservationBackend for Backend<H> {
                 node,
                 &json!(run),
                 &json!(deployment),
+                None,
                 |mailbox, binding, now| {
                     if binding != &expected {
                         return Err(OwnerError("managed_control_member_stale"));
@@ -1148,7 +1188,7 @@ mod descriptor_age_tests {
     //! outlast it refused every later call `managed_control_descriptor_unavailable` (row 111:
     //! Mac B's first refusal 20:40:58, 330 s after it reported at 20:35:28; run 2 of the same
     //! session, 20:53:40 -> 20:59:10, while serving).
-    use super::descriptor_key;
+    use super::{call_key, descriptor_key};
     use crate::installation_descriptor::{Member, Paths, Source, installation_descriptor};
     use protocol::identity::Identity;
     use serde_json::{Value, json};
@@ -1258,6 +1298,50 @@ mod descriptor_age_tests {
             )
             .map_err(|e| e.0),
             unavailable
+        );
+    }
+
+    /// Lane CS: a joined Mac's discovery-scope staging call while no descriptor is reported for it
+    /// (after Stop) binds the envelope's own key once its digest is the membership's (v0.1.4
+    /// `_verify_target`, managed_control.py:968-995 @ f4e366e9); nothing else changes.
+    #[test]
+    fn with_no_reported_descriptor_only_a_discovery_staging_call_binds_its_membership_pinned_key() {
+        let signer = identity("endpoint-b", 7);
+        let (member, current) = member_of(&signer);
+        let own = signer.public_key_record();
+        let foreign = identity("endpoint-x", 9).public_key_record();
+        let none = Value::Null;
+        let now = SIGNED_AT + 10.0;
+        let key = |card: &Value, discovery: bool, envelope: Option<&Value>| {
+            call_key(card, &current, "swarm-1", now, discovery, envelope).map_err(|e| e.0)
+        };
+        // After Stop: the member's own key, pinned by the membership's digest.
+        assert_eq!(key(&none, true, Some(&own)), Ok(own.clone()));
+        // Another key under the member's binding: the membership's key pin refuses it.
+        assert_eq!(
+            key(&none, true, Some(&foreign)),
+            Err("managed_control_key_pin_mismatch")
+        );
+        assert_eq!(
+            key(&none, true, Some(&json!({}))),
+            Err("managed_control_key_pin_mismatch")
+        );
+        // A run-scoped call still needs the run's descriptor.
+        assert_eq!(
+            key(&none, false, Some(&own)),
+            Err("managed_control_run_invalid")
+        );
+        // An owner-originated call (no envelope key) too.
+        assert_eq!(key(&none, true, None), Err("managed_control_run_invalid"));
+        // While a descriptor is reported, its key binds, whatever the envelope names.
+        let card = card(&signer, &member);
+        assert_eq!(
+            key(&card, true, Some(&foreign)),
+            Ok(card["verification_key"].clone())
+        );
+        assert_eq!(
+            key(&card, false, Some(&foreign)),
+            Ok(card["verification_key"].clone())
         );
     }
 }
