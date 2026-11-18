@@ -21,6 +21,9 @@ use std::{
     time::Duration,
 };
 
+#[cfg(test)]
+mod real_copy_bench;
+
 const OWNER_DIR_MODE: u32 = 0o700;
 const OWNER_FILE_MODE: u32 = 0o600;
 const MODE_BITS: u32 = 0o777;
