@@ -647,17 +647,35 @@ fn stage_call(client: &Client, protocol: &str, extra: Value) -> OResult<Value> {
         .verified(&response, answer, &request_id, DISCOVERY, DISCOVERY)
         .map_err(client_error)?;
     let offer = &body["offer"];
+    let refused = |why: String| {
+        // Lane SR round 2: the predicate behind this code (log-only).
+        crate::hello_probe::on_change(
+            &format!("member_stage_call {protocol}"),
+            &format!("{} {why}", offer["offer_id"]),
+            format_args!(
+                "l11_hello_offer_invalid wall_ms={} side=member site=stage_call protocol={protocol} offer={} reason={why}",
+                crate::hello_probe::wall_ms(),
+                crate::hello_probe::short(&offer["offer_id"]),
+            ),
+        );
+        OwnerError("offer_response_invalid")
+    };
     if !offer.is_null()
         && crate::run_exchange_client::BINDING
             .iter()
             .any(|k| offer[*k] != statement[*k])
     {
-        return Err(OwnerError("offer_response_invalid"));
+        let fields: Vec<&str> = crate::run_exchange_client::BINDING
+            .iter()
+            .copied()
+            .filter(|k| offer[*k] != statement[*k])
+            .collect();
+        return Err(refused(format!("binding_mismatch:{}", fields.join(","))));
     }
     if let Some(offset) = statement.get("offset")
         && body["offset"] != *offset
     {
-        return Err(OwnerError("offer_response_invalid"));
+        return Err(refused("answer_offset".into()));
     }
     Ok(body)
 }
@@ -1084,12 +1102,42 @@ fn stage_root(root: &Path) -> PathBuf {
 /// `/api/staging/accept` + `/api/control/start` for the owner's announced bootstrap offer: fetch
 /// the offer from the owner's mailbox, check it is exactly the model-free hello archive of this
 /// run, stage it and start the admitted helper under this Mac's own target pump.
+///
+/// Lane SR round 2: each distinct outcome is logged once (`l11_hello_member_bootstrap`), with the
+/// exact predicate behind a refusal; the returned codes are unchanged.
 fn bootstrap<H: MemberHost>(
     view: &MemberView<'_, H>,
     run: &str,
     deployment: &str,
     offer_id: &str,
 ) -> OResult<()> {
+    let mut why = String::from("-");
+    let mut expires_in = f64::NAN;
+    let result = bootstrap_offer(view, run, deployment, offer_id, &mut why, &mut expires_in);
+    let outcome = match &result {
+        Ok(true) => "started",
+        Ok(false) => "already_running",
+        Err(error) => error.0,
+    };
+    crate::hello_probe::on_change(
+        "member_bootstrap",
+        &format!("{run} {offer_id} {outcome} {why}"),
+        format_args!(
+            "l11_hello_member_bootstrap wall_ms={} run={run} offer={} outcome={outcome} reason={why} offer_expires_in_s={expires_in:.1}",
+            crate::hello_probe::wall_ms(),
+            crate::hello_probe::short(&json!(offer_id)),
+        ),
+    );
+    result.map(drop)
+}
+fn bootstrap_offer<H: MemberHost>(
+    view: &MemberView<'_, H>,
+    run: &str,
+    deployment: &str,
+    offer_id: &str,
+    why: &mut String,
+    expires_in: &mut f64,
+) -> OResult<bool> {
     let (scope, offer) = {
         let body = view.staging(STAGE_READ, json!({"offer_id": null, "offset": 0}))?;
         let client = locked(&view.client)?;
@@ -1097,14 +1145,33 @@ fn bootstrap<H: MemberHost>(
         (scope, body["offer"].clone())
     };
     let wanted = runtime::observe::bootstrap_archive(run, deployment);
+    let at = now();
+    *expires_in = crate::hello_probe::expires_in(&offer, at);
     if offer["offer_id"] != offer_id
-        || offer["expires_at"].as_f64().is_none_or(|t| t <= now())
+        || offer["expires_at"].as_f64().is_none_or(|t| t <= at)
         || scope
             .as_object()
             .ok_or(OwnerError("offer_response_invalid"))?
             .iter()
             .any(|(k, v)| offer[k] != *v)
     {
+        *why = if offer.is_null() {
+            "offer_missing".into()
+        } else if offer["offer_id"] != offer_id {
+            format!(
+                "offer_id_mismatch:{}",
+                crate::hello_probe::short(&offer["offer_id"])
+            )
+        } else if offer["expires_at"].as_f64().is_none() {
+            "offer_expiry_missing".into()
+        } else if offer["expires_at"].as_f64().is_some_and(|t| t <= at) {
+            "offer_expired".into()
+        } else {
+            format!(
+                "binding_mismatch:{}",
+                crate::hello_probe::mismatched(&scope, &offer)
+            )
+        };
         return Err(OwnerError("offer_response_invalid"));
     }
     if offer.as_object().is_none_or(|o| o.len() != 11)
@@ -1126,14 +1193,16 @@ fn bootstrap<H: MemberHost>(
         if read["offer"] != offer {
             return Err(OwnerError("offer_changed"));
         }
-        let data = base64::engine::general_purpose::STANDARD
-            .decode(
-                read["data"]
-                    .as_str()
-                    .ok_or(OwnerError("offer_response_invalid"))?,
-            )
-            .map_err(|_| OwnerError("offer_response_invalid"))?;
+        let Some(data) = read["data"].as_str() else {
+            "chunk_data_missing".clone_into(why);
+            return Err(OwnerError("offer_response_invalid"));
+        };
+        let Ok(data) = base64::engine::general_purpose::STANDARD.decode(data) else {
+            "chunk_data_not_base64".clone_into(why);
+            return Err(OwnerError("offer_response_invalid"));
+        };
         if data.len() as u64 != chunk.min((wanted.len() - archive.len()) as u64) {
+            "chunk_length".clone_into(why);
             return Err(OwnerError("offer_response_invalid"));
         }
         archive.extend(data);
@@ -1143,38 +1212,61 @@ fn bootstrap<H: MemberHost>(
     {
         return Err(OwnerError("offer_archive_digest_mismatch"));
     }
-    start(view, scope, offer, archive)
+    start(view, scope, offer, archive, why)
 }
 
+/// `Ok(true)` when a new worker started, `Ok(false)` when this exact scope's worker already runs;
+/// `why` names the slot state behind a refusal (log-only).
 fn start<H: MemberHost>(
     view: &MemberView<'_, H>,
     scope: Value,
     offer: Value,
     archive: Vec<u8>,
-) -> OResult<()> {
+    why: &mut String,
+) -> OResult<bool> {
     let host = view.host;
     settle_finished(&**host, &scope)?;
     let lifecycle = host.lifecycle()?;
     let _lifecycle = locked(&lifecycle)?;
     // `false`: the same worker already runs this exact offer, nothing to start.
-    let admitted = host.slot(|s| {
+    let (admitted, slot) = host.slot(|s| {
+        // The slot as this start found it (log-only, lane SR round 2).
+        let slot = match (s.worker.as_ref(), s.failure.as_ref()) {
+            (_, Some(failure)) => format!("start_failure_latched:{}", failure.code()),
+            (Some(worker), None) => format!(
+                "worker_run={}:running={}:same_scope={}",
+                worker.scope()["run_id"].as_str().unwrap_or("-"),
+                worker.running(),
+                *worker.scope() == scope
+            ),
+            (None, None) => "empty".to_owned(),
+        };
         if s.failure.is_some() {
-            return Err(OwnerError("control_restart_requires_reconciliation"));
+            return (
+                Err(OwnerError("control_restart_requires_reconciliation")),
+                slot,
+            );
         }
         if let Some(worker) = s.worker.as_ref() {
-            return if *worker.scope() == scope && worker.running() {
-                Ok(false)
-            } else {
-                Err(OwnerError("stage_runtime_active"))
-            };
+            return (
+                if *worker.scope() == scope && worker.running() {
+                    Ok(false)
+                } else {
+                    Err(OwnerError("stage_runtime_active"))
+                },
+                slot,
+            );
         }
         if s.state.fenced() {
-            return Err(OwnerError("bootstrap_start_fenced"));
+            return (Err(OwnerError("bootstrap_start_fenced")), slot);
         }
-        Ok(true)
-    })??;
-    if !admitted {
-        return Ok(());
+        (Ok(true), slot)
+    })?;
+    if !matches!(admitted, Ok(true)) {
+        *why = slot;
+    }
+    if !admitted? {
+        return Ok(false);
     }
     let program = host.program(&view.root)?;
     let root = native_root(&view.root);
@@ -1241,7 +1333,7 @@ fn start<H: MemberHost>(
         worker.close()?;
         return Err(OwnerError("bootstrap_start_fenced"));
     }
-    Ok(())
+    Ok(true)
 }
 
 /// PR-ASTRA-02: settle an earlier run's FINISHED worker before a new run is admitted.
@@ -1283,6 +1375,13 @@ fn settle_finished<H: MemberHost>(host: &H, scope: &Value) -> OResult<()> {
             worker.close()
         }
     };
+    crate::hello_probe::record(format_args!(
+        "l11_hello_member_settle wall_ms={} old_run={} new_run={} outcome={}",
+        crate::hello_probe::wall_ms(),
+        worker.scope()["run_id"].as_str().unwrap_or("-"),
+        scope["run_id"].as_str().unwrap_or("-"),
+        settled.as_ref().err().map_or("ok", |e| e.0),
+    ));
     match settled {
         Ok(()) => Ok(()),
         Err(error) => {
@@ -1455,6 +1554,20 @@ impl<H: MemberHost> TargetHost for RemoteTarget<H> {
         };
         let body = stage_call(&self.client, protocol, extra).map_err(|e| e.0)?;
         if body["offer"] != *offer || (removed && body["ack"] != ack) {
+            let why = if body["offer"].is_null() {
+                "offer_missing"
+            } else if body["offer"] != *offer {
+                "offer_changed"
+            } else {
+                "cleanup_ack_changed"
+            };
+            crate::owner_observation::target::stage_ack_line(
+                "member",
+                &self.scope,
+                offer,
+                removed,
+                why,
+            );
             return Err("offer_response_invalid");
         }
         self.current(!removed).map_err(|e| e.0)
@@ -1628,12 +1741,14 @@ pub fn spawn_pump<T: TargetHost + 'static>(
     let process = pump.process_control();
     let worker_fence = fence.clone();
     let owner_wake = wake.clone();
+    let mut probe = crate::hello_probe::PumpProbe::started("member", &scope);
     let join = std::thread::spawn(move || {
         let result: OResult<()> = (|| {
             let mut cadence = Cadence::new()?;
             loop {
                 let generation = wake.generation()?;
                 let outcome = pump.step_outcome().map_err(OwnerError)?;
+                probe.step(&outcome);
                 if matches!(outcome, StepOutcome::Completed { stopped: true }) {
                     while worker_fence.check().is_ok() {
                         let g = wake.generation()?;
@@ -1645,6 +1760,7 @@ pub fn spawn_pump<T: TargetHost + 'static>(
             }
             Ok(())
         })();
+        probe.ended(result.as_ref().err().map_or("ok", |e| e.0));
         let recorded = if let Err(e) = &result {
             pump.record_failure(e.0)
         } else {

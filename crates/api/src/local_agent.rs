@@ -177,6 +177,9 @@ pub struct LocalAgent {
     slice_stop: Arc<AtomicBool>,
     /// `local=False`: a joined Mac (`DemoTargetAgent(app, consent=StandingConsentGate(), ...)`).
     remote: bool,
+    /// The announced bootstrap offer and when this agent first saw it (log-only: the offer's age
+    /// on `l11_hello_agent_bootstrap`, lane SR round 2).
+    bootstrap_seen: Option<(String, f64)>,
 }
 
 /// `_code(error, default)` over a native worker's error code.
@@ -388,11 +391,33 @@ impl LocalAgent {
             return Ok(false);
         };
         if !self.consent(host) {
+            self.probe_cleanup(&request, "consent_wait");
             return Ok(true);
         }
         self.set("cleaning_up", None);
-        host.cleanup(&request)?;
+        let cleaned = host.cleanup(&request);
+        self.probe_cleanup(
+            &request,
+            cleaned.as_ref().err().map_or("ok", |e| e.code.as_str()),
+        );
+        cleaned?;
         Ok(true)
+    }
+
+    /// `l11_hello_agent_cleanup` (lane SR round 2, log-only): an owner cleanup request this agent
+    /// acted on, once per distinct outcome.
+    fn probe_cleanup(&self, request: &Value, outcome: &str) {
+        crate::hello_probe::on_change(
+            &format!("agent_cleanup {}", self.remote),
+            &format!("{} {outcome}", request["offer_id"]),
+            format_args!(
+                "l11_hello_agent_cleanup wall_ms={} remote={} run={} offer={} outcome={outcome}",
+                crate::hello_probe::wall_ms(),
+                self.remote,
+                request["run_id"].as_str().unwrap_or("-"),
+                crate::hello_probe::short(&request["offer_id"]),
+            ),
+        );
     }
 
     /// `_share_refusal(a)`: a closed code when this Mac's caps cannot hold its announced share.
@@ -663,6 +688,8 @@ impl LocalAgent {
         // 3. Bootstrap (hello-only, model load denied).
         let early = matches!(phase.as_str(), "collect" | "observe" | "compile");
         let bootstrap = text(&a, "bootstrap_offer_id");
+        let now = host.clock();
+        self.probe_offer(&run_id, &phase, offer.as_ref(), bootstrap.as_deref(), now);
         // Past the owner's early phases (and always on a joined Mac) the worker starts only for the
         // announced offer this Mac holds itself, once (`demo_target.py:495-497`): a work offer held
         // after a descriptor reset never re-runs the bootstrap.
@@ -676,7 +703,14 @@ impl LocalAgent {
                 return Ok(());
             }
             self.set("preparing", None);
-            host.bootstrap(&run_id, &deployment_id, id)?;
+            let entry = if self.bootstrap_done.contains(id) {
+                "reentry"
+            } else {
+                "first"
+            };
+            let started = host.bootstrap(&run_id, &deployment_id, id);
+            self.probe_bootstrap(&run_id, &phase, id, entry, &started, now);
+            started?;
             self.bootstrap_done.insert(id.clone());
             self.set("bootstrap_running", None);
             return Ok(());
@@ -768,6 +802,71 @@ impl LocalAgent {
         Ok(())
     }
 
+    /// `l11_hello_agent_offer` (lane SR round 2, log-only): the pending offer this agent read
+    /// against the announced bootstrap offer, once per change; it also remembers when the
+    /// announced offer was first seen (its age on `l11_hello_agent_bootstrap`).
+    fn probe_offer(
+        &mut self,
+        run_id: &str,
+        phase: &str,
+        offer: Option<&Value>,
+        bootstrap: Option<&str>,
+        now: f64,
+    ) {
+        if let Some(id) = bootstrap
+            && self
+                .bootstrap_seen
+                .as_ref()
+                .is_none_or(|(seen, _)| seen != id)
+        {
+            self.bootstrap_seen = Some((id.to_owned(), now));
+        }
+        let pending = offer.map_or(Value::Null, |o| o["offer_id"].clone());
+        let held = bootstrap.is_some() && pending.as_str() == bootstrap;
+        crate::hello_probe::on_change(
+            &format!("agent_offer {}", self.remote),
+            &format!("{run_id} {pending} {bootstrap:?} {held}"),
+            format_args!(
+                "l11_hello_agent_offer wall_ms={} remote={} run={run_id} phase={phase} pending={} announced={} held={held} expires_in_s={:.1}",
+                crate::hello_probe::wall_ms(),
+                self.remote,
+                crate::hello_probe::short(&pending),
+                crate::hello_probe::short(&json!(bootstrap)),
+                offer.map_or(f64::NAN, |o| crate::hello_probe::expires_in(o, now)),
+            ),
+        );
+    }
+
+    /// `l11_hello_agent_bootstrap` (lane SR round 2, log-only): one bootstrap entry (`first`) or
+    /// re-entry for an offer already started, with its outcome and how long ago this agent first
+    /// saw the announced offer; once per distinct outcome.
+    fn probe_bootstrap(
+        &self,
+        run_id: &str,
+        phase: &str,
+        offer: &str,
+        entry: &str,
+        started: &Result<(), Failure>,
+        now: f64,
+    ) {
+        let outcome = started.as_ref().err().map_or("ok", |e| e.code.as_str());
+        let age = self
+            .bootstrap_seen
+            .as_ref()
+            .filter(|(seen, _)| seen == offer)
+            .map_or(f64::NAN, |(_, at)| now - at);
+        crate::hello_probe::on_change(
+            &format!("agent_bootstrap {}", self.remote),
+            &format!("{run_id} {offer} {entry} {outcome}"),
+            format_args!(
+                "l11_hello_agent_bootstrap wall_ms={} remote={} run={run_id} phase={phase} offer={} entry={entry} outcome={outcome} seen_age_s={age:.1}",
+                crate::hello_probe::wall_ms(),
+                self.remote,
+                crate::hello_probe::short(&json!(offer)),
+            ),
+        );
+    }
+
     /// `holds_offer()`: tell a standing acceptor to leave the pending offer to this agent.
     pub fn holds_offer(&mut self) -> bool {
         self.collect_slice();
@@ -812,6 +911,21 @@ impl LocalAgent {
         if let Err(failure) = self.step(host) {
             self.set("error", Some(&closed(&failure.code, "demo_step_failed")));
         }
+        // Lane SR round 2 (log-only): this agent's card, once per change.
+        let a = self.announcement.clone().unwrap_or(Value::Null);
+        let run = a["run_id"].as_str().unwrap_or("-");
+        let phase = a["phase"].as_str().unwrap_or("-");
+        let detail = self.detail.as_deref().unwrap_or("-");
+        crate::hello_probe::on_change(
+            &format!("agent_card {}", self.remote),
+            &format!("{run} {phase} {} {detail}", self.state),
+            format_args!(
+                "l11_hello_agent_card wall_ms={} remote={} run={run} phase={phase} state={} detail={detail}",
+                crate::hello_probe::wall_ms(),
+                self.remote,
+                self.state,
+            ),
+        );
         self.report(host, false);
         self.status()
     }
