@@ -342,6 +342,16 @@ impl RunHost for PackagedRun {
         owner_observation::cleanup(self, node, request)
             .map_err(|error| Failure::new("RuntimeError", error.0))
     }
+    /// The contributor's hello worker state (`api::owner_observation::native_control`).
+    fn native_control(&self, node: &str) -> Result<Value, Failure> {
+        owner_observation::native_control(self, node)
+            .map_err(|error| Failure::new("RuntimeError", error.0))
+    }
+    /// Close the contributor's hello worker (`api::owner_observation::stop_native`).
+    fn stop_native(&self, node: &str) -> Result<(), Failure> {
+        owner_observation::stop_native(self, node)
+            .map_err(|error| Failure::new("RuntimeError", error.0))
+    }
 }
 impl ChainHost for PackagedRun {
     type Weak = WeakRun;

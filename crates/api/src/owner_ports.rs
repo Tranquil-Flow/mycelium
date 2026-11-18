@@ -116,6 +116,16 @@ pub trait RunHost: Clone + Send + Sync + 'static {
     fn cleanup(&self, _node: &str, _request: &Value) -> Result<(), Failure> {
         Err(Failure::new("RuntimeError", "member_cleanup_unavailable"))
     }
+    /// `actor.status()['native_control']` of the owner's own contributor `node`: its hello worker
+    /// running, stopped or blocked (an empty object when it has none). Without a producer, none.
+    fn native_control(&self, _node: &str) -> Result<Value, Failure> {
+        Ok(json!({}))
+    }
+    /// `/api/control/stop` of the owner's own contributor `node`: close its hello worker. Without a
+    /// producer it refuses.
+    fn stop_native(&self, _node: &str) -> Result<(), Failure> {
+        Err(Failure::new("RuntimeError", "member_cleanup_unavailable"))
+    }
     /// The wall clock the contributor's membership renewal reads ([`crate::app_host::now`]). A
     /// test host may step it (lane FLK patch 3: a local lease-expiry check is no seed refusal).
     fn renewal_clock(&self) -> f64 {
@@ -545,6 +555,12 @@ impl<H: RunHost> AgentHost for AgentView<'_, H> {
     }
     fn cleanup(&mut self, request: &Value) -> Result<(), Failure> {
         self.host.cleanup(&self.node, request)
+    }
+    fn native_control(&mut self) -> Result<Value, Failure> {
+        self.host.native_control(&self.node)
+    }
+    fn stop_native(&mut self) -> Result<(), Failure> {
+        self.host.stop_native(&self.node)
     }
     fn announcement(&mut self) -> Result<Option<Value>, crate::local_agent::ExchangeUnavailable> {
         Ok(Some(

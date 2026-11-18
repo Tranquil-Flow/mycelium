@@ -1098,6 +1098,40 @@ fn own_stage_call<H: ChainHost>(
     }
     Ok(body)
 }
+/// `actor.status()['native_control']` of the owner's own contributor `node` (the member's own
+/// `native_control` in `crate::member_agent`, demo_target.py:516-517 @ f4e366e9): its hello worker
+/// `running` while its pump thread runs (an owner Stop leaves it awaiting cleanup), `blocked` with
+/// the code of a start whose cleanup is unproven, `stopped` once the thread ended, else nothing.
+pub fn native_control<H: ChainHost>(core: &H, node: &str) -> OResult<Value> {
+    viewed(core, |c| {
+        if c.run
+            .contributor
+            .as_ref()
+            .is_none_or(|local| local.node != node)
+        {
+            return json!({});
+        }
+        match (c.bootstrap.as_ref(), c.bootstrap_failure.as_ref()) {
+            (Some(worker), _) if worker.running() => json!({"state": "running"}),
+            (_, Some(failure)) => json!({"state": "blocked", "error_code": failure.code()}),
+            (Some(_), None) => json!({"state": "stopped"}),
+            (None, None) => json!({}),
+        }
+    })
+}
+/// `/api/control/stop` of the owner's own contributor `node`: close its hello worker
+/// ([`target::close`]).
+pub fn stop_native<H: ChainHost>(core: &H, node: &str) -> OResult<()> {
+    if viewed(core, |c| {
+        c.run
+            .contributor
+            .as_ref()
+            .is_none_or(|local| local.node != node)
+    })? {
+        return Err(OwnerError("managed_control_member_stale"));
+    }
+    target::close(core)
+}
 const CLEANUP_READ: &str = "mycelium.managed_stage_cleanup_read.v1";
 const CLEANUP_ACK: &str = "mycelium.managed_stage_cleanup_ack.v1";
 const CLEANUP_STATE: &str = "mycelium.managed_stage_cleanup_state.v1";

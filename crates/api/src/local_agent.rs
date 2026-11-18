@@ -691,13 +691,23 @@ impl LocalAgent {
         let now = host.clock();
         self.probe_offer(&run_id, &phase, offer.as_ref(), bootstrap.as_deref(), now);
         // Past the owner's early phases (and always on a joined Mac) the worker starts only for the
-        // announced offer this Mac holds itself, once (`demo_target.py:495-497`): a work offer held
-        // after a descriptor reset never re-runs the bootstrap.
+        // announced offer this Mac holds itself (`demo_target.py:495-497`): a work offer held
+        // after a descriptor reset never re-runs the bootstrap. The owner's own contributor has no
+        // pending-offer reader here: in the early phases its own bootstrap reads and checks the
+        // announced offer itself.
+        //
+        // Either way ONCE per announced offer (`bootstrap not in self._bootstrap_done`,
+        // demo_target.py:494-514 @ f4e366e9); afterwards the card is the worker's own state below.
+        // Lane SR round 2: the owner's branch re-entered the bootstrap on every early-phase tick,
+        // re-reading the offer over the owner's local carrier; once the offer outlived its 300 s
+        // life (or was retired) the re-read found none and the owner's card turned
+        // `offer_response_invalid` while its hello worker still ran (rv42/rv43 second run).
         let held = offer
             .as_ref()
             .is_some_and(|o| bootstrap.is_some() && o["offer_id"].as_str() == bootstrap.as_deref());
         if let Some(id) = &bootstrap
-            && ((early && !self.remote) || (held && !self.bootstrap_done.contains(id)))
+            && !self.bootstrap_done.contains(id)
+            && ((early && !self.remote) || held)
         {
             if !self.consent(host) {
                 return Ok(());
