@@ -355,6 +355,14 @@ fn renewals_and_emitted_ids_survive_reopen_and_the_single_blob_migration() {
 
     // A commit the database refuses leaves no effect: no renewal, no emitted id, and the same heartbeat is then
     // committed as new once the database is writable again.
+    // A heartbeat committed since the reopen must survive the refused commit that follows it.
+    w.advance(KEEPALIVE);
+    w.receive(&w.heartbeat("heartbeat-before-blocked", 19, 0))
+        .unwrap();
+    let kept = w
+        .seed()
+        .lease_renewal("node-a", "heartbeat-before-blocked")
+        .unwrap();
     w.advance(KEEPALIVE);
     let blocked = w.heartbeat("heartbeat-blocked", 20, 0);
     let draw_before = w.ids.lock().unwrap().next;
@@ -373,6 +381,13 @@ fn renewals_and_emitted_ids_survive_reopen_and_the_single_blob_migration() {
             .code,
         "seed_lease_renewal_unknown",
         "memory never leads disk"
+    );
+    assert_eq!(
+        w.seed()
+            .lease_renewal("node-a", "heartbeat-before-blocked")
+            .unwrap(),
+        kept,
+        "a refused commit forgets only its own rows"
     );
     let refused_id = format!("seed-message-{}", draw_before + 1);
     assert!(
@@ -400,8 +415,14 @@ fn renewals_and_emitted_ids_survive_reopen_and_the_single_blob_migration() {
             .unwrap(),
         renewal
     );
+    assert_eq!(
+        w.seed()
+            .lease_renewal("node-a", "heartbeat-before-blocked")
+            .unwrap(),
+        kept
+    );
     let after = full_document(&w.db());
-    assert_eq!(after["renewals"].as_array().unwrap().len(), 4);
+    assert_eq!(after["renewals"].as_array().unwrap().len(), 5);
     assert_eq!(
         after["renewals"].as_array().unwrap()[..3],
         before["renewals"].as_array().unwrap()[..],

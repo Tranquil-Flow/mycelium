@@ -139,7 +139,9 @@ fn require_segment(s: &str) -> Result<(), SeedError> {
 
 struct Inner {
     table: SeedTable,
-    /// The snapshot of `table` as this process last committed or loaded it (what a commit is diffed against).
+    /// The snapshot row of `table` ([`SeedTable::core_snapshot`]: everything but the append-only journals) as
+    /// this process last committed or loaded it (what a commit is diffed against). Its size does not grow with
+    /// the heartbeat history; the journals' unsaved rows are tracked by the table itself.
     baseline: Value,
     store: Store,
     seed_url: Option<String>,
@@ -157,15 +159,21 @@ pub struct Coordinator {
     inner: Mutex<Inner>,
 }
 
+fn id_source(ids: &Arc<Mutex<IdSource>>) -> Box<dyn FnMut() -> String + Send> {
+    let shared = ids.clone();
+    Box::new(move || match shared.lock() {
+        Ok(mut draw) => (draw)(),
+        Err(poisoned) => (poisoned.into_inner())(),
+    })
+}
+
+/// A table of the stored snapshot row alone (members, replay, rotations ...; no journal rows): what the
+/// member-authority guard compares.
 fn table_from(
     ids: &Arc<Mutex<IdSource>>,
     snapshot: Option<&Value>,
 ) -> Result<SeedTable, SeedError> {
-    let shared = ids.clone();
-    let source: Box<dyn FnMut() -> String + Send> = Box::new(move || match shared.lock() {
-        Ok(mut draw) => (draw)(),
-        Err(poisoned) => (poisoned.into_inner())(),
-    });
+    let source = id_source(ids);
     match snapshot {
         Some(s) => Ok(SeedTable::restore(s, source)?),
         None => Ok(SeedTable::new(source)),
@@ -251,7 +259,15 @@ impl Coordinator {
             busy,
         )?;
         let ids = Arc::new(Mutex::new(ids));
-        let table = table_from(&ids, store.load_snapshot()?.as_ref())?;
+        let table = match store.load_table()? {
+            Some(stored) => SeedTable::restore_journaled(
+                &stored.core,
+                stored.renewals,
+                stored.emitted,
+                id_source(&ids),
+            )?,
+            None => SeedTable::new(id_source(&ids)),
+        };
         let timing = Timing {
             keepalive_interval_seconds: options.keepalive_interval_seconds,
             evidence_freshness_seconds: options.evidence_freshness_seconds,
@@ -267,7 +283,7 @@ impl Coordinator {
             clock,
             ids,
             inner: Mutex::new(Inner {
-                baseline: table.snapshot(),
+                baseline: table.core_snapshot(),
                 table,
                 store,
                 seed_url,
@@ -426,21 +442,24 @@ impl Coordinator {
         }
     }
 
-    /// Commit the table (and the optional invite consumption and signed envelopes); when the database
-    /// refuses, the in-memory table is rebuilt from the last committed snapshot so memory never leads disk.
+    /// Commit the table (and the optional invite consumption and signed envelopes): the snapshot row and the
+    /// journal rows recorded since the last commit, before the caller answers. When the database refuses, the
+    /// in-memory table goes back to the last committed state so memory never leads disk.
     fn persist(
         &self,
         inner: &mut Inner,
         consume: Option<&Consume<'_>>,
         envelopes: &[Envelope<'_>],
     ) -> Result<(), SeedError> {
-        let snapshot = inner.table.snapshot();
+        let snapshot = inner.table.core_snapshot();
+        let journal = inner.table.unsaved_journal();
         match inner
             .store
-            .commit(&snapshot, &inner.baseline, consume, envelopes)
+            .commit(&snapshot, &inner.baseline, &journal, consume, envelopes)
         {
             Ok(_) => {
                 inner.baseline = snapshot;
+                inner.table.mark_journal_saved();
                 Ok(())
             }
             Err(error) => {
@@ -453,13 +472,12 @@ impl Coordinator {
     /// Memory never leads disk: drop what the failed operation changed, back to the last view this process
     /// committed or loaded (a stale process keeps its stale view, as v0.1.4 keeps its `_members`).
     fn forget_uncommitted(&self, inner: &mut Inner) -> Result<(), SeedError> {
-        inner.table = table_from(&self.ids, Some(&inner.baseline))?;
-        Ok(())
+        Ok(inner.table.forget_unsaved(&inner.baseline)?)
     }
 
     /// The members the database holds now, for `_ensure_current_member`.
     fn durable_view(inner: &Inner) -> Result<Vec<DurableMember>, SeedError> {
-        let snapshot = inner.store.load_snapshot()?;
+        let snapshot = inner.store.load_core()?;
         let members = snapshot
             .as_ref()
             .and_then(|s| s["members"].as_array().cloned())
@@ -936,14 +954,17 @@ impl Coordinator {
         if completion == seed_members::Completion::AlreadyCompleted {
             return Ok(());
         }
-        let snapshot = inner.table.snapshot();
+        let snapshot = inner.table.core_snapshot();
+        let journal = inner.table.unsaved_journal();
         match inner.store.commit_rotation_completion(
             &snapshot,
+            &journal,
             new_seed_key_digest,
             authority_generation,
         ) {
             Ok(()) => {
                 inner.baseline = snapshot;
+                inner.table.mark_journal_saved();
                 Ok(())
             }
             Err(error) => {

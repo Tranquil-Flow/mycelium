@@ -29,6 +29,13 @@ const MEMBER_PROTOCOLS: [&str; 6] = [
     "mycelium.membership.drain_ack.v1",
     SEED_ROTATION_ACK_PROTOCOL,
 ];
+/// The key and value a [`SeedTable::core_snapshot`] carries: the document holds every collection except the
+/// two append-only journals (committed renewals, emitted message ids), which the caller keeps as rows
+/// (v0.1.4 `seed_heartbeat_renewals` / `seed_emitted_messages`) and hands back to
+/// [`SeedTable::restore_journaled`]. A [`SeedTable::snapshot`] document (no key) holds them inline.
+pub const JOURNALS_KEY: &str = "journals";
+pub const JOURNALS_ROWS_V1: &str = "rows.v1";
+
 /// `_MAX_REPLAY_IDS`: replay rows kept per member generation.
 pub const MAX_REPLAY_IDS: usize = 4096;
 /// `assignment_offer` accepts at most this many peers.
@@ -43,6 +50,21 @@ const LIFECYCLE_ORDER: [&str; 6] = [
 ];
 
 type Refusal = SeedCoordinatorError;
+
+const CORRUPT: Refusal = SeedCoordinatorError("seed_state_corrupt");
+
+fn json_text(v: &Value, k: &str) -> Result<String, Refusal> {
+    v[k].as_str().map(str::to_owned).ok_or(CORRUPT)
+}
+fn json_num(v: &Value, k: &str) -> Result<f64, Refusal> {
+    v[k].as_f64().ok_or(CORRUPT)
+}
+fn json_int(v: &Value, k: &str) -> Result<u64, Refusal> {
+    v[k].as_u64().ok_or(CORRUPT)
+}
+fn json_rows<'v>(v: &'v Value, k: &str) -> Result<&'v Vec<Value>, Refusal> {
+    v[k].as_array().ok_or(CORRUPT)
+}
 
 fn refuse<T>(code: &'static str) -> Result<T, Refusal> {
     Err(SeedCoordinatorError(code))
@@ -202,6 +224,18 @@ pub struct SeedTable {
     row_kept_by_refusal: bool,
     /// The members the durable state holds right now (set by the caller around one operation; `None` = no check).
     durable: Option<Vec<DurableMember>>,
+    /// `renewals[..saved_renewals]` are the rows the caller last saved or loaded (the journal is append-only).
+    saved_renewals: usize,
+    /// Emitted ids recorded since the caller last saved or loaded, in the order they were recorded.
+    unsaved_emitted: Vec<String>,
+}
+
+/// The journal rows a table recorded since the caller last saved it ([`SeedTable::unsaved_journal`]): each
+/// renewal as its [`SeedTable::snapshot`] row, each emitted id once.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Journal {
+    pub renewals: Vec<Value>,
+    pub emitted: Vec<String>,
 }
 
 /// The identity of a member as the database holds it (`SqliteSeedState.member_is_current`).
@@ -237,7 +271,56 @@ impl SeedTable {
             drawn: Vec::new(),
             row_kept_by_refusal: false,
             durable: None,
+            saved_renewals: 0,
+            unsaved_emitted: Vec::new(),
         }
+    }
+
+    /// Record one emitted message id (the in-memory `seed_emitted_messages` INSERT).
+    fn record_emitted(&mut self, id: String) {
+        if self.emitted.insert(id.clone()) {
+            self.unsaved_emitted.push(id);
+        }
+    }
+
+    /// The journal rows recorded since [`SeedTable::mark_journal_saved`] (or the restore).
+    pub fn unsaved_journal(&self) -> Journal {
+        Journal {
+            renewals: self.renewals[self.saved_renewals.min(self.renewals.len())..]
+                .iter()
+                .map(Self::renewal_value)
+                .collect(),
+            emitted: self.unsaved_emitted.clone(),
+        }
+    }
+
+    /// The caller durably saved [`SeedTable::unsaved_journal`] together with [`SeedTable::core_snapshot`].
+    pub fn mark_journal_saved(&mut self) {
+        self.saved_renewals = self.renewals.len();
+        self.unsaved_emitted.clear();
+    }
+
+    /// Back to the state last saved: `core` (the [`SeedTable::core_snapshot`] the caller last saved or loaded)
+    /// replaces every non-journal collection, the journals drop what was recorded since. Equivalent to
+    /// [`SeedTable::restore`] of the last saved whole document, without rebuilding the journals.
+    pub fn forget_unsaved(&mut self, core: &Value) -> Result<(), Refusal> {
+        let saved = Self::restore_core(core, Box::new(String::new))?;
+        self.members = saved.members;
+        self.replay = saved.replay;
+        self.join_rows = saved.join_rows;
+        self.resume_rows = saved.resume_rows;
+        self.assignments = saved.assignments;
+        self.rotations = saved.rotations;
+        self.acks = saved.acks;
+        self.authority_generation = saved.authority_generation;
+        self.renewals.truncate(self.saved_renewals);
+        for id in std::mem::take(&mut self.unsaved_emitted) {
+            self.emitted.remove(&id);
+        }
+        self.drawn.clear();
+        self.row_kept_by_refusal = false;
+        self.durable = None;
+        Ok(())
     }
 
     /// Whether the last refused [`receive_member_message`] still changed the durable state: a rotation
@@ -391,7 +474,7 @@ impl SeedTable {
         now: f64,
         timing: &Timing,
     ) {
-        self.emitted.insert(id);
+        self.record_emitted(id);
         if let (Some(nonce), Some(request_digest)) = (
             envelope["message"]["invite_nonce"].as_str(),
             digest_of(envelope),
@@ -428,7 +511,7 @@ impl SeedTable {
         now: f64,
         timing: &Timing,
     ) {
-        self.emitted.insert(id);
+        self.record_emitted(id);
         if let (Some(message_id), Some(request_digest)) = (
             envelope["message"]["message_id"].as_str(),
             digest_of(envelope),
@@ -443,8 +526,38 @@ impl SeedTable {
     /// renewals, join / resume retry rows, assignments, authority rotations, emitted message ids). The id
     /// source is not state. [`SeedTable::restore`] is its inverse.
     pub fn snapshot(&self) -> Value {
-        let f = float_value;
+        let mut document = self.core_map();
+        document.insert(
+            "renewals".into(),
+            Value::Array(self.renewals.iter().map(Self::renewal_value).collect()),
+        );
+        document.insert(
+            "emitted".into(),
+            json!(self.emitted.iter().collect::<Vec<_>>()),
+        );
+        Value::Object(document)
+    }
+
+    /// [`SeedTable::snapshot`] without the two append-only journals (renewals, emitted ids), marked
+    /// [`JOURNALS_KEY`] = [`JOURNALS_ROWS_V1`]: its size does not grow with the heartbeat history.
+    pub fn core_snapshot(&self) -> Value {
+        let mut document = self.core_map();
+        document.insert(JOURNALS_KEY.into(), json!(JOURNALS_ROWS_V1));
+        Value::Object(document)
+    }
+
+    /// One committed renewal as its [`SeedTable::snapshot`] row.
+    fn renewal_value(r: &RenewalRow) -> Value {
         json!({
+            "node_id": r.node_id, "generation": r.generation,
+            "heartbeat_message_id": r.heartbeat_message_id, "request_digest": r.request_digest,
+            "sequence": r.sequence, "renewal": r.renewal,
+        })
+    }
+
+    fn core_map(&self) -> Map<String, Value> {
+        let f = float_value;
+        let document = json!({
             "members": self.members.iter().map(|t| json!({
                 "node_id": t.member.node_id, "endpoint_id": t.member.endpoint_id,
                 "endpoint_addrs": t.member.endpoint_addrs, "peer_class": t.member.peer_class,
@@ -462,11 +575,6 @@ impl SeedTable {
             "replay": self.replay.iter().map(|r| json!({
                 "node_id": r.node_id, "generation": r.generation, "message_id": r.message_id,
                 "expires_at": f(r.expires_at),
-            })).collect::<Vec<_>>(),
-            "renewals": self.renewals.iter().map(|r| json!({
-                "node_id": r.node_id, "generation": r.generation,
-                "heartbeat_message_id": r.heartbeat_message_id, "request_digest": r.request_digest,
-                "sequence": r.sequence, "renewal": r.renewal,
             })).collect::<Vec<_>>(),
             "join_rows": self.join_rows.iter().map(|r| json!([r.0, r.1, r.2])).collect::<Vec<_>>(),
             "resume_rows": self.resume_rows.iter().map(|r| json!([r.0, r.1])).collect::<Vec<_>>(),
@@ -486,28 +594,86 @@ impl SeedTable {
                 "message_id": a.message_id, "acknowledged_at": float_value(a.acknowledged_at),
             })).collect::<Vec<_>>(),
             "authority_generation": self.authority_generation,
-            "emitted": self.emitted.iter().collect::<Vec<_>>(),
-        })
+        });
+        match document {
+            Value::Object(map) => map,
+            _ => Map::new(),
+        }
     }
 
-    /// Rebuild a table from [`SeedTable::snapshot`]; any missing or mistyped field is `seed_state_corrupt`.
+    /// Rebuild a table from [`SeedTable::snapshot`] (the journals inline) or from a
+    /// [`SeedTable::core_snapshot`] (the table then holds no journal rows; [`SeedTable::restore_journaled`]
+    /// adds them). Any missing or mistyped field is `seed_state_corrupt`.
     pub fn restore(
         snapshot: &Value,
         id_source: Box<dyn FnMut() -> String + Send>,
     ) -> Result<Self, Refusal> {
-        const CORRUPT: Refusal = SeedCoordinatorError("seed_state_corrupt");
-        fn text(v: &Value, k: &str) -> Result<String, Refusal> {
-            v[k].as_str().map(str::to_owned).ok_or(CORRUPT)
+        let mut table = Self::restore_core(snapshot, id_source)?;
+        if !Self::is_core(snapshot)? {
+            for r in json_rows(snapshot, "renewals")? {
+                table.push_renewal(r)?;
+            }
+            for id in json_rows(snapshot, "emitted")? {
+                table.emitted.insert(id.as_str().ok_or(CORRUPT)?.to_owned());
+            }
+            table.mark_journal_saved();
         }
-        fn num(v: &Value, k: &str) -> Result<f64, Refusal> {
-            v[k].as_f64().ok_or(CORRUPT)
+        Ok(table)
+    }
+
+    /// Rebuild a table from a [`SeedTable::core_snapshot`] and its journal rows: the renewals in the order they
+    /// were recorded (each a [`SeedTable::snapshot`] row) and the emitted ids.
+    pub fn restore_journaled(
+        core: &Value,
+        renewals: impl IntoIterator<Item = Value>,
+        emitted: impl IntoIterator<Item = String>,
+        id_source: Box<dyn FnMut() -> String + Send>,
+    ) -> Result<Self, Refusal> {
+        if !Self::is_core(core)? {
+            return Err(CORRUPT);
         }
-        fn int(v: &Value, k: &str) -> Result<u64, Refusal> {
-            v[k].as_u64().ok_or(CORRUPT)
+        let mut table = Self::restore_core(core, id_source)?;
+        for row in renewals {
+            table.push_renewal(&row)?;
         }
-        fn rows<'v>(v: &'v Value, k: &str) -> Result<&'v Vec<Value>, Refusal> {
-            v[k].as_array().ok_or(CORRUPT)
+        table.emitted.extend(emitted);
+        table.mark_journal_saved();
+        Ok(table)
+    }
+
+    /// Whether `snapshot` is a [`SeedTable::core_snapshot`]: marked, and without inline journals.
+    fn is_core(snapshot: &Value) -> Result<bool, Refusal> {
+        match snapshot.get(JOURNALS_KEY) {
+            None => Ok(false),
+            Some(mark)
+                if mark == JOURNALS_ROWS_V1
+                    && snapshot.get("renewals").is_none()
+                    && snapshot.get("emitted").is_none() =>
+            {
+                Ok(true)
+            }
+            Some(_) => Err(CORRUPT),
         }
+    }
+
+    fn push_renewal(&mut self, r: &Value) -> Result<(), Refusal> {
+        self.renewals.push(RenewalRow {
+            node_id: json_text(r, "node_id")?,
+            generation: json_int(r, "generation")?,
+            heartbeat_message_id: json_text(r, "heartbeat_message_id")?,
+            request_digest: json_text(r, "request_digest")?,
+            sequence: json_int(r, "sequence")?,
+            renewal: r["renewal"].clone(),
+        });
+        Ok(())
+    }
+
+    /// Every collection of a snapshot document except the two journals.
+    fn restore_core(
+        snapshot: &Value,
+        id_source: Box<dyn FnMut() -> String + Send>,
+    ) -> Result<Self, Refusal> {
+        let (text, num, int, rows) = (json_text, json_num, json_int, json_rows);
         let mut table = Self::new(id_source);
         for m in rows(snapshot, "members")? {
             let addrs = rows(m, "endpoint_addrs")?
@@ -543,16 +709,6 @@ impl SeedTable {
                 generation: int(r, "generation")?,
                 message_id: text(r, "message_id")?,
                 expires_at: num(r, "expires_at")?,
-            });
-        }
-        for r in rows(snapshot, "renewals")? {
-            table.renewals.push(RenewalRow {
-                node_id: text(r, "node_id")?,
-                generation: int(r, "generation")?,
-                heartbeat_message_id: text(r, "heartbeat_message_id")?,
-                request_digest: text(r, "request_digest")?,
-                sequence: int(r, "sequence")?,
-                renewal: r["renewal"].clone(),
             });
         }
         let cell = |r: &Value, i: usize| r[i].as_str().map(str::to_owned).ok_or(CORRUPT);
@@ -604,9 +760,6 @@ impl SeedTable {
             }
         }
         table.authority_generation = int(snapshot, "authority_generation")?;
-        for id in rows(snapshot, "emitted")? {
-            table.emitted.insert(id.as_str().ok_or(CORRUPT)?.to_owned());
-        }
         Ok(table)
     }
 
@@ -1138,7 +1291,7 @@ pub fn receive_member_message(
         });
         let expires_at = message["expires_at"].as_f64().unwrap_or_default();
         table.insert_replay(node_id, generation, &message_id, expires_at);
-        table.emitted.insert(renewal_id);
+        table.record_emitted(renewal_id);
         table.renewals.push(RenewalRow {
             node_id: node_id.to_owned(),
             generation,
@@ -1430,7 +1583,7 @@ pub fn assignment_offer(
         "placement_provenance": offer.placement_provenance,
         "peer_endpoint_records": records,
     });
-    table.emitted.insert(message_id);
+    table.record_emitted(message_id);
     membership::validate(&message, frame.limits).map_err(|e| SeedCoordinatorError(e.0))?;
     table.assignments.push(Assignment {
         node_id: offer.node_id.to_owned(),

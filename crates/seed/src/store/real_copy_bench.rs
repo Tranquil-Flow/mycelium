@@ -22,8 +22,9 @@ fn private_copy(source: &Path) -> std::path::PathBuf {
     target
 }
 
-fn ms(started: Instant) -> u128 {
-    started.elapsed().as_millis()
+/// Milliseconds since `started`, rounded to microseconds for printing.
+fn ms(started: Instant) -> f64 {
+    (started.elapsed().as_secs_f64() * 1_000_000.0).round() / 1000.0
 }
 
 #[test]
@@ -35,6 +36,7 @@ fn real_copy_per_message_persistence_cost() {
     };
     let database = private_copy(Path::new(&source));
     let bound = read_binding(&database).unwrap();
+    let before = read_snapshot(&Connection::open(&database).unwrap()).unwrap();
     let started = Instant::now();
     let mut store = Store::open_with(
         &database,
@@ -46,28 +48,67 @@ fn real_copy_per_message_persistence_cost() {
         None,
     )
     .unwrap();
-    eprintln!("lane-sn real copy: open {} ms", ms(started));
+    eprintln!(
+        "lane-sn real copy: open (incl. the one-time migration) {} ms",
+        ms(started)
+    );
+    let started = Instant::now();
+    let stored = store.load_table().unwrap().unwrap();
+    let load_table = ms(started);
+    let started = Instant::now();
+    let mut table = SeedTable::restore_journaled(
+        &stored.core,
+        stored.renewals,
+        stored.emitted,
+        Box::new(String::new),
+    )
+    .unwrap();
+    eprintln!(
+        "lane-sn real copy: load_table {load_table} ms, restore_journaled {} ms",
+        ms(started)
+    );
+    // Migration fidelity on real data: the table read back from the snapshot row and the journal rows is the
+    // table the single snapshot held, row for row and in order.
+    if let Some(before) = before.filter(|b| !is_core(b)) {
+        let started = Instant::now();
+        assert_eq!(
+            table.snapshot(),
+            before,
+            "the migrated table equals the single snapshot"
+        );
+        eprintln!(
+            "lane-sn real copy: migrated table equals the single snapshot ({} renewals, {} emitted ids; checked in {} ms)",
+            before["renewals"].as_array().map_or(0, Vec::len),
+            before["emitted"].as_array().map_or(0, Vec::len),
+            ms(started)
+        );
+    }
+    let mut baseline = table.core_snapshot();
+    assert_eq!(store.load_core().unwrap().unwrap(), baseline);
+    let template = table.snapshot()["renewals"][0].clone();
     for round in 0..3 {
-        // `durable_view`: the whole snapshot read and parsed for the member check.
+        // `durable_view`: the stored snapshot row read and parsed for the member check.
         let started = Instant::now();
-        let durable = store.load_snapshot().unwrap().unwrap();
+        store.load_core().unwrap().unwrap();
         let load = ms(started);
-        let table = SeedTable::restore(&durable, Box::new(String::new)).unwrap();
-        // `persist`: the table serialized to a document, then the commit (read + parse + compare + write).
+        // `persist`: the snapshot row and this message's journal rows, then the commit.
         let started = Instant::now();
-        let mut snapshot = table.snapshot();
+        let snapshot = table.core_snapshot();
         let snap = ms(started);
-        let mut row = snapshot["renewals"][0].clone();
+        let mut row = template.clone();
         row["heartbeat_message_id"] = json!(format!("lane-sn-measure-{round}"));
-        snapshot["renewals"].as_array_mut().unwrap().push(row);
-        snapshot["emitted"]
-            .as_array_mut()
-            .unwrap()
-            .push(json!(format!("lane-sn-measure-{round}")));
+        let journal = Journal {
+            renewals: vec![row],
+            emitted: vec![format!("lane-sn-measure-{round}")],
+        };
         let started = Instant::now();
-        store.commit(&snapshot, &durable, None, &[]).unwrap();
+        store
+            .commit(&snapshot, &baseline, &journal, None, &[])
+            .unwrap();
         let commit = ms(started);
-        // `with_current_member`: the snapshot read, parsed and restored as a whole table per call.
+        baseline = snapshot.clone();
+        table.mark_journal_saved();
+        // `with_current_member`: the snapshot row read, parsed and restored per call.
         let started = Instant::now();
         store
             .with_authority(|s| {
@@ -77,7 +118,7 @@ fn real_copy_per_message_persistence_cost() {
             .unwrap();
         let guard = ms(started);
         eprintln!(
-            "lane-sn real copy round {round}: durable_view load {load} ms, table.snapshot {snap} ms, commit {commit} ms \
+            "lane-sn real copy round {round}: durable_view load {load} ms, core_snapshot {snap} ms, commit {commit} ms \
              (per message under the lock ~{} ms); with_current_member read {guard} ms; snapshot row {} bytes",
             load + snap + commit,
             snapshot.to_string().len()
