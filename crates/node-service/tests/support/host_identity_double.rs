@@ -253,7 +253,8 @@ impl ObservePort for HostIdentityTestDouble {
         self.0.offers()
     }
     fn collect(&mut self) -> Result<(), PortError> {
-        self.0.collect()
+        // As the product's observe port: each attempt's outcome on the log (lane SR round 3).
+        api::owner_compiler::collect_logged(&mut self.0)
     }
     fn observed_hosts(&mut self) -> Vec<Option<String>> {
         self.0.observed_hosts()

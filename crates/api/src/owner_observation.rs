@@ -1191,12 +1191,25 @@ struct ProbedSessions {
     /// Sessions opened per node so far (the collection attempt a line belongs to).
     opens: BTreeMap<String, u64>,
 }
-fn collect_line(run: &str, node: &str, attempt: u64, op: &str, outcome: &str, started: Instant) {
+/// `attempt` counts this node's session opens; `collection=` is the whole collection attempt it
+/// belongs to (lane SR round 3, review SR2-01: a node's first open need not be in the first
+/// attempt). Each line also marks how far the attempt got, for its `op=validate` line
+/// ([`crate::hello_probe::Collection`]).
+fn collect_line(
+    run: &str,
+    node: &str,
+    attempt: u64,
+    op: &'static str,
+    outcome: &str,
+    started: Instant,
+) {
+    let collection = crate::hello_probe::Collection::attempt(run);
+    crate::hello_probe::Collection::reached(run, node, op);
     crate::hello_probe::on_change(
         &format!("collect {node} {op}"),
-        &format!("{run} {outcome}"),
+        &format!("{run} {collection} {outcome}"),
         format_args!(
-            "l11_hello_collect wall_ms={} node={} run={run} attempt={attempt} op={op} outcome={outcome} elapsed_ms={}",
+            "l11_hello_collect wall_ms={} node={} run={run} collection={collection} attempt={attempt} op={op} outcome={outcome} elapsed_ms={}",
             crate::hello_probe::wall_ms(),
             crate::hello_probe::short(&json!(node)),
             started.elapsed().as_millis(),
@@ -1238,7 +1251,10 @@ impl HelloSessions for ProbedSessions {
         })
     }
     fn binding_current(&mut self, node_id: &str) -> bool {
+        // The timer covers the check it names (review SR2-01); only a refusal is logged.
+        let started = Instant::now();
         let current = self.inner.binding_current(node_id);
+        crate::hello_probe::Collection::reached(&self.run, node_id, "binding_current");
         if !current {
             let attempt = self.opens.get(node_id).copied().unwrap_or(0);
             collect_line(
@@ -1247,7 +1263,7 @@ impl HelloSessions for ProbedSessions {
                 attempt,
                 "binding_current",
                 "member_not_current",
-                Instant::now(),
+                started,
             );
         }
         current

@@ -38,8 +38,11 @@ use std::{
 
 /// A wait or hold this long (milliseconds) is reported. Log threshold only; it bounds nothing.
 pub const REPORT_MS: u128 = 1000;
-/// The longest probe line, in bytes, newline included.
-pub const LINE_BYTES: usize = 256;
+/// The longest probe line, in bytes, newline included. 512, not 256 (lane SR round 3, review
+/// SR2-02): a hello bootstrap refusal names every mismatching binding field after the line's
+/// node / run / offer, and at the longest run id the protocol admits (103 characters) the cut
+/// fell inside the field list. Still a fixed buffer, still cut, never grown.
+pub const LINE_BYTES: usize = 512;
 /// Probe lines waiting for the drain thread; one more is dropped and counted.
 pub const QUEUE_LINES: usize = 256;
 
