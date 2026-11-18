@@ -69,7 +69,7 @@ fn real_copy_per_message_persistence_cost() {
     );
     // Migration fidelity on real data: the table read back from the snapshot row and the journal rows is the
     // table the single snapshot held, row for row and in order.
-    if let Some(before) = before.filter(|b| !is_core(b)) {
+    if let Some(before) = before.filter(has_inline_journals) {
         let started = Instant::now();
         assert_eq!(
             table.snapshot(),
