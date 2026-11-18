@@ -264,6 +264,8 @@ struct ProxyShared {
     slots: AtomicUsize,
     trust_client_ip: bool,
     handlers: Mutex<Handlers>,
+    /// Where the relay's log-only probe lines go ([`seed::probe::Recorder::global`]; a test's own).
+    probe: &'static ::seed::probe::Recorder,
 }
 /// Lane B, B12: the relay's fork boundary. A child forked while a socket is open holds its own copy
 /// of that socket until its exec closes it (std marks it close-on-exec, and macOS has no atomic
@@ -307,6 +309,14 @@ pub struct Proxy {
 impl Proxy {
     /// `SeedRelayProxy(port, trust_client_ip).start()`; an `OSError` is the caller's.
     pub fn start(port: u16, trust_client_ip: bool) -> std::io::Result<Arc<Proxy>> {
+        Self::start_in(port, trust_client_ip, ::seed::probe::Recorder::global())
+    }
+    /// [`Proxy::start`] with its probe lines going to `probe` (test seam).
+    fn start_in(
+        port: u16,
+        trust_client_ip: bool,
+        probe: &'static ::seed::probe::Recorder,
+    ) -> std::io::Result<Arc<Proxy>> {
         // B12: no relay spawn lands between the listener's `socket()` and its close-on-exec.
         let listener = {
             let _forks = fork_boundary();
@@ -323,6 +333,7 @@ impl Proxy {
                 chat: None,
                 swarm: None,
             }),
+            probe,
         });
         let accept = shared.clone();
         let handle = thread::Builder::new()
@@ -402,12 +413,12 @@ fn accept_with(
                 }
                 failing += 1;
                 if failing % 100 == 1 {
-                    eprintln!(
+                    shared.probe.record(format_args!(
                         "l11_relay_accept_error errno={} kind={:?} consecutive={failing} wall_ms={}",
                         error.raw_os_error().unwrap_or(0),
                         error.kind(),
                         ::seed::probe::wall_ms()
-                    );
+                    ));
                 }
                 thread::sleep(pause);
                 continue;
@@ -429,10 +440,10 @@ fn accept_with(
             .is_ok();
         if !acquired {
             // Log-only probe (RV42 S1 RCA): the public front answers its own 502 for this one.
-            eprintln!(
+            shared.probe.record(format_args!(
                 "l11_relay_slots_exhausted slots={MAX_CONNECTIONS} wall_ms={}",
                 ::seed::probe::wall_ms()
-            );
+            ));
             stream.shutdown(Shutdown::Both).unwrap_or(());
             continue;
         }
@@ -754,7 +765,7 @@ fn forward(shared: &Arc<ProxyShared>, req: &mut Req, stream: &mut TcpStream) {
         Ok(body) => body,
         Err(Framed::Invalid) => return error_reply(stream, 400, "relay_frame_invalid", &[]),
         Err(Framed::Io) => {
-            backend_unavailable_probe(&req.path, "request_read", started);
+            backend_unavailable_probe(shared, &req.path, "request_read", started);
             return error_reply(stream, 502, "relay_backend_unavailable", &[]);
         }
     };
@@ -783,7 +794,7 @@ fn forward(shared: &Arc<ProxyShared>, req: &mut Req, stream: &mut TcpStream) {
             error_reply(stream, 400, "relay_frame_invalid", &[])
         }
         Err(BackendError::Unavailable) => {
-            backend_unavailable_probe(&req.path, "hop", started);
+            backend_unavailable_probe(shared, &req.path, "hop", started);
             error_reply(stream, 502, "relay_backend_unavailable", &[]);
         }
     }
@@ -793,12 +804,12 @@ fn forward(shared: &Arc<ProxyShared>, req: &mut Req, stream: &mut TcpStream) {
 /// the public front; `hop`: the verified-TLS hop into the seed, 5 s per step) and the time since the
 /// request head was read. A joined Mac logs every 502 as `code=None`; this line tells the proxy's
 /// own answer from the front's.
-fn backend_unavailable_probe(path: &str, stage: &str, started: Instant) {
-    eprintln!(
+fn backend_unavailable_probe(shared: &ProxyShared, path: &str, stage: &str, started: Instant) {
+    shared.probe.record(format_args!(
         "l11_relay_backend_unavailable path={path} stage={stage} elapsed_ms={} wall_ms={}",
         started.elapsed().as_millis(),
         ::seed::probe::wall_ms()
-    );
+    ));
 }
 enum Framed {
     Invalid,
@@ -2178,6 +2189,7 @@ mod accept_pause_tests {
                 chat: None,
                 swarm: None,
             }),
+            probe: ::seed::probe::Recorder::global(),
         });
         let pause = span(BudgetId::PyFinalMyceliumSeedHttpSelfServerTimeoutL676C8);
         assert!(pause > Duration::ZERO);
@@ -2208,3 +2220,6 @@ mod accept_pause_tests {
         assert!(started.elapsed() >= pause * u32::try_from(errors - 1).unwrap_or(0));
     }
 }
+
+#[cfg(test)]
+mod probe_tests;
