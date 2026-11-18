@@ -22,6 +22,7 @@ pub mod endpoint_recovery;
 pub mod framing;
 pub mod gateway;
 pub mod handoff;
+pub mod hello_probe;
 pub mod http;
 pub mod installation_descriptor;
 pub mod join_client;

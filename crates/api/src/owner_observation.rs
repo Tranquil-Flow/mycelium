@@ -19,7 +19,7 @@ use runtime::{
         ManagedControlOwner, OwnerError, OwnerHost,
         session::{CallFence, ManagedSessionFactory, SessionHost, SharedManagedOwner},
     },
-    observe::{HelloSessions, ObservationContext, ObservationError, Offer},
+    observe::{HelloSession, HelloSessions, ObservationContext, ObservationError, Offer},
     observe_owner::ObserveAdapter,
 };
 use serde_json::{Value, json};
@@ -27,7 +27,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use transport::Clock;
 pub mod target;
 
@@ -682,12 +682,15 @@ impl<H: ChainHost> SessionHost for PinnedHost<H> {
         self.pin().map(drop)
     }
 }
+/// `why` receives the predicate a refused answer failed (log-only, lane SR round 2): the wire code
+/// stays `offer_response_invalid` for every one of them.
 fn read_offer<H: ChainHost>(
     host: &PinnedHost<H>,
     signer: &Identity,
     member: &Value,
     offer_id: Option<&str>,
     offset: u64,
+    why: &mut String,
 ) -> OResult<Value> {
     let seed = host.pin()?;
     let scope = binding(member, &json!("stage-discovery"), &json!("stage-discovery"))?;
@@ -745,9 +748,10 @@ fn read_offer<H: ChainHost>(
         "offset",
         "data",
     ];
-    let object = body
-        .as_object()
-        .ok_or(OwnerError("offer_response_invalid"))?;
+    let Some(object) = body.as_object() else {
+        "answer_not_object".clone_into(why);
+        return Err(OwnerError("offer_response_invalid"));
+    };
     if object.len() != allowed.len()
         || allowed.iter().any(|k| !object.contains_key(*k))
         || body["request_id"] != request_id
@@ -762,6 +766,27 @@ fn read_offer<H: ChainHost>(
             .iter()
             .any(|(k, v)| body[k] != *v)
     {
+        *why = if object.len() != allowed.len() || allowed.iter().any(|k| !object.contains_key(*k))
+        {
+            "answer_fields".into()
+        } else if body["request_id"] != request_id {
+            "answer_request_id".into()
+        } else if body["swarm_id"] != seed.coordinator.swarm_id() {
+            "answer_swarm_id".into()
+        } else if body["owner_node_id"] != seed.coordinator.seed_node_id()
+            || body["owner_endpoint_id"] != host.signer.endpoint_id()
+        {
+            "answer_owner".into()
+        } else if body["offset"] != offset {
+            "answer_offset".into()
+        } else if offer_id.is_none() && !body["data"].is_null() {
+            "answer_discovery_data".into()
+        } else {
+            format!(
+                "answer_scope:{}",
+                crate::hello_probe::mismatched(&scope, &body)
+            )
+        };
         return Err(OwnerError("offer_response_invalid"));
     }
     if end
@@ -788,6 +813,9 @@ fn read_offer<H: ChainHost>(
 
 /// Exercise the real signed staging-discovery carrier before naming the absent
 /// native collaborator. A receipt or offer alone MUST NOT promote the local agent.
+///
+/// Lane SR round 2: each distinct outcome per node is logged once (`l11_hello_owner_bootstrap`),
+/// with the exact predicate behind a refusal; the returned codes are unchanged.
 pub fn bootstrap<H: ChainHost>(
     core: &H,
     node: &str,
@@ -795,6 +823,43 @@ pub fn bootstrap<H: ChainHost>(
     deployment: &str,
     offer_id: &str,
 ) -> OResult<()> {
+    let mut why = String::from("-");
+    let mut expires_in = f64::NAN;
+    let result = bootstrap_offer(
+        core,
+        node,
+        run,
+        deployment,
+        offer_id,
+        &mut why,
+        &mut expires_in,
+    );
+    let outcome = match &result {
+        Ok(true) => "started",
+        Ok(false) => "already_running",
+        Err(error) => error.0,
+    };
+    crate::hello_probe::on_change(
+        &format!("owner_bootstrap {node}"),
+        &format!("{run} {offer_id} {outcome} {why}"),
+        format_args!(
+            "l11_hello_owner_bootstrap wall_ms={} node={} run={run} offer={} outcome={outcome} reason={why} offer_expires_in_s={expires_in:.1}",
+            crate::hello_probe::wall_ms(),
+            crate::hello_probe::short(&json!(node)),
+            crate::hello_probe::short(&json!(offer_id)),
+        ),
+    );
+    result.map(drop)
+}
+fn bootstrap_offer<H: ChainHost>(
+    core: &H,
+    node: &str,
+    run: &str,
+    deployment: &str,
+    offer_id: &str,
+    why: &mut String,
+    expires_in: &mut f64,
+) -> OResult<bool> {
     let backend = Backend::<H> {
         core: core.downgrade(),
         published: BTreeMap::new(),
@@ -816,19 +881,38 @@ pub fn bootstrap<H: ChainHost>(
     if signer.verification_key_digest() != member["verification_key_digest"] {
         return Err(OwnerError("managed_control_member_stale"));
     }
-    let body = read_offer(&host, &signer, &member, None, 0)?;
+    let body = read_offer(&host, &signer, &member, None, 0, why)?;
     let actual = &body["offer"];
     let expected = binding(&member, &json!(run), &json!(deployment))?;
+    let now = host.wall_seconds();
+    *expires_in = crate::hello_probe::expires_in(actual, now);
     if actual["offer_id"] != offer_id
-        || actual["expires_at"]
-            .as_f64()
-            .is_none_or(|t| t <= host.wall_seconds())
+        || actual["expires_at"].as_f64().is_none_or(|t| t <= now)
         || expected
             .as_object()
             .ok_or(OwnerError("offer_response_invalid"))?
             .iter()
             .any(|(k, v)| actual[k] != *v)
     {
+        // The three predicates this one code covers (rv43: offer missing or expired once the
+        // local agent re-entered the bootstrap past the offer's 300 s life, vs a stale binding).
+        *why = if actual.is_null() {
+            "offer_missing".into()
+        } else if actual["offer_id"] != offer_id {
+            format!(
+                "offer_id_mismatch:{}",
+                crate::hello_probe::short(&actual["offer_id"])
+            )
+        } else if actual["expires_at"].as_f64().is_none() {
+            "offer_expiry_missing".into()
+        } else if actual["expires_at"].as_f64().is_some_and(|t| t <= now) {
+            "offer_expired".into()
+        } else {
+            format!(
+                "binding_mismatch:{}",
+                crate::hello_probe::mismatched(&expected, actual)
+            )
+        };
         return Err(OwnerError("offer_response_invalid"));
     }
     // This model-free archive is the exact canonical source-produced input:
@@ -873,18 +957,21 @@ pub fn bootstrap<H: ChainHost>(
             &member,
             Some(offer_id),
             archive.len() as u64,
+            why,
         )?;
         if result["offer"] != *actual {
             return Err(OwnerError("offer_changed"));
         }
-        let data = base64::engine::general_purpose::STANDARD
-            .decode(
-                result["data"]
-                    .as_str()
-                    .ok_or(OwnerError("offer_response_invalid"))?,
-            )
-            .map_err(|_| OwnerError("offer_response_invalid"))?;
+        let Some(data) = result["data"].as_str() else {
+            "chunk_data_missing".clone_into(why);
+            return Err(OwnerError("offer_response_invalid"));
+        };
+        let Ok(data) = base64::engine::general_purpose::STANDARD.decode(data) else {
+            "chunk_data_not_base64".clone_into(why);
+            return Err(OwnerError("offer_response_invalid"));
+        };
         if data.len() as u64 != chunk.min((wanted.len() - archive.len()) as u64) {
+            "chunk_length".clone_into(why);
             return Err(OwnerError("offer_response_invalid"));
         }
         archive.extend(data);
@@ -981,9 +1068,69 @@ fn own_stage_call<H: ChainHost>(
                 .filter(|k| *k != "run_id" && *k != "deployment_id")
                 .any(|k| offer[k] != scope[k]))
     {
+        // Lane SR round 2: the predicate behind this code (log-only).
+        let why = if body["request_id"] != request_id {
+            "answer_request_id".to_owned()
+        } else if body["swarm_id"] != seed.coordinator.swarm_id() {
+            "answer_swarm_id".to_owned()
+        } else {
+            let mut member_scope = scope.clone();
+            if let Some(fields) = member_scope.as_object_mut() {
+                fields.remove("run_id");
+                fields.remove("deployment_id");
+            }
+            format!(
+                "binding_mismatch:{}",
+                crate::hello_probe::mismatched(&member_scope, offer)
+            )
+        };
+        crate::hello_probe::on_change(
+            &format!("owner_stage_call {node} {protocol}"),
+            &format!("{} {why}", offer["offer_id"]),
+            format_args!(
+                "l11_hello_offer_invalid wall_ms={} side=local site=stage_call node={} protocol={protocol} offer={} reason={why}",
+                crate::hello_probe::wall_ms(),
+                crate::hello_probe::short(&json!(node)),
+                crate::hello_probe::short(&offer["offer_id"]),
+            ),
+        );
         return Err(OwnerError("offer_response_invalid"));
     }
     Ok(body)
+}
+/// `actor.status()['native_control']` of the owner's own contributor `node` (the member's own
+/// `native_control` in `crate::member_agent`, demo_target.py:516-517 @ f4e366e9): its hello worker
+/// `running` while its pump thread runs (an owner Stop leaves it awaiting cleanup), `blocked` with
+/// the code of a start whose cleanup is unproven, `stopped` once the thread ended, else nothing.
+pub fn native_control<H: ChainHost>(core: &H, node: &str) -> OResult<Value> {
+    viewed(core, |c| {
+        if c.run
+            .contributor
+            .as_ref()
+            .is_none_or(|local| local.node != node)
+        {
+            return json!({});
+        }
+        match (c.bootstrap.as_ref(), c.bootstrap_failure.as_ref()) {
+            (Some(worker), _) if worker.running() => json!({"state": "running"}),
+            (_, Some(failure)) => json!({"state": "blocked", "error_code": failure.code()}),
+            (Some(_), None) => json!({"state": "stopped"}),
+            (None, None) => json!({}),
+        }
+    })
+}
+/// `/api/control/stop` of the owner's own contributor `node`: close its hello worker
+/// ([`target::close`]).
+pub fn stop_native<H: ChainHost>(core: &H, node: &str) -> OResult<()> {
+    if viewed(core, |c| {
+        c.run
+            .contributor
+            .as_ref()
+            .is_none_or(|local| local.node != node)
+    })? {
+        return Err(OwnerError("managed_control_member_stale"));
+    }
+    target::close(core)
 }
 const CLEANUP_READ: &str = "mycelium.managed_stage_cleanup_read.v1";
 const CLEANUP_ACK: &str = "mycelium.managed_stage_cleanup_ack.v1";
@@ -1032,6 +1179,150 @@ pub fn cleanup<H: ChainHost>(core: &H, node: &str, request: &Value) -> OResult<(
         CLEANUP_STATE,
     )
     .map(drop)
+}
+
+/// Lane SR round 2: the hello collection's operations on the log (`l11_hello_collect`), per node:
+/// open, hello, stop, current binding, with the outcome code and the time each took. Each distinct
+/// outcome per node and operation is logged once; the sessions and their results are the inner
+/// factory's, unchanged.
+struct ProbedSessions {
+    inner: Box<dyn HelloSessions>,
+    run: String,
+    /// Sessions opened per node so far (the collection attempt a line belongs to).
+    opens: BTreeMap<String, u64>,
+}
+fn collect_line(run: &str, node: &str, attempt: u64, op: &str, outcome: &str, started: Instant) {
+    crate::hello_probe::on_change(
+        &format!("collect {node} {op}"),
+        &format!("{run} {outcome}"),
+        format_args!(
+            "l11_hello_collect wall_ms={} node={} run={run} attempt={attempt} op={op} outcome={outcome} elapsed_ms={}",
+            crate::hello_probe::wall_ms(),
+            crate::hello_probe::short(&json!(node)),
+            started.elapsed().as_millis(),
+        ),
+    );
+}
+impl HelloSessions for ProbedSessions {
+    fn run_id(&self) -> &str {
+        self.inner.run_id()
+    }
+    fn deployment_id(&self) -> &str {
+        self.inner.deployment_id()
+    }
+    fn bound_nodes(&self) -> std::collections::BTreeSet<String> {
+        self.inner.bound_nodes()
+    }
+    fn open(
+        &mut self,
+        node_id: &str,
+        timeout_seconds: f64,
+    ) -> Result<Box<dyn HelloSession + '_>, Option<String>> {
+        let attempt = self.opens.entry(node_id.to_owned()).or_insert(0);
+        *attempt = attempt.saturating_add(1);
+        let attempt = *attempt;
+        let started = Instant::now();
+        let opened = self.inner.open(node_id, timeout_seconds);
+        let outcome = match &opened {
+            Ok(_) => "ok",
+            Err(code) => code.as_deref().unwrap_or("session_failed"),
+        };
+        collect_line(&self.run, node_id, attempt, "open", outcome, started);
+        opened.map(|inner| -> Box<dyn HelloSession + '_> {
+            Box::new(ProbedSession {
+                inner,
+                run: self.run.clone(),
+                node: node_id.to_owned(),
+                attempt,
+            })
+        })
+    }
+    fn binding_current(&mut self, node_id: &str) -> bool {
+        let current = self.inner.binding_current(node_id);
+        if !current {
+            let attempt = self.opens.get(node_id).copied().unwrap_or(0);
+            collect_line(
+                &self.run,
+                node_id,
+                attempt,
+                "binding_current",
+                "member_not_current",
+                Instant::now(),
+            );
+        }
+        current
+    }
+}
+struct ProbedSession<'a> {
+    inner: Box<dyn HelloSession + 'a>,
+    run: String,
+    node: String,
+    attempt: u64,
+}
+impl HelloSession for ProbedSession<'_> {
+    fn send_hello(&mut self, command_id: &str) -> Result<Value, Option<String>> {
+        let started = Instant::now();
+        let answer = self.inner.send_hello(command_id);
+        let outcome = match &answer {
+            Ok(_) => "ok",
+            Err(code) => code.as_deref().unwrap_or("session_failed"),
+        };
+        collect_line(
+            &self.run,
+            &self.node,
+            self.attempt,
+            "hello",
+            outcome,
+            started,
+        );
+        answer
+    }
+    fn close(&mut self) -> Result<(), runtime::observe::CloseFailed> {
+        let started = Instant::now();
+        let closed = self.inner.close();
+        let outcome = if closed.is_err() {
+            "close_failed"
+        } else if self.inner.cleanup_error() {
+            "cleanup_error"
+        } else if self.inner.stop_response_ok() == Some(false) {
+            "stop_rejected"
+        } else {
+            "ok"
+        };
+        collect_line(
+            &self.run,
+            &self.node,
+            self.attempt,
+            "stop",
+            outcome,
+            started,
+        );
+        closed
+    }
+    fn cleanup_error(&self) -> bool {
+        self.inner.cleanup_error()
+    }
+    fn stop_response_ok(&self) -> Option<bool> {
+        self.inner.stop_response_ok()
+    }
+}
+
+/// `l11_hello_offer_<event>` for one owner offer effect (log-only), once per distinct outcome of
+/// that offer (the retire wait asks again on every pass until the member confirms its cleanup).
+fn offer_event(event: &str, offer: &Offer, failed: Option<&str>) {
+    crate::hello_probe::on_change(
+        &format!("offer_{event} {}", offer.offer_id),
+        failed.unwrap_or("ok"),
+        format_args!(
+            "l11_hello_offer_{event} wall_ms={} node={} run={} offer={} outcome={} expires_in_s={:.1}",
+            crate::hello_probe::wall_ms(),
+            crate::hello_probe::short(&offer.raw["target_node_id"]),
+            offer.raw["run_id"].as_str().unwrap_or("-"),
+            crate::hello_probe::short(&json!(offer.offer_id)),
+            failed.unwrap_or("ok"),
+            crate::hello_probe::expires_in(&offer.raw, now()),
+        ),
+    );
 }
 
 impl<H: ChainHost> ObservationBackend for Backend<H> {
@@ -1094,7 +1385,11 @@ impl<H: ChainHost> ObservationBackend for Backend<H> {
         let factory = ManagedSessionFactory::new(managed.owner.clone(), run, deployment, members)
             .map_err(|e| ObservationError(e.0))?;
         host.pin().map_err(observe)?;
-        Ok(Box::new(factory))
+        Ok(Box::new(ProbedSessions {
+            inner: Box::new(factory),
+            run: run.to_owned(),
+            opens: BTreeMap::new(),
+        }))
     }
     fn publish_offer(
         &mut self,
@@ -1144,26 +1439,57 @@ impl<H: ChainHost> ObservationBackend for Backend<H> {
                     Ok(raw)
                 },
             )
-            .map_err(observe)?;
-        Ok(Offer { offer_id: id, raw })
+            .map_err(observe);
+        match &raw {
+            Ok(raw) => crate::hello_probe::record(format_args!(
+                "l11_hello_offer_published wall_ms={} node={} run={run} offer={} expires_in_s={:.1}",
+                crate::hello_probe::wall_ms(),
+                crate::hello_probe::short(&json!(node)),
+                crate::hello_probe::short(&json!(id)),
+                crate::hello_probe::expires_in(raw, now()),
+            )),
+            Err(error) => crate::hello_probe::record(format_args!(
+                "l11_hello_offer_publish_failed wall_ms={} node={} run={run} code={}",
+                crate::hello_probe::wall_ms(),
+                crate::hello_probe::short(&json!(node)),
+                error.0,
+            )),
+        }
+        Ok(Offer {
+            offer_id: id,
+            raw: raw?,
+        })
     }
     fn retire_offer(&mut self, offer: &Offer) -> Result<Value, ObservationError> {
         let receipt = self
             .offer_effect(offer, |m, now| {
                 m.retire_stage(&offer.raw, || now).map_err(owner_error)
             })
-            .map_err(observe)?;
+            .map_err(observe);
+        offer_event(
+            "retired",
+            offer,
+            receipt.as_ref().err().map(|e| e.0.as_str()),
+        );
+        let receipt = receipt?;
         // A retired offer is final (its receipt kept: `retire_offer`, managed_offers.py:158-170 @
         // f4e366e9): the run's teardown never asks for its cleanup again.
         self.published.remove(&offer.offer_id);
         Ok(receipt)
     }
     fn request_stage_cleanup(&mut self, offer: &Offer) -> Result<(), ObservationError> {
-        self.offer_effect(offer, |m, now| {
-            m.request_stage_cleanup(&offer.raw, || now)
-                .map_err(owner_error)
-        })
-        .map_err(observe)
+        let requested = self
+            .offer_effect(offer, |m, now| {
+                m.request_stage_cleanup(&offer.raw, || now)
+                    .map_err(owner_error)
+            })
+            .map_err(observe);
+        offer_event(
+            "cleanup_requested",
+            offer,
+            requested.as_ref().err().map(|e| e.0.as_str()),
+        );
+        requested
     }
     fn rebuild_observation(
         &mut self,

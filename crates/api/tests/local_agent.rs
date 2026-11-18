@@ -437,6 +437,8 @@ struct WorkHost {
     transport: bool,
     sink: Vec<Value>,
     actions: Vec<Value>,
+    /// The code the host's bootstrap refuses with (its offer is gone), when set.
+    bootstrap_refusal: Option<String>,
 }
 impl WorkHost {
     fn new(root: PathBuf) -> Self {
@@ -458,6 +460,7 @@ impl WorkHost {
             transport: true,
             sink: Vec::new(),
             actions: Vec::new(),
+            bootstrap_refusal: None,
         }
     }
     fn slices(&self) -> PathBuf {
@@ -524,6 +527,9 @@ impl AgentHost for WorkHost {
     /// recorded route (no recorded scenario announces a bootstrap offer).
     fn bootstrap(&mut self, _run: &str, _deployment: &str, offer: &str) -> Result<(), Failure> {
         self.action("bootstrap", json!({"offer_id": offer}));
+        if let Some(code) = &self.bootstrap_refusal {
+            return Err(Failure::new("RuntimeError", code));
+        }
         self.native = json!({"state": "running"});
         Ok(())
     }
@@ -734,6 +740,63 @@ fn the_work_phase_bootstraps_only_for_the_bootstrap_offer_it_holds() {
         drop(agent);
         fs::remove_dir_all(&root).unwrap_or_default();
     }
+}
+
+/// Lane SR round 2 (rv42/rv43 physical second run: the owner's own Mac ended observe as
+/// `offer_response_invalid` while its hello worker still ran). Every agent, the owner's own
+/// contributor included, starts its hello worker ONCE per announced bootstrap offer: v0.1.4 bootstraps
+/// only an offer `not in self._bootstrap_done` and afterwards reports `bootstrap_running` from its
+/// worker's own state through collect / observe / compile (`demo_target.py:494-517 @ f4e366e9`).
+/// v0.2's owner-local branch re-entered the bootstrap on every early-phase tick, re-reading the offer
+/// each time; once the offer outlived its 300 s life (`managed_offers.py:107`; or was retired) the
+/// re-read found none and the card turned `offer_response_invalid` with the worker still running.
+/// Here the owner's own agent (no pending-offer reader, as the packaged host's) bootstraps in
+/// observe, then the host's bootstrap refuses as the expired re-read does, past the offer's life.
+#[test]
+fn the_owners_own_contributor_bootstraps_once_per_offer_past_the_offers_life() {
+    let fx = work_fixture();
+    let work = work_announcement(&fx);
+    let root = scratch("bootstrap-once-per-offer");
+    let mut host = WorkHost::new(root.clone());
+    let mut agent = LocalAgent::new();
+    let observe = |offer: &str| {
+        json!({"phase": "observe", "run_id": work["run_id"], "deployment_id": work["deployment_id"],
+            "model": work["model"], "bootstrap_offer_id": offer})
+    };
+    let bootstraps = |host: &WorkHost| host.actions.iter().filter(|a| a[0] == "bootstrap").count();
+    host.announcement = Some(observe("bootstrap-offer-1"));
+    // The first attempt refuses (nothing started): the agent tries again on its next tick.
+    host.bootstrap_refusal = Some("offer_response_invalid".into());
+    let status = agent.tick(&mut host);
+    assert_eq!(status["state"], "error", "{status}");
+    host.bootstrap_refusal = None;
+    let status = agent.tick(&mut host);
+    assert_eq!(status["state"], "bootstrap_running", "{status}");
+    assert_eq!(bootstraps(&host), 2, "{:?}", host.actions);
+    // The offer's life ends while observe still runs: a re-read would find no offer now.
+    host.bootstrap_refusal = Some("offer_response_invalid".into());
+    host.t += 301.0;
+    for phase in ["observe", "observe", "compile"] {
+        let mut a = observe("bootstrap-offer-1");
+        a["phase"] = json!(phase);
+        host.announcement = Some(a);
+        let status = agent.tick(&mut host);
+        assert_eq!(
+            status["state"], "bootstrap_running",
+            "{phase}: the started worker is reported, the offer is not read again: {status}"
+        );
+    }
+    assert_eq!(bootstraps(&host), 2, "once per offer: {:?}", host.actions);
+    // A stopped worker reads `reported` in the early phases, as the joined Mac's card.
+    host.native = json!({"state": "stopped"});
+    assert_eq!(agent.tick(&mut host)["state"], "reported");
+    // A NEW announced offer is bootstrapped again.
+    host.bootstrap_refusal = None;
+    host.announcement = Some(observe("bootstrap-offer-2"));
+    assert_eq!(agent.tick(&mut host)["state"], "bootstrap_running");
+    assert_eq!(bootstraps(&host), 3, "{:?}", host.actions);
+    drop(agent);
+    fs::remove_dir_all(&root).unwrap_or_default();
 }
 
 /// Proves: the HTTP repository fallback (S1 model download) is never used for a slice: without an owner-served

@@ -382,6 +382,35 @@ impl<H: ChainHost> Host<H> {
             || body["deployment_id"] != "stage-discovery"
             || (removed && body["ack"] != ack)
         {
+            // Lane SR round 2: the predicate behind this one code (log-only).
+            let why = if body["request_id"] != s["request_id"] {
+                "answer_request_id".to_owned()
+            } else if body["swarm_id"] != self.swarm || body["owner_node_id"] != self.owner {
+                "answer_owner".to_owned()
+            } else if body["offer"] != self.offer {
+                if body["offer"].is_null() {
+                    "offer_missing".to_owned()
+                } else {
+                    "offer_changed".to_owned()
+                }
+            } else if body["run_id"] != "stage-discovery"
+                || body["deployment_id"] != "stage-discovery"
+            {
+                "answer_discovery_scope".to_owned()
+            } else if removed && body["ack"] != ack {
+                "cleanup_ack_changed".to_owned()
+            } else {
+                let mut scope = self.scope.clone();
+                if let Some(scope) = scope.as_object_mut() {
+                    scope.remove("run_id");
+                    scope.remove("deployment_id");
+                }
+                format!(
+                    "answer_binding:{}",
+                    crate::hello_probe::mismatched(&scope, &body)
+                )
+            };
+            stage_ack_line("local", &self.scope, &self.offer, removed, &why);
             return Err(OwnerError("offer_response_invalid"));
         }
         if end
@@ -451,6 +480,21 @@ impl<H: ChainHost> TargetHost for Host<H> {
         self.ack(root, removed).map_err(|e| e.0)
     }
 }
+/// `l11_hello_stage_ack` (lane SR round 2): a refused stage / cleanup ACK answer and the predicate
+/// it failed, once per distinct outcome (log-only).
+pub(crate) fn stage_ack_line(side: &str, scope: &Value, offer: &Value, removed: bool, why: &str) {
+    crate::hello_probe::on_change(
+        &format!("stage_ack {side} {} {removed}", scope["target_node_id"]),
+        &format!("{} {} {why}", scope["run_id"], offer["offer_id"]),
+        format_args!(
+            "l11_hello_stage_ack wall_ms={} side={side} node={} run={} offer={} removed={removed} outcome=offer_response_invalid reason={why}",
+            crate::hello_probe::wall_ms(),
+            crate::hello_probe::short(&scope["target_node_id"]),
+            scope["run_id"].as_str().unwrap_or("-"),
+            crate::hello_probe::short(&offer["offer_id"]),
+        ),
+    );
+}
 /// The admitted hello-only helper program this installation runs (`bootstrap-program.json`).
 pub fn program(root: &Path) -> OResult<TrustedBootstrap> {
     crate::bootstrap_process::installed_program(root).map_err(OwnerError)
@@ -465,12 +509,14 @@ pub fn spawn<H: TargetHost + 'static>(
     let process = pump.process_control();
     let worker_fence = fence.clone();
     let owner_wake = wake.clone();
+    let mut probe = crate::hello_probe::PumpProbe::started("local", &scope);
     let join = thread::spawn(move || {
         let result: OResult<()> = (|| {
             let mut cadence = Cadence::new()?;
             loop {
                 let generation = wake.generation()?;
                 let outcome = pump.step_outcome().map_err(OwnerError)?;
+                probe.step(&outcome);
                 if matches!(outcome, StepOutcome::Completed { stopped: true }) {
                     while worker_fence.check().is_ok() {
                         let g = wake.generation()?;
@@ -482,6 +528,7 @@ pub fn spawn<H: TargetHost + 'static>(
             }
             Ok(())
         })();
+        probe.ended(result.as_ref().err().map_or("ok", |e| e.0));
         let recorded = if let Err(e) = &result {
             pump.record_failure(e.0)
         } else {
@@ -512,6 +559,8 @@ pub fn spawn<H: TargetHost + 'static>(
         failure: None,
     }
 }
+/// Start the owner's own contributor's hello worker for `offer`: `Ok(true)` when a new worker
+/// started, `Ok(false)` when this scope's worker already runs.
 pub fn start<H: ChainHost>(
     core: &H,
     pinned: PinnedHost<H>,
@@ -519,7 +568,7 @@ pub fn start<H: ChainHost>(
     scope: Value,
     offer: Value,
     archive: Vec<u8>,
-) -> OResult<()> {
+) -> OResult<bool> {
     let lifecycle = viewed(core, |c| c.bootstrap_lifecycle.clone())?;
     // Reserve under Stop's guard before startup side effects. The signer pointer
     // identifies this contributor incarnation, not merely a reusable member ID.
@@ -546,7 +595,7 @@ pub fn start<H: ChainHost>(
         })
     })? {
         return if current {
-            Ok(())
+            Ok(false)
         } else {
             Err(OwnerError("control_restart_requires_reconciliation"))
         };
@@ -648,7 +697,7 @@ pub fn start<H: ChainHost>(
         }
         return Err(OwnerError("managed_owner_closed"));
     }
-    Ok(())
+    Ok(true)
 }
 #[cfg(test)]
 mod cadence_tests {
