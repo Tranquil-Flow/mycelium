@@ -787,14 +787,17 @@ pub trait Cell {
 /// own loop ends with the host), the public seed path for a joining member.
 impl<M: ManagedSlot> Cell for Mutex<Authority<M>> {
     type Managed = M;
+    // Probed (log-only): a wait or hold of a second or more prints its call site (RV42 S1 RCA).
+    #[track_caller]
     fn with<R>(&self, f: impl FnOnce(&mut HostView<'_, M>) -> R) -> R {
-        match self.lock() {
+        match crate::probe::lock(self) {
             Ok(mut authority) => f(&mut HostView::bare(&mut authority)),
             Err(poisoned) => f(&mut HostView::bare(&mut poisoned.into_inner())),
         }
     }
+    #[track_caller]
     fn try_with<R>(&self, f: impl FnOnce(&mut HostView<'_, M>) -> R) -> Option<R> {
-        self.lock()
+        crate::probe::lock(self)
             .ok()
             .map(|mut authority| f(&mut HostView::bare(&mut authority)))
     }

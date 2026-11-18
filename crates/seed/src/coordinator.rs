@@ -19,7 +19,7 @@ use protocol::{
 use serde_json::{Value, json};
 use std::{
     path::Path,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{Arc, Mutex},
 };
 
 pub type Clock = Box<dyn Fn() -> f64 + Send + Sync>;
@@ -276,11 +276,11 @@ impl Coordinator {
         })
     }
 
-    fn lock(&self) -> MutexGuard<'_, Inner> {
-        match self.inner.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        }
+    /// The coordinator lock, probed (log-only, [`crate::probe`]): a wait or hold of a second or more
+    /// names the caller of the public method that took it (RV42 S1 relay-502 RCA).
+    #[track_caller]
+    fn lock(&self) -> crate::probe::Probed<'_, Inner> {
+        crate::probe::lock_or_poisoned(&self.inner)
     }
 
     fn now(&self) -> Result<f64, SeedError> {
@@ -307,11 +307,13 @@ impl Coordinator {
     pub fn shared_signer(&self) -> Arc<Identity> {
         Arc::clone(&self.signer)
     }
+    #[track_caller]
     pub fn seed_url(&self) -> Option<String> {
         self.lock().seed_url.clone()
     }
 
     /// `bind_seed_url`: the first binding wins; a different later one is `seed_url_already_bound`.
+    #[track_caller]
     pub fn bind_seed_url(&self, url: &str) -> Result<(), SeedError> {
         if url.is_empty() || url.trim() != url {
             return Err(SeedError::accident("seed_option_invalid"));
@@ -334,6 +336,7 @@ impl Coordinator {
     }
 
     /// `mint_invite`: a seed-pinned bundle with one signed single-use token.
+    #[track_caller]
     pub fn mint_invite(&self, nonce: &str, ttl_seconds: u64) -> Result<Value, SeedError> {
         let inner = self.lock();
         let url = Self::require_url(&inner)?;
@@ -388,12 +391,14 @@ impl Coordinator {
     }
 
     /// `identity_envelope`: the seed's signed, time-windowed self statement.
+    #[track_caller]
     pub fn identity_envelope(&self) -> Result<Value, SeedError> {
         let inner = self.lock();
         self.signed_statement(&inner, SEED_IDENTITY_PROTOCOL, None)
     }
 
     /// `receipt_envelope`: the seed's signed receipt for one accepted member message.
+    #[track_caller]
     pub fn receipt_envelope(&self, message_id: &str) -> Result<Value, SeedError> {
         require_segment(message_id)?;
         let inner = self.lock();
@@ -488,6 +493,7 @@ impl Coordinator {
     }
 
     /// `accept_join` with a string token.
+    #[track_caller]
     pub fn accept_join(
         &self,
         invite_token: &str,
@@ -498,6 +504,7 @@ impl Coordinator {
 
     /// `accept_join` for the HTTP body's untyped `invite_token` / `join_envelope` (a non-string token skips
     /// the committed-retry lookup, as `isinstance(invite_token, str)` does, and is `invite_malformed`).
+    #[track_caller]
     pub fn accept_join_value(
         &self,
         invite_token: &Value,
@@ -560,6 +567,7 @@ impl Coordinator {
 
     /// `SqliteInviteRegistry.consume`: atomically consume one live nonce (the other pairing paths use this
     /// registry too); a nonce already consumed is `invite_replayed`.
+    #[track_caller]
     pub fn consume_invite(&self, nonce: &str, now: f64, expires_at: f64) -> Result<(), SeedError> {
         if nonce.is_empty() {
             return Err(SeedError::new("invite_field_invalid"));
@@ -574,6 +582,7 @@ impl Coordinator {
     }
 
     /// `accept_resume`: fence one durable principal's next incarnation, no invite consumed.
+    #[track_caller]
     pub fn accept_resume(&self, resume_envelope: &Value) -> Result<Value, SeedError> {
         let mut guard = self.lock();
         let inner = &mut *guard;
@@ -620,6 +629,7 @@ impl Coordinator {
 
     /// `receive_member_message`: verify and record one member message; a heartbeat commits its signed
     /// lease renewal (read back with [`Coordinator::lease_renewal`]).
+    #[track_caller]
     pub fn receive_member_message(
         &self,
         envelope: &Value,
@@ -685,6 +695,7 @@ impl Coordinator {
     }
 
     /// `lease_renewal`: the signed renewal the seed committed for one heartbeat.
+    #[track_caller]
     pub fn lease_renewal(
         &self,
         node_id: &str,
@@ -764,6 +775,7 @@ impl Coordinator {
     }
 
     /// `member`: one member's projection with its liveness at the coordinator clock.
+    #[track_caller]
     pub fn member(&self, node_id: &str) -> Result<Value, SeedError> {
         require_segment(node_id)?;
         let inner = self.lock();
@@ -793,6 +805,7 @@ impl Coordinator {
     /// operator in another process. Callback side effects are NOT atomically durable
     /// with this read-only transaction, nor rolled back on error/panic/commit failure.
     /// This is not a cross-database journal or a global crash-atomic capability.
+    #[track_caller]
     pub fn with_current_member<R>(
         &self,
         node_id: &str,
@@ -833,6 +846,7 @@ impl Coordinator {
     }
 
     /// `members`: every projection ordered by node id, optionally one peer class.
+    #[track_caller]
     pub fn members(&self, peer_class: Option<&str>) -> Result<Vec<Value>, SeedError> {
         if let Some(class) = peer_class {
             require_segment(class)?;
@@ -850,6 +864,7 @@ impl Coordinator {
 
     /// `advance_member_generation`: durably fence a member into STOPPING / STOPPED under its next
     /// generation (revocation).
+    #[track_caller]
     pub fn advance_member_generation(
         &self,
         node_id: &str,
@@ -885,12 +900,14 @@ impl Coordinator {
 
 impl Coordinator {
     /// `SqliteSeedState.authority_state`: the current authority generation and the latest rotation.
+    #[track_caller]
     pub fn authority_state(&self) -> Result<Value, SeedError> {
         Ok(self.lock().table.authority_state())
     }
 
     /// `SqliteSeedState.begin_authority_rotation`: persist one monotonic pending authority transition (the
     /// operator's `begin_seed_key_rotation` builds and signs the transition; this is its state write).
+    #[track_caller]
     pub fn begin_authority_rotation(&self, transition: &Value) -> Result<(), SeedError> {
         let mut guard = self.lock();
         let inner = &mut *guard;
@@ -902,6 +919,7 @@ impl Coordinator {
     /// `SqliteSeedState.complete_authority_rotation`: atomically promote one pending transition in durable
     /// metadata. The running coordinator keeps signing with its current key until it is restarted under the new
     /// one (a restart under the old key is then refused `seed_state_identity_mismatch`).
+    #[track_caller]
     pub fn complete_authority_rotation(
         &self,
         authority_generation: u64,
@@ -937,6 +955,7 @@ impl Coordinator {
 
     /// `SqliteSeedState.seed_rotation_acknowledgements`: the durable acknowledgement rows of one authority
     /// generation, ordered by node id.
+    #[track_caller]
     pub fn rotation_acknowledgements(&self, authority_generation: u64) -> Vec<Value> {
         self.lock()
             .table
@@ -944,16 +963,19 @@ impl Coordinator {
     }
 
     /// `SqliteSeedState.load_members`: the committed member rows (operator use).
+    #[track_caller]
     pub fn member_rows(&self) -> Vec<seed_coordinator::Member> {
         self.lock().table.rows()
     }
 
     /// The envelope `GET /seed/rotation` serves (`SeedHTTPServer(rotation_envelope=...)`; `None` answers
     /// `404 seed_rotation_absent`). The caller verifies it (`protocol::seed_transition::verify`) before setting it.
+    #[track_caller]
     pub fn set_rotation_envelope(&self, envelope: Option<Value>) {
         self.lock().rotation_envelope = envelope;
     }
 
+    #[track_caller]
     pub fn rotation_envelope(&self) -> Option<Value> {
         self.lock().rotation_envelope.clone()
     }

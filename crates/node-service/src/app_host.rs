@@ -1109,7 +1109,7 @@ impl Host for PackagedHost {
     /// then answers the refusal's code). A poisoned authority is no owner (fail closed).
     fn owner(&self) -> bool {
         self.loaded()
-            .is_none_or(|authority| authority.lock().is_ok_and(|a| !a.target))
+            .is_none_or(|authority| api::probe::lock(authority).is_ok_and(|a| !a.target))
     }
     /// The code the state was refused with at bind (`Authority::load`), or its seed's reopen.
     fn installation_refused(&self) -> Option<&'static str> {
@@ -1360,7 +1360,7 @@ impl Host for PackagedHost {
     /// (app.py:1802-1806); `error_http` is `None` for a consent error (control_failures.py:24-27).
     fn standing_bind_failed(&mut self, code: &'static str) {
         if let Some(authority) = self.loaded() {
-            let mut a = authority.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut a = api::probe::lock_or_poisoned(authority);
             a.recorded.standing_error = Some(code.to_owned());
             a.recorded.standing_error_http = None;
         }

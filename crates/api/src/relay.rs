@@ -396,6 +396,11 @@ fn accept_loop(listener: &TcpListener, shared: &Arc<ProxyShared>) {
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
             .is_ok();
         if !acquired {
+            // Log-only probe (RV42 S1 RCA): the public front answers its own 502 for this one.
+            eprintln!(
+                "l11_relay_slots_exhausted slots={MAX_CONNECTIONS} wall_ms={}",
+                ::seed::probe::wall_ms()
+            );
             stream.shutdown(Shutdown::Both).unwrap_or(());
             continue;
         }
@@ -693,6 +698,7 @@ fn options(req: &Req, stream: &mut TcpStream) {
     reply(stream, 204, b"", "application/json", false, &SWARM_CORS);
 }
 fn forward(shared: &Arc<ProxyShared>, req: &mut Req, stream: &mut TcpStream) {
+    let started = Instant::now();
     if route_unknown(&req.path) {
         return error_reply(stream, 404, "relay_route_unknown", &[]);
     }
@@ -715,7 +721,10 @@ fn forward(shared: &Arc<ProxyShared>, req: &mut Req, stream: &mut TcpStream) {
     let body = match read_framed(req, Framing::Backend) {
         Ok(body) => body,
         Err(Framed::Invalid) => return error_reply(stream, 400, "relay_frame_invalid", &[]),
-        Err(Framed::Io) => return error_reply(stream, 502, "relay_backend_unavailable", &[]),
+        Err(Framed::Io) => {
+            backend_unavailable_probe(&req.path, "request_read", started);
+            return error_reply(stream, 502, "relay_backend_unavailable", &[]);
+        }
     };
     let backend = lock(&shared.handlers).backend.clone();
     let Some(backend) = backend else {
@@ -742,9 +751,22 @@ fn forward(shared: &Arc<ProxyShared>, req: &mut Req, stream: &mut TcpStream) {
             error_reply(stream, 400, "relay_frame_invalid", &[])
         }
         Err(BackendError::Unavailable) => {
-            error_reply(stream, 502, "relay_backend_unavailable", &[])
+            backend_unavailable_probe(&req.path, "hop", started);
+            error_reply(stream, 502, "relay_backend_unavailable", &[]);
         }
     }
+}
+/// Log-only probe (RV42 S1 relay-502 RCA): the proxy's OWN `502 relay_backend_unavailable`, with
+/// the route (no query: `route_unknown` refused any `?`), what failed (`request_read`: the body from
+/// the public front; `hop`: the verified-TLS hop into the seed, 5 s per step) and the time since the
+/// request head was read. A joined Mac logs every 502 as `code=None`; this line tells the proxy's
+/// own answer from the front's.
+fn backend_unavailable_probe(path: &str, stage: &str, started: Instant) {
+    eprintln!(
+        "l11_relay_backend_unavailable path={path} stage={stage} elapsed_ms={} wall_ms={}",
+        started.elapsed().as_millis(),
+        ::seed::probe::wall_ms()
+    );
 }
 enum Framed {
     Invalid,

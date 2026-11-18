@@ -813,8 +813,7 @@ impl DesktopServices {
                     .actions
                     .exclusive(|| {
                         let owner = self.authority.as_ref().is_some_and(|authority| {
-                            authority
-                                .lock()
+                            api::probe::lock(authority)
                                 .is_ok_and(|a| !a.target && a.owner_authority().is_some())
                         });
                         self.network.reach_action(body, owner)

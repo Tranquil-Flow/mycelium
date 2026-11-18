@@ -128,7 +128,7 @@ impl Network {
         Ok(())
     }
     pub fn sync_work_session(&self, authority: &Mutex<Authority>) {
-        let a = lock(authority);
+        let a = lock_authority(authority);
         // A renewal temporarily moves the Session out. Retain the preceding snapshot only
         // during that flight, and only while it stands in (lane FLK, `api::renewal`: not after
         // it unwound, ran past its deadline or was refused); its lease still bounds the resident
@@ -204,7 +204,7 @@ impl PackagedMember {
                 return Err(code);
             }
         } else {
-            let root = lock(&self.authority).root.clone();
+            let root = lock_authority(&self.authority).root.clone();
             let (identity, _, _) = app_host::identity(&root).map_err(|e| e.code.to_owned())?;
             // D1 / D3: the signed mode, or a named refusal on this Mac's card and in its report
             // to the owner (never a silent fallback, never the owner's timeout).

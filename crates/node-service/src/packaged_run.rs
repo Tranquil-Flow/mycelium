@@ -57,6 +57,12 @@ pub use chat::{RunChatRoute, chat_run};
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
+/// [`lock`] for the authority, probed (log-only, `api::probe`): a wait or hold of a second or more
+/// prints its call site (RV42 S1 relay-502 RCA).
+#[track_caller]
+fn lock_authority(authority: &Mutex<Authority>) -> api::probe::Probed<'_, Authority> {
+    api::probe::lock_or_poisoned(authority)
+}
 
 /// The managed control owner this host binds on its owner's seed (`api::owner_observation`).
 pub type Managed = owner_observation::Managed<PackagedRun>;
@@ -257,7 +263,7 @@ impl RunHost for PackagedRun {
         let closed = self.node.closed().unwrap_or(true);
         let left = self.network.left();
         let relay_absent = matches!(self.network.state(), RelayState::Absent);
-        let mut authority = lock(&self.authority);
+        let mut authority = lock_authority(&self.authority);
         let mut run = lock(&self.run);
         let result = f(&mut RunView {
             authority: &mut authority,
@@ -369,7 +375,7 @@ impl ChainHost for PackagedRun {
     fn try_with<R>(&self, f: impl FnOnce(&mut ChainView<'_, Self>) -> R) -> Option<R> {
         let closed = self.node.closed().unwrap_or(true);
         let acquisition = (self.model.acquisition)();
-        let mut authority = self.authority.lock().ok()?;
+        let mut authority = api::probe::lock(&self.authority).ok()?;
         let mut run = self.run.lock().ok()?;
         let mut custody = self.custody.lock().ok()?;
         let Custody {
