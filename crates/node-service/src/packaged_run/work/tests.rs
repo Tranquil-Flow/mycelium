@@ -1152,3 +1152,40 @@ fn a_second_owner_run_in_one_process_reads_the_interfaces_again() {
     assert_eq!(error.code, "owner_work_network_unavailable");
     assert_eq!(reads.load(Ordering::SeqCst), 3);
 }
+/// Proves: L13-08 / rv48 certification (ledger 277). An automatic rollover's model step checks
+/// the run's member binding (`_check_rollover_members`, demo_chain.py:1072-1078 @ v0.1.4) over
+/// this Mac's local contributor and the current reports. It is not refused `not_ported`: that
+/// refusal failed all three continuation attempts at the 1,800 s worker wall (`rollover_failed`).
+#[test]
+fn a_rollovers_model_step_checks_its_members_instead_of_refusing_as_unported() {
+    use api::owner_ports::OwnerPorts;
+    use owner_run::steps::{exchange::ReportsPort as _, model::ModelPort as _};
+    let mut f = Fixture::new();
+    let mut ports = PackagedChainPorts::new(&f.host, None, None);
+    let _ = run_state(&mut f, &ports);
+    let local = f
+        .host
+        .with(|c| c.run.contributor.as_ref().unwrap().node.clone());
+    let mut reports = OwnerPorts::new(f.host.clone());
+    let mut members = serde_json::Map::new();
+    for node in [local.clone(), f.remote.clone()] {
+        let identity = reports.member_identity(&node);
+        members.insert(node, identity);
+    }
+    let binding = json!({"model": ["m", "c", "d"], "members": Value::Object(members)});
+    assert_eq!(
+        ports.model.check_rollover_members(&binding).map_err(|e| format!("{e:?}")),
+        Ok(()),
+        "the same members and identities continue"
+    );
+    let mut changed = binding.clone();
+    changed["members"]
+        .as_object_mut()
+        .unwrap()
+        .remove(&f.remote);
+    let refused = ports.model.check_rollover_members(&changed).unwrap_err();
+    let StepError::Refused(error) = refused else {
+        panic!("{refused:?}")
+    };
+    assert_eq!(error.code, "rollover_members_changed");
+}
