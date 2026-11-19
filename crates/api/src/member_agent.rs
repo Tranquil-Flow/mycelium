@@ -438,15 +438,12 @@ impl<H: MemberHost> MemberAgent<H> {
                 }
                 Err(_) => Err("member_work_exchange_poisoned".into()),
             };
-            if let Err(code) = publication {
-                host.close_work();
-                eprintln!("member_work_publication:{code}");
-                // `auto_poll_step` (standing_consent.py:357-363) reports BEFORE it accepts, and a
-                // refusal to accept work never suppresses the report. Returning here was the v0.2
-                // divergence: a joined Mac whose resource policy denies work (a battery-only Mac
-                // with `ac_only`) then never reported in at all, so the owner's run waited on
-                // "Joined Macs report in" forever while that Mac looked healthy on its own page.
-            }
+            settle_publication(&**host, publication);
+            // `auto_poll_step` (standing_consent.py:357-363) reports BEFORE it accepts, and a
+            // refusal to accept work never suppresses the report. Returning here was the v0.2
+            // divergence: a joined Mac whose resource policy denies work (a battery-only Mac
+            // with `ac_only`) then never reported in at all, so the owner's run waited on
+            // "Joined Macs report in" forever while that Mac looked healthy on its own page.
         }
         // `if report_due: outcome['report'] = app.auto_report('periodic')` (standing_consent.py:
         // 362-363), past the gates above, before the acceptor and the agent; `_auto_report` never
@@ -543,6 +540,13 @@ impl<H: MemberHost> MemberAgent<H> {
 }
 
 /// Close this Mac's bootstrap worker (its pump removes the stage and ACKs the cleanup).
+/// The end of one pass's work publication (announcement read + endpoint publish).
+fn settle_publication<H: MemberHost>(host: &H, publication: Result<(), String>) {
+    if let Err(code) = publication {
+        host.close_work();
+        eprintln!("member_work_publication:{code}");
+    }
+}
 fn close_worker<H: MemberHost>(host: &H) -> OResult<()> {
     let lifecycle = host.lifecycle()?;
     let _lifecycle = locked(&lifecycle)?;
@@ -1846,9 +1850,14 @@ mod settle_tests {
     struct Host {
         lifecycle: Arc<Mutex<()>>,
         slot: Mutex<(Option<Fake>, Option<CleanupFailure>, Arc<()>)>,
+        work_closes: std::sync::atomic::AtomicUsize,
     }
     impl MemberHost for Host {
         type Worker = Fake;
+        fn close_work(&self) {
+            self.work_closes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
         fn state(&self) -> OResult<HostState> {
             Ok(HostState {
                 root: PathBuf::new(),
@@ -2016,5 +2025,39 @@ mod settle_tests {
                 "{old} -> {wanted}: not closed"
             );
         }
+    }
+    fn closes_after(code: &str) -> usize {
+        let host = Host::default();
+        settle_publication(&host, Err(code.to_owned()));
+        host.work_closes.load(std::sync::atomic::Ordering::SeqCst)
+    }
+    #[test]
+    fn a_failed_relay_read_keeps_the_members_work() {
+        // rv47 s2 (ledger 265): B's charger attach stalled its relay reads for ~32 s; the first
+        // publication pass that failed `managed_control_unreachable` closed the member's work and
+        // the owner's run ended `member_operation_cancelled`. v0.1.4 contains a failed standing
+        // poll as `standing_error` and leaves running work alone (app.py:1201-1212 @ f4e366e9).
+        for code in [
+            "managed_control_unreachable",
+            "managed_control_response_timeout",
+            "managed_control_internal_error",
+        ] {
+            assert_eq!(closes_after(code), 0, "{code}: work must survive a transport failure");
+        }
+    }
+    #[test]
+    fn an_owner_refusal_still_closes_the_members_work() {
+        for code in [
+            "owner_pin_missing",
+            "member_work_run_changed",
+            "managed_control_member_stale",
+            "managed_owner_closed",
+            "member_work_exchange_poisoned",
+        ] {
+            assert_eq!(closes_after(code), 1, "{code}: an answer from the owner closes work");
+        }
+        let host = Host::default();
+        settle_publication(&host, Ok(()));
+        assert_eq!(host.work_closes.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 }
