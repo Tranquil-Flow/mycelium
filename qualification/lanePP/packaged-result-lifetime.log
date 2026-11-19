@@ -1,0 +1,22 @@
+   Compiling desktop v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/desktop)
+   Compiling node-service v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/node-service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.45s
+     Running tests/packaged_work.rs (target/debug/deps/packaged_work-e23cc47f263ebcbb)
+
+running 9 tests
+test a_run_names_why_the_two_macs_cannot_meet ... ok
+test the_app_default_work_transport_follows_this_macs_private_address ... ok
+test the_owners_portmapping_is_frozen_with_its_run ... ok
+l11_hello_agent_card wall_ms=1795086437253 remote=true run=run-s4cb2 phase=compile state=error detail=member_model_download_not_ported
+test enrolled_packaged_control_dispatches_without_pair_request_and_closes_all_owned_loops ... ok
+test result_lifetime::accepted_owner_process_update_retires_read_results_without_stopping_work ... ok
+test a_joined_mac_binds_in_the_mode_the_owner_signed_and_names_a_foreign_relay ... ok
+test packaged_standing_pass_publishes_real_work_endpoint_from_renewed_membership ... ok
+test a_joined_mac_whose_relay_is_unreachable_refuses_by_name_before_announcing_ready ... ok
+test a_signed_relay_run_never_binds_a_loopback_only_service_on_the_joined_mac ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.10s
+
+real 11.45
+user 13.18
+sys 4.24

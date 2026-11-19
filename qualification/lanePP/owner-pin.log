@@ -1,0 +1,29 @@
+   Compiling api v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/api)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.98s
+     Running tests/owner_pin.rs (target/debug/deps/owner_pin-f74a43a97b5f4a19)
+
+running 18 tests
+test an_announcement_without_the_pin_keeps_the_oracle_bytes_and_a_valid_signature ... ok
+test a_set_owner_pin_is_published_last_under_the_owner_signature ... ok
+test a_member_takes_the_pin_only_from_a_verified_well_formed_announcement ... ok
+test result_retention::round2::unchanged_refresh_preserves_unread_result_control ... ok
+test result_retention::lost_result_response_is_returned_by_the_next_signed_carrier_poll ... ok
+test result_retention::a_replacement_announced_owner_cannot_read_the_previous_owners_consumed_result ... ok
+test result_retention::round2::unchanged_refresh_preserves_same_authority_retry ... ok
+test result_retention::round2::same_endpoint_changed_signed_deployment_cannot_read_previous_result ... ok
+test the_member_control_endpoint_obeys_only_the_announced_owner_key ... ok
+test result_retention::round2::new_signed_owner_process_cannot_read_previous_result ... ok
+test result_retention::round2::same_endpoint_changed_signed_run_cannot_read_previous_result ... ok
+test result_retention::round2::returning_to_a_does_not_revive_an_unread_a_result ... ok
+test result_retention::round2::completion_published_after_repin_keeps_its_admission_authority ... ok
+test result_retention::round2::late_completion_does_not_revive_after_a_b_a ... ok
+test result_retention::round2::clearing_then_restoring_pin_does_not_revive_previous_result ... ok
+test result_retention::round2::replacement_service_has_no_previous_result_control ... ok
+test the_control_loop_answers_the_announced_owner_and_drops_any_other ... ok
+test result_retention::round2::unread_completion_is_not_returned_to_a_replacement_authority ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.21s
+
+real 2.98
+user 2.51
+sys 0.72

@@ -1,0 +1,5 @@
+    Checking api v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/api)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.66s
+real 0.73
+user 0.56
+sys 0.15

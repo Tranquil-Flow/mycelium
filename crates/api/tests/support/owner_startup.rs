@@ -18,6 +18,9 @@ use owner_run::steps::{
 };
 use work::Challenge;
 
+#[path = "owner_prepare_honesty.rs"]
+mod prepare_honesty;
+
 /// The challenge prompt (carrier test values) and the scripted output it expects.
 fn challenge(expected: &[u32]) -> Challenge {
     Challenge {

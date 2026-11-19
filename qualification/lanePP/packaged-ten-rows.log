@@ -1,0 +1,15 @@
+   Compiling desktop v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/desktop)
+   Compiling node-service v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/node-service)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 13.23s
+     Running tests/packaged_ten_rows.rs (target/debug/deps/packaged_ten_rows-9a3b61066d78802c)
+
+running 3 tests
+test a_small_command_grant_ends_the_answer_by_name_on_the_lan ... ignored, real Metal + cached Qwen3-0.6B + this Mac's private LAN address; MYCELIUM_TEN_PACKAGED_EXECUTABLE, MYCELIUM_PINNED_PAYLOAD_APP, MYCELIUM_TEN_RUN_DIR, MYCELIUM_BOOTSTRAP_TEST_CONFIG
+test probe_route_chat_against_a_single_process_reference ... ignored, real Metal + cached Qwen3-0.6B + this Mac's private LAN address; MYCELIUM_TEN_PACKAGED_EXECUTABLE, MYCELIUM_PINNED_PAYLOAD_APP, MYCELIUM_TEN_RUN_DIR, MYCELIUM_BOOTSTRAP_TEST_CONFIG
+test ten_rows_with_the_real_model_on_the_lan ... ignored, real Metal + cached Qwen3-0.6B + this Mac's private LAN address; MYCELIUM_TEN_PACKAGED_EXECUTABLE, MYCELIUM_PINNED_PAYLOAD_APP, MYCELIUM_TEN_RUN_DIR, MYCELIUM_BOOTSTRAP_TEST_CONFIG
+
+test result: ok. 0 passed; 0 failed; 3 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+real 14.25
+user 22.64
+sys 4.31

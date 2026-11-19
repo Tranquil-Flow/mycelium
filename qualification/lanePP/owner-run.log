@@ -1,0 +1,309 @@
+   Compiling typenum v1.20.1
+   Compiling subtle v2.6.1
+   Compiling libc v0.2.190
+   Compiling zeroize v1.9.0
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+   Compiling once_cell v1.21.4
+   Compiling syn v3.0.9
+   Compiling signature v2.2.0
+   Compiling rand_core v0.6.4
+   Compiling memchr v2.8.3
+   Compiling rustix v1.1.4
+   Compiling ed25519 v2.2.3
+   Compiling smallvec v1.16.4
+   Compiling ahash v0.8.12
+   Compiling hashbrown v0.14.5
+   Compiling generic-array v0.14.7
+   Compiling hashlink v0.9.1
+   Compiling rusqlite v0.32.1
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling inout v0.1.4
+   Compiling digest v0.10.7
+   Compiling universal-hash v0.5.1
+   Compiling aead v0.5.2
+   Compiling cipher v0.4.4
+   Compiling poly1305 v0.8.0
+   Compiling curve25519-dalek v4.1.3
+   Compiling chacha20 v0.9.1
+   Compiling hmac v0.12.1
+   Compiling hkdf v0.12.4
+   Compiling chacha20poly1305 v0.10.1
+   Compiling serde_derive v1.0.229
+   Compiling thiserror-impl v2.0.21
+   Compiling x25519-dalek v2.0.1
+   Compiling thiserror v2.0.21
+   Compiling cpufeatures v0.2.17
+   Compiling errno v0.3.14
+   Compiling sha2 v0.10.9
+   Compiling sha1 v0.10.6
+   Compiling ed25519-dalek v2.2.0
+   Compiling serde_json v1.0.154
+   Compiling protocol v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/protocol)
+   Compiling control v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/control)
+   Compiling control-runtime v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/control-runtime)
+   Compiling node v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/node)
+   Compiling planner v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/planner)
+   Compiling owner-run v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/owner-run)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.75s
+     Running unittests src/lib.rs (target/debug/deps/owner_run-1d1737550f043c62)
+
+running 19 tests
+test runner::fence_tests::a_stop_before_the_fence_skips_the_commit ... ok
+test owner_chain::teardown_tests::the_chains_teardown_hands_its_ports_the_runs_state ... ok
+test runner::view_tests::active_operation_is_a_noop_and_does_not_call_observers ... ok
+test runner::fence_tests::a_stop_cannot_land_inside_the_serving_commit ... ok
+test runner::lifecycle_tests::disconnected_release_is_recorded_and_owning_runner_still_joins ... ok
+test runner::fence_tests::a_fence_of_a_run_that_is_no_longer_running_refuses_without_committing ... ok
+test runner::view_tests::view_reads_and_idle_operation_do_not_acquire_queue_or_call_observers ... ok
+test steps::model::staging_slices_tests::a_host_that_stages_by_slice_slices_a_source_below_the_window ... ok
+test runner::view_tests::held_transition_finishes_before_inactive_decision ... ok
+test runner::view_tests::inactive_callback_excludes_transition_and_holds_no_queue_lock ... ok
+test runner::replaced_tests::a_call_of_a_replaced_run_cannot_publish_or_write_into_the_new_run ... ok
+test steps::model::staging_slices_tests::the_ported_window_still_applies_to_a_host_without_the_requirement ... ok
+test runner::probe_tests::serving_probe_call_order_matches_source_before_side_effects ... ok
+test runner::fence_tests::a_concurrent_stop_lands_after_the_parked_publication ... ok
+test runner::serving_tests::the_real_serving_step_publishes_its_origin_inside_the_transaction ... ok
+test runner::fence_tests::a_status_snapshot_never_shows_the_serving_announcement_without_its_origin ... ok
+test runner::watcher_tests::a_watcher_between_its_check_and_its_expiry_cannot_expire_a_newer_rebuild ... ok
+test runner::watcher_tests::an_old_rebuild_watcher_cannot_expire_a_newer_rebuild ... ok
+test runner::lifecycle_tests::held_serving_hooks_release_locks_stop_and_join_only_with_owner ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/identity.rs (target/debug/deps/identity-15210d0b548f4f2a)
+
+running 2 tests
+test closed_codes ... ok
+test identity_has_the_oracle_shape ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+     Running tests/not_ported.rs (target/debug/deps/not_ported-fa86cee0eaab78dc)
+
+running 4 tests
+test a_host_without_the_serving_seam_keeps_the_legacy_refusal_text ... ok
+test every_unported_step_is_an_explicit_tagged_refusal ... ok
+test a_run_stops_at_the_first_unported_step_and_tears_down ... ok
+test v014_never_produces_the_not_ported_code ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
+
+     Running tests/oracle_activate.rs (target/debug/deps/oracle_activate-78668232f4a67013)
+
+running 1 test
+test activation_step_matches_executed_oracle ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/oracle_ceiling.rs (target/debug/deps/oracle_ceiling-322ec152eb061133)
+
+running 3 tests
+test registered_bounds_equal_the_oracle_rehearsal_max ... ok
+test checked_ceiling_matches_the_executed_oracle_on_every_body ... ok
+test proposal_within_ceiling_matches_the_executed_oracle ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/oracle_compile_step.rs (target/debug/deps/oracle_compile_step-85dc33b5ae706e51)
+
+running 8 tests
+test a_stop_during_the_compile_wait_is_stopped ... ok
+test a_stop_during_the_source_preflight_is_stopped_before_any_build ... ok
+test a_stop_observed_before_the_commit_prevents_retire_and_build ... ok
+test compile_source_refusal_follows_announcement_without_a_second_input_read ... ok
+test a_build_that_never_finishes_times_out_after_the_compile_budget ... ok
+test a_proposal_outside_the_ceiling_is_refused_before_publish ... ok
+test the_compile_step_equals_the_oracle_for_all_907_recorded_cases ... ok
+test a_builder_that_finishes_a_few_polls_later_changes_nothing ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.16s
+
+     Running tests/oracle_demo_action.rs (target/debug/deps/oracle_demo_action-41c5e0e26ad456e3)
+
+running 2 tests
+test only_start_takes_an_execution_ceiling ... ok
+test the_ladder_and_dispatch_match_the_executed_oracle_on_every_case ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/oracle_model_step.rs (target/debug/deps/oracle_model_step-140f0c63d258fe27)
+
+running 4 tests
+test fixture_models_are_the_registered_catalog_in_order ... ok
+test a_prepared_source_that_raises_fails_the_step_with_its_class_only ... ok
+test contributor_step_matches_the_executed_oracle ... ok
+test model_step_matches_the_executed_oracle_on_every_case ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/oracle_owner_run.rs (target/debug/deps/oracle_owner_run-b16efd0d0f099cc7)
+
+running 40 tests
+test happy ... ok
+test ceiling_check_raises_then_clears ... ok
+test rebuild_async_stop_incomplete ... ok
+test monitor_raises_via_status ... ok
+test rebuild_stop_incomplete ... ok
+test every_recorded_scenario_is_replayed ... ok
+test ceiling_reached_in_serving ... ok
+test monitor_code_bad_closure ... ok
+test rollover_backoff_capped_60 ... ok
+test rebuild_requires_run ... ok
+test rebuild_of_failed_run_runs_fresh ... ok
+test monitor_code_via_status ... ok
+test rollover_cleanup_unproven_fatal ... ok
+test rollover_failure_then_success ... ok
+test rollover_run_stopped_by_user_midstep ... ok
+test rollover_due_wins_over_ceiling ... ok
+test rollover_backoff_then_fatal ... ok
+test rollover_model_changed_fatal ... ok
+test rollover_members_changed_fatal ... ok
+test status_while_not_serving_skips_monitor ... ok
+test serving_failure_not_rollover_is_final ... ok
+test start_refusals ... ok
+test rollover_success ... ok
+test start_with_ceiling_then_rebuild ... ok
+test step_error_code_not_closed ... ok
+test step_error_code_80_and_81_chars ... ok
+test step_error_mid_chain ... ok
+test step_generic_exception ... ok
+test step_error_model_with_message_fix ... ok
+test stop_before_first_step_runs ... ok
+test stop_during_step ... ok
+test stop_during_rollover_backoff ... ok
+test step_progress_truncation ... ok
+test stop_during_rollover_teardown ... ok
+test stop_after_step_ok_before_next ... ok
+test stop_when_idle ... ok
+test teardown_exception_after_failure_with_chain_unproven ... ok
+test teardown_exception_after_stop ... ok
+test teardown_runs_with_failed_false_on_stop_and_true_on_failure ... ok
+test teardown_ok_with_chain_unproven ... ok
+
+test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s
+
+     Running tests/oracle_run_chain.rs (target/debug/deps/oracle_run_chain-359cfede6318cd5b)
+
+running 11 tests
+test work_chain::missing_work_ports_preserve_exact_legacy_refusals ... ok
+test owner_chain_exports_the_recorded_descriptor_binding ... ok
+test slices_chain::default_work_announcement_refuses_without_losing_limits ... ok
+test a_run_with_a_ceiling_the_proposal_exceeds_fails_at_compile ... ok
+test work_chain::a_serving_run_stays_serving_and_monitored_until_stop_tears_it_down ... ok
+test compile_timeouts_and_failures_end_the_run_at_compile ... ok
+test slices_chain::slices_through_owner_chain_and_runner_matches_oracle ... ok
+test oracle_recorded_runs_of_two_and_three_members_reach_slices ... ok
+test work_chain::publish_targets_through_owner_chain_and_runner_matches_oracle ... ok
+test work_chain::activation_through_owner_chain_and_runner_matches_oracle ... ok
+test threaded_compile::held_builder_keeps_status_responsive_then_matches_recorded_runs ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.28s
+
+     Running tests/oracle_runner.rs (target/debug/deps/oracle_runner-8cbae9afaac2078e)
+
+running 39 tests
+test a_failed_assertion_reaps_the_scripted_runner ... ok
+test rebuild_of_failed_run_runs_fresh ... ok
+test descriptor_binding_survives_rollover ... ok
+test ceiling_reached_in_serving ... ok
+test happy ... ok
+test monitor_raises_via_status ... ok
+test monitor_code_bad_closure ... ok
+test rollover_cleanup_unproven_fatal ... ok
+test rollover_backoff_capped_60 ... ok
+test monitor_code_via_status ... ok
+test rollover_backoff_then_fatal ... ok
+test ceiling_check_raises_then_clears ... ok
+test rollover_due_wins_over_ceiling ... ok
+test rollover_members_changed_fatal ... ok
+test start_refusals ... ok
+test rollover_run_stopped_by_user_midstep ... ok
+test status_while_not_serving_skips_monitor ... ok
+test rollover_model_changed_fatal ... ok
+test rebuild_async_stop_incomplete ... ok
+test serving_failure_not_rollover_is_final ... ok
+test rollover_failure_then_success ... ok
+test step_error_code_80_and_81_chars ... ok
+test step_error_code_not_closed ... ok
+test rollover_success ... ok
+test stop_after_step_ok_before_next ... ok
+test start_with_ceiling_then_rebuild ... ok
+test step_error_model_with_message_fix ... ok
+test step_error_mid_chain ... ok
+test step_progress_truncation ... ok
+test stop_before_first_step_runs ... ok
+test step_generic_exception ... ok
+test stop_during_rollover_teardown ... ok
+test teardown_exception_after_failure_with_chain_unproven ... ok
+test stop_during_step ... ok
+test stop_when_idle ... ok
+test teardown_runs_with_failed_false_on_stop_and_true_on_failure ... ok
+test teardown_exception_after_stop ... ok
+test teardown_ok_with_chain_unproven ... ok
+test stop_during_rollover_backoff ... ok
+
+test result: ok. 39 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s
+
+     Running tests/oracle_serving.rs (target/debug/deps/oracle_serving-02b62494acec1d10)
+
+running 6 tests
+test serving_matches_executed_oracle_round_two ... ok
+test serving_matches_executed_oracle_round_three ... ok
+test a_host_without_the_serving_seam_is_refused_by_name ... ok
+test a_stop_before_the_fence_ends_the_step_stopped ... ok
+test a_refused_fence_publishes_nothing ... ok
+test serving_matches_executed_oracle ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.33s
+
+     Running tests/oracle_slices.rs (target/debug/deps/oracle_slices-5fcad12762587963)
+
+running 2 tests
+test a_force_sliced_run_reports_the_owner_s_shard_push_not_whole_snapshots ... ok
+test slices_matches_executed_oracle ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.69s
+
+     Running tests/oracle_steps_r12.rs (target/debug/deps/oracle_steps_r12-7584e04f60c2d9b8)
+
+running 8 tests
+test the_virtual_clock_starts_where_the_probe_started ... ok
+test clock_skew_and_stop_equal_the_oracle ... ok
+test member_refusals_during_bootstrap_equal_the_oracle ... ok
+test rollover_binding_equals_the_oracle ... ok
+test descriptor_margin_and_resigning_equal_the_oracle ... ok
+test every_recorded_observe_scenario_equals_the_oracle ... ok
+test download_verify_and_silence_budgets_equal_the_oracle ... ok
+test every_recorded_descriptors_scenario_equals_the_oracle ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.50s
+
+     Running tests/oracle_work.rs (target/debug/deps/oracle_work-a642b810c9b5b3f9)
+
+running 2 tests
+test publish_matches_executed_oracle ... ok
+test targets_matches_executed_oracle ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.28s
+
+     Running tests/runner_view.rs (target/debug/deps/runner_view-45445f8646797569)
+
+running 4 tests
+test surviving_view_observes_owning_drop_of_active_run ... ok
+test idle_owner_close_does_not_invent_a_closed_state ... ok
+test view_clone_and_drop_leave_driver_owned_and_alive ... ok
+test surviving_view_observes_close_and_keeps_only_final_state ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests owner_run
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+real 23.67
+user 45.78
+sys 7.18

@@ -1,0 +1,57 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.16s
+     Running tests/owner_work.rs (target/debug/deps/owner_work-91f440909507f276)
+
+running 47 tests
+test a_member_whose_seed_lease_ran_out_fails_the_serving_run_joined_route_member_stale ... ok
+test a_member_without_its_own_bound_consent_is_refused_before_any_offer ... ok
+test a_prepare_refused_by_one_stage_cancels_the_other_and_every_member_discards_its_stage ... ok
+test a_prepared_stage_whose_close_fails_leaves_the_runs_cleanup_unproven_by_name ... ok
+test a_publish_that_fails_after_a_stage_prepared_closes_that_stage_before_its_discard ... ok
+test a_serving_joined_route_never_claims_a_startup_qualification_it_did_not_run ... ok
+test a_retired_epoch_is_never_reopened_and_later_chats_are_refused_until_stop ... ok
+test a_stop_during_a_held_receive_interrupts_it_and_ends_within_the_stop_allowance ... ok
+test a_stop_during_held_native_prepares_cancels_both_and_every_member_discards ... ok
+test a_spent_command_grant_is_published_as_the_epochs_retirement ... ok
+test a_stop_while_the_slices_step_pushes_ends_the_step_within_the_stop_allowance ... ok
+test a_member_that_ended_its_epoch_while_idle_is_refused_by_name_within_a_few_owner_polls ... ok
+test codec_custody::ep2h_native_response_growth_is_bounded_and_reaps_the_helper ... ok
+test activation_before_every_stage_is_prepared_is_refused ... ok
+test codec_stop::ep2h_native_helper_normal_protocol_positive_control ... ok
+test codec_stop::ep2h_native_helper_ready_responses_do_not_pay_a_sleep_per_token ... ok
+test codec_stop::ep2h_native_helper_partial_write_cannot_hide_work_stop ... ok
+test a_run_serves_every_chat_on_one_epoch_with_one_prepare_per_member ... ok
+test an_idle_member_failure_closes_the_other_members_serve_within_bound ... ok
+test a_stop_mid_chat_closes_the_epoch_before_the_members_discard_and_the_next_run_receives ... ok
+test rollover_is_due_at_480_s_and_the_ceiling_at_570_s_of_a_600_s_worker_wall ... ok
+test codec_stop::ep2h_native_helper_read_cannot_hide_work_stop ... ok
+test codec_custody::ep2h_native_deadline_retry_never_signals_an_unrelated_helper ... ok
+test every_route_expires_at_publish_plus_the_smallest_of_two_distinct_member_walls ... ok
+test startup::a_challenge_that_retires_its_epoch_refuses_startup_challenge_failed ... ok
+test startup::a_failed_challenge_is_published_before_the_route_has_closed ... ok
+test readiness_after_a_completed_then_retired_epoch_agrees_with_the_refused_submission ... ok
+test startup::a_stop_mid_challenge_ends_the_step_stopped_and_releases_the_request ... ok
+test startup::prepare_honesty::a_missing_then_failed_prepare_cannot_complete_publish_or_qualify_the_run ... ok
+test startup::a_second_run_in_the_same_process_qualifies_again ... ok
+test startup::a_product_chat_ends_at_a_stop_id_and_never_emits_it ... ok
+test startup::product_stop_tokens_do_not_truncate_the_startup_challenge ... ok
+test a_silent_member_early_in_stage_order_leaves_only_its_own_cleanup_unproven ... ok
+test a_member_that_never_answers_its_discard_leaves_cleanup_unproven_within_the_stop_allowance ... ok
+test startup::the_startup_challenge_runs_through_the_opened_route_and_qualifies_it ... ok
+test startup::a_member_that_dies_mid_challenge_fails_the_route_with_the_routes_code ... ok
+test the_member_stale_rule_keeps_the_skew_tolerance_and_reads_only_the_admitted_generation ... ok
+test teardown_hands_every_member_back_in_stage_order_started_or_not ... ok
+test startup::one_wrong_token_anywhere_refuses_the_route_startup_challenge_failed ... ok
+test the_ports_probes_switch_the_run_at_480_s_and_end_it_at_the_570_s_ceiling ... ok
+test the_slices_step_pushes_every_stage_before_publish_and_start_serving_only_prepares ... ok
+test the_work_port_transfers_every_stage_then_asks_each_member_for_its_native_prepare ... ok
+test a_stop_with_a_member_silent_on_its_receive_ends_within_the_stop_allowance ... ok
+test codec_custody::ep2h_legacy_held_callback_retains_same_owner_and_never_renews_stop ... ok
+test ep2g_stop::ep2g_stop_during_held_dial_closes_partial_peers_and_cleans_other_member ... ok
+test ep2g_stop::ep2g_stop_held_gateway_and_member_close_share_the_first_stop_end ... ok
+test an_old_member_paired_with_a_v2_route_fails_the_activation_with_a_named_owner_code ... ok
+
+test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 37.41s
+
+real 37.62
+user 40.29
+sys 3.92
