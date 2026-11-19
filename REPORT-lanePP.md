@@ -137,6 +137,34 @@ Do not merge this as a fix for rv46. Request either:
 
 The physical failure remains valid release-blocking evidence. Its proposed prepare-causality explanation is the blocked prerequisite, not a reason to invent a fix or claim success.
 
+## Round 3 — sanctioned convergence fix round (in progress)
+
+Base: `85dc0af6`, production behavior unchanged from `c2963eb4`. Both required REDs
+executed before any production fix: `qualification/lanePP/round3-red-executed.log`.
+Command: `bash qualification/lanePP/run.sh round3-red-executed test -p api --test owner_work startup::retirement:: -- --nocapture`.
+Result: **0 passed, 2 failed**, 47 filtered out; test 6.08 s, command 8.56 s.
+
+- RED-A: `red_a_tracking_timeout_does_not_retire_a_live_serving_epoch_or_refuse_chat`:
+  expected null retirement, actual `joined_route_member_ended`. The signed route wall
+  exceeds MemberChosenWall, startup and an initial chat succeed, the actual remote
+  driver polls after an injected tracking-age advance, and a later chat is attempted.
+- RED-B: `red_b_retired_epoch_clears_run_readiness_without_ending_api_running`:
+  actual member consent exhaustion ends serve; workflow remains api_running and
+  the next chat refuses, but the run snapshot's route_ready is true, expected false.
+  Completed checklist and Serving state are explicitly preserved.
+- Harness: real OwnerWork, epoch/carrier/stage servers, gateway, startup challenge,
+  serving step, Runner and snapshot. Existing model-free controlled stage computation
+  and admission; remote call transport is controlled. The actual remote.rs is compiled
+  by path, not copied. Added only cfg(test) call/age hooks to that file; ordinary library
+  behavior and all timeout branches are unchanged at this RED commit. Native proof,
+  signed-control authentication and physical inference are NOT simulated evidence.
+- Initial compile attempt (`round3-red.log`) used a nonexistent test wait helper;
+  corrected to the existing snapshot interface. This is not counted as RED.
+- Preflight: 24 GiB available, user-authorized floor 22 GiB. Pruned only this lane's
+  stale target/debug/incremental (3.3 GiB logical); df then 26 GiB, after RED 25 GiB.
+  No models, installed app, SSH, cloudflared, network, pushes or other worktrees touched.
+  Wrapper now enforces 22 GiB and adopted four-job/nonincremental/line-table settings.
+
 ## Round 2 — final round: packaged epoch retirement / readiness accounting
 
 ### Scope, execution blocker and disposition

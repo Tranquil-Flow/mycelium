@@ -4,6 +4,12 @@
 set -uo pipefail
 cd /Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP || exit 1
 export CARGO_TARGET_DIR="$PWD/target" CARGO_NET_OFFLINE=true
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-4}" CARGO_INCREMENTAL=0
+export CARGO_PROFILE_DEV_DEBUG=line-tables-only CARGO_PROFILE_TEST_DEBUG=line-tables-only
+if ! df -g / | perl -ane 'END { exit($F[3] < 22 ? 1 : 0) }'; then
+    printf 'BLOCKED: lane PP disk floor 22 GiB\n' >&2
+    exit 4
+fi
 export TMPDIR="$HOME/.hermes/cache/scratch"
 export MLXC_INCLUDE_DIR="$HOME/Projects/mycelium-spike-mlxc/vendor/mlx-c-57731b00e8bed710e0750e7356da9f18f8eb3e20"
 export MLXC_LIB_DIR="$HOME/Projects/mycelium-native-macos14/install/lib"

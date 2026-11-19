@@ -1796,6 +1796,8 @@ mod codec_custody;
 mod codec_stop;
 #[path = "support/owner_startup.rs"]
 mod startup;
+// The tracking regression compiles the actual remote driver with cfg(test) clock/transport seams.
+use api::{managed_carrier, member_control};
 #[path = "support/tokenizer_helper.rs"]
 mod tokenizer_helper;
 

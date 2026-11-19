@@ -20,6 +20,8 @@ use work::Challenge;
 
 #[path = "owner_prepare_honesty.rs"]
 mod prepare_honesty;
+#[path = "owner_retirement.rs"]
+mod retirement;
 
 /// The challenge prompt (carrier test values) and the scripted output it expects.
 fn challenge(expected: &[u32]) -> Challenge {

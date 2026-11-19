@@ -1,0 +1,43 @@
+   Compiling api v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/api)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.50s
+     Running tests/owner_work.rs (target/debug/deps/owner_work-8d4bd826caddd244)
+
+running 2 tests
+serve: route already settled at receiver close
+joined owner gateway wake: Connection refused (os error 61)
+joined_route_close: carrier already ended
+joined owner gateway wake: Connection refused (os error 61)
+
+thread 'startup::retirement::red_b_retired_epoch_clears_run_readiness_without_ending_api_running' (1097307) panicked at crates/api/tests/support/owner_retirement.rs:270:5:
+assertion `left == right` failed: retired String("joined_route_member_ended") is not ready
+  left: Bool(true)
+ right: false
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+diag: managed seat unbound (seed runtime closed)
+test startup::retirement::red_b_retired_epoch_clears_run_readiness_without_ending_api_running ... FAILED
+joined owner gateway connection ended: Stream(StreamError { code: "m16_stream_poll_timeout", io_kind: None })
+joined owner gateway connection ended: Stream(StreamError { code: "m16_stream_poll_timeout", io_kind: None })
+serve: route already settled at receiver close
+joined owner gateway wake: Connection refused (os error 61)
+joined_route_close: carrier already ended
+joined owner gateway wake: Connection refused (os error 61)
+
+thread 'startup::retirement::red_a_tracking_timeout_does_not_retire_a_live_serving_epoch_or_refuse_chat' (1097306) panicked at crates/api/tests/support/owner_retirement.rs:229:5:
+assertion `left == right` failed: local tracking timeout is not a member end
+  left: String("joined_route_member_ended")
+ right: Null
+diag: managed seat unbound (seed runtime closed)
+test startup::retirement::red_a_tracking_timeout_does_not_retire_a_live_serving_epoch_or_refuse_chat ... FAILED
+
+failures:
+
+failures:
+    startup::retirement::red_a_tracking_timeout_does_not_retire_a_live_serving_epoch_or_refuse_chat
+    startup::retirement::red_b_retired_epoch_clears_run_readiness_without_ending_api_running
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 47 filtered out; finished in 6.08s
+
+error: test failed, to rerun pass `-p api --test owner_work`
+real 8.56
+user 4.00
+sys 0.60

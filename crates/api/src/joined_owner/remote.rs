@@ -28,6 +28,11 @@ use std::{
 };
 use transport::{Channel, Clock};
 
+// Test-only transport/elapsed-time seams; absent from ordinary library builds.
+#[cfg(test)]
+#[path = "../../tests/support/remote_tracking_hooks.rs"]
+pub(crate) mod tracking_hooks;
+
 fn span(id: B) -> Result<Duration, Refusal> {
     super::span(id).map_err(Refusal::from)
 }
@@ -211,6 +216,10 @@ fn drive(
     // One signed call, bounded by the local handshake budget.
     let call = |remote: &Remote, request: Value| -> Result<Value, String> {
         let deadline = until(budgets.call).ok_or("deadline_invalid")?;
+        #[cfg(test)]
+        if let Some(reply) = tracking_hooks::call(remote.addr.id, &request) {
+            return reply;
+        }
         remote
             .call(&owner, &client, request, deadline, crate::app_host::now())
             .map_err(|e| e.code.to_owned())
@@ -296,6 +305,8 @@ fn drive(
         } else if pending.is_empty() {
             break;
         }
+        #[cfg(test)]
+        tracking_hooks::age(remote.addr.id, &mut pending);
         if let Some((id, name, began)) = pending.front().cloned() {
             let attempt = {
                 let n = polls.entry(id).or_insert(0);
