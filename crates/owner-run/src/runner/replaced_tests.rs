@@ -54,6 +54,13 @@ impl Chain for Held {
         let stopped = env.stopped();
         env.progress("progress of the replaced run");
         env.set_result("participants", json!(["replaced-run-node"]));
+        let readiness = Arc::new(());
+        let captured = readiness.clone();
+        env.set_route_readiness(Arc::new(move || {
+            let _keep = &captured;
+            panic!("replaced run readiness must never be read")
+        }));
+        assert_eq!(Arc::strong_count(&readiness), 1, "late reader was rejected");
         env.record_exception("replaced_run_code", "ReplacedRunError");
         let committed = self.committed.clone();
         let result = env.fenced(
@@ -142,6 +149,7 @@ fn a_call_of_a_replaced_run_cannot_publish_or_write_into_the_new_run() {
     new_entered
         .recv_timeout(patience())
         .expect("the new run's first step began");
+
     let fresh = runner.snapshot();
     let old_teardown = teardowns.try_recv();
     drop(release.new.take());

@@ -1,0 +1,358 @@
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+   Compiling proc-macro2 v1.0.107
+   Compiling libc v0.2.190
+   Compiling serde_json v1.0.154
+   Compiling digest v0.10.7
+   Compiling syn v2.0.119
+   Compiling syn v3.0.9
+   Compiling cpufeatures v0.2.17
+   Compiling sha2 v0.10.9
+   Compiling serde_derive v1.0.229
+   Compiling serde v1.0.229
+   Compiling xtask v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/xtask)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.45s
+     Running `target/debug/xtask lint`
+crates/api/src/compiler_inputs/owner_retire.rs:173: SE003: empty Err handler; propagate or record a specific failure
+crates/api/src/compiler_inputs/owner_retire.rs:200: SE003: empty Err handler; propagate or record a specific failure
+crates/api/src/joined_member.rs:817: TM001: literal Duration argument outside crates/budgets
+crates/api/src/local_network.rs:60: TM001: literal Duration argument outside crates/budgets
+crates/api/src/local_network.rs:170: TM001: literal Duration argument outside crates/budgets
+crates/api/src/local_network.rs:174: TM001: literal Duration argument outside crates/budgets
+crates/api/src/relay/probe_tests.rs:11: TM001: literal Duration argument outside crates/budgets
+crates/api/src/relay/probe_tests.rs:56: TM001: literal Duration argument outside crates/budgets
+crates/api/src/relay/probe_tests.rs:129: TM001: literal Duration argument outside crates/budgets
+crates/desktop/src/install.rs:1003: SE004: spawned JoinHandle discarded; retain and observe completion
+crates/desktop/src/install.rs:1006: TM001: literal Duration argument outside crates/budgets
+crates/desktop/tests/install.rs:489: SE004: spawned JoinHandle discarded; retain and observe completion
+crates/desktop/tests/install.rs:494: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/app_host.rs:976: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/app_host.rs:991: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_run/work/tests/chat_route.rs:111: SE003: empty Err handler; propagate or record a specific failure
+crates/node-service/src/packaged_run/work/tests/chat_route.rs:1216: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_run/work/tests/chat_route.rs:1281: SE004: spawned JoinHandle discarded; retain and observe completion
+crates/node-service/src/packaged_run/work/tests/chat_route.rs:1336: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_run/work/tests/local_network.rs:309: SE002: discarded .ok() hides the error
+crates/node-service/src/packaged_run/work/tests/local_network.rs:461: SE002: discarded .ok() hides the error
+crates/node-service/src/packaged_run/work/tests/local_network.rs:550: SE002: discarded .ok() hides the error
+crates/node-service/src/packaged_run/work/tests/local_network.rs:591: SE002: discarded .ok() hides the error
+crates/node-service/src/packaged_run/work/tests/local_network.rs:610: SE002: discarded .ok() hides the error
+crates/node-service/src/packaged_run/work/tests/local_network.rs:685: SE002: discarded .ok() hides the error
+crates/node-service/src/packaged_run/work/tests/local_network.rs:921: SE002: discarded .ok() hides the error
+crates/node-service/src/packaged_run/work/tests/local_network.rs:944: SE002: discarded .ok() hides the error
+crates/node-service/src/packaged_run/work/tests/quit_stopped.rs:99: SE002: discarded .ok() hides the error
+crates/node-service/src/packaged_run/work/tests/quit_stopped.rs:104: SE002: discarded .ok() hides the error
+crates/node-service/src/packaged_run/work/tests/quit_stopped.rs:291: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_run/work/tests/quit_stopped.rs:334: SE004: spawned JoinHandle discarded; retain and observe completion
+crates/node-service/src/packaged_run/work/tests/quit_stopped.rs:350: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_run/work/tests/quit_stopped.rs:447: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_run/work/tests/quit_verified.rs:39: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_run/work/tests/quit_verified.rs:121: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_run/work/tests/quit_verified.rs:171: SE004: spawned JoinHandle discarded; retain and observe completion
+crates/node-service/src/packaged_run/work/tests/quit_verified.rs:185: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_run/work/tests/quit_verified.rs:215: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_run/work/tests/reach_action.rs:61: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_run/work/tests/reach_action.rs:66: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_run/work/tests/reach_action.rs:69: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_run/work/tests/reach_action.rs:73: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_run/work/tests/reach_action.rs:79: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_run/work/tests/reach_action.rs:87: SE002: discarded .ok() hides the error
+crates/node-service/src/packaged_run/work/tests/recovery_fence.rs:84: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_run/work/tests/recovery_fence.rs:92: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_run/work/tests/retire.rs:28: SE003: empty Err handler; propagate or record a specific failure
+crates/node-service/src/packaged_run/work/tests/serving_r3b.rs:154: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_work_reach.rs:580: SE002: discarded .ok() hides the error
+crates/node-service/src/packaged_work_reach.rs:756: SE002: discarded .ok() hides the error
+crates/node-service/src/packaged_work_reach.rs:838: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_work_reach.rs:863: SE002: discarded .ok() hides the error
+crates/node-service/src/packaged_work_reach.rs:968: SE002: discarded .ok() hides the error
+crates/node-service/src/packaged_work_reach.rs:998: TM001: literal Duration argument outside crates/budgets
+crates/node-service/src/packaged_work_reach.rs:1039: SE002: discarded .ok() hides the error
+crates/node-service/src/packaged_work_reach.rs:1098: SE002: discarded .ok() hides the error
+crates/node-service/tests/desktop_host.rs:1208: TM001: literal Duration argument outside crates/budgets
+crates/node-service/tests/packaged_recovery.rs:45: SE004: spawned JoinHandle discarded; retain and observe completion
+crates/node-service/tests/packaged_recovery.rs:48: SE004: spawned JoinHandle discarded; retain and observe completion
+crates/node-service/tests/packaged_ten_rows.rs:697: TM001: literal Duration argument outside crates/budgets
+crates/node-service/tests/packaged_ten_rows.rs:909: TM001: literal Duration argument outside crates/budgets
+crates/node-service/tests/packaged_work.rs:90: SE002: discarded .ok() hides the error
+crates/node-service/tests/packaged_work.rs:197: SE002: discarded .ok() hides the error
+crates/node-service/tests/packaged_work.rs:430: SE002: discarded .ok() hides the error
+crates/node-service/tests/packaged_work.rs:551: TM001: literal Duration argument outside crates/budgets
+crates/node-service/tests/packaged_work.rs:628: SE002: discarded .ok() hides the error
+crates/node-service/tests/packaged_work.rs:672: SE002: discarded .ok() hides the error
+crates/node-service/tests/packaged_work.rs:673: SE002: discarded .ok() hides the error
+crates/node-service/tests/support/cached_repository.rs:108: TM001: literal Duration argument outside crates/budgets
+crates/runtime/src/iroh_lan_inbound_tests.rs:230: TM001: literal Duration argument outside crates/budgets
+crates/runtime/src/iroh_lan_inbound_tests.rs:244: TM001: literal Duration argument outside crates/budgets
+crates/runtime/src/iroh_lan_inbound_tests.rs:250: TM001: literal Duration argument outside crates/budgets
+crates/runtime/src/iroh_lan_inbound_tests.rs:265: TM001: literal Duration argument outside crates/budgets
+crates/runtime/tests/iroh_cross_network.rs:184: SE002: discarded .ok() hides the error
+crates/runtime/tests/iroh_cross_network.rs:357: TM001: literal Duration argument outside crates/budgets
+crates/runtime/tests/iroh_cross_network.rs:436: TM001: literal Duration argument outside crates/budgets
+crates/runtime/tests/iroh_cross_network.rs:511: TM001: literal Duration argument outside crates/budgets
+crates/runtime/tests/iroh_cross_network.rs:572: TM001: literal Duration argument outside crates/budgets
+crates/runtime/tests/iroh_cross_network.rs:674: TM001: literal Duration argument outside crates/budgets
+crates/runtime/tests/iroh_cross_network.rs:691: TM001: literal Duration argument outside crates/budgets
+crates/runtime/tests/iroh_cross_network.rs:727: TM001: literal Duration argument outside crates/budgets
+crates/runtime/tests/iroh_relay_probe.rs:44: TM001: literal Duration argument outside crates/budgets
+crates/runtime/tests/iroh_relay_probe.rs:86: TM001: literal Duration argument outside crates/budgets
+crates/runtime/tests/iroh_relay_probe.rs:130: SE002: discarded .ok() hides the error
+crates/seed/src/probe/tests.rs:15: TM001: literal Duration argument outside crates/budgets
+crates/seed/src/probe/tests.rs:89: TM001: literal Duration argument outside crates/budgets
+crates/seed/src/probe/tests.rs:176: TM001: literal Duration argument outside crates/budgets
+crates/api/tests/fixtures/oracle_acquisition.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_adaptive.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_adaptive_policy.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_authority.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_chat_order.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_consent.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_demo_action.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_failures.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_gateway_admission.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_generation.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_handoff.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_join_text.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_leave.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_leave_race.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_live_answer.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_local_agent.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_local_contributor.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_manifest.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_model_facts.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_model_routes.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_netstart.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_pairwin.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_peer_accept.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_peer_renew.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_peer_resume.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_policy_encodings.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_prepare.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_qr.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_qr_directory.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_relay.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_renew_session.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_resources.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_routes.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_run_exchange.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_run_model.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_run_model_errors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_seed_http.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_seed_join.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_seed_time.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_sigterm.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_start_stop.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_surrogates.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_windows.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_wire.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/oracle_wire_routes.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/api/tests/fixtures/publisher_tls.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/artifact_grant.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/canonical-contracts.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continuation-cancel-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continuation-cancel-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continuation-generators.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continuation-managed-receipts.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continuation-native-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continuation-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continuation-request-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continuation-request-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continuation-schema-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continuation-token-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-capacity-ingress.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-capacity-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-capacity-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-explorer-projections.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-history-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-observatory-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-observatory-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-performance-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-performance-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-product-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-product-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-projection-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-projection-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-promotion-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-promotion-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-recovery-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-recovery-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-wire-framing.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-wire-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/continued-wire-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/artifact-verification-report-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/assignment-artifact-cache-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/assignment-materialization-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/candidate-promotion-report-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/capacity-profile-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/coarse-region-evidence-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/concurrent-request-runtime-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/control-plane-tranche-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/deployment-activation-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/deployment-residency-physical-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/evidence-history-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/evidence-projection-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/execution-graph-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/full-context-recovery-gate-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/full-context-recovery-intent-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/full-context-recovery-qualification-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/full-context-recovery-runtime-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/gossip-allocator-view-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/gossip-evidence-bundle-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/gossip-router-view-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/governance-readiness-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/internet-activation-observation-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/internet-bootstrap-status-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/internet-native-qualification-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/interruptible-stage-command-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/layer-assignment-v2.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/layer-load-proof-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/layer-planner-snapshot-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/layer-replan-simulation-report-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/link-state-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/live-route-incident-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/live-route-status-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/m13-placement-projection-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/m14-topology-projection-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/m15-plan-comparison-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/m23-kv-gate-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/manual-provisioning-route-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/membership-assignment-offer-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/membership-assignment-result-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/membership-capability-report-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/membership-drain-ack-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/membership-heartbeat-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/membership-join-acceptance-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/membership-join-request-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/membership-lease-renewal-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/membership-link-probe-report-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/membership-resume-acceptance-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/membership-resume-request-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/membership-seed-rotation-ack-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/membership-signed-message-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/model-preparation-authorization-v2.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/observatory-event-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/observatory-snapshot-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/path-manifest-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/performance-budget-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/performance-budget-v2.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/performance-budget-v3.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/private-request-replay-checkpoint-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/product-concurrency-liveness-qualification-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/product-event-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/product-snapshot-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/product-ui-bootstrap-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/product-ui-swarm-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/provisioning-audit-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/relay-projection-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/replica-benchmark-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/replica-benchmark-v2.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/replica-plan-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/replica-qualification-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/replica-runtime-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/request-event-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/request-event-v2.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/request-gateway-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/request-gateway-v2.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/route-explorer-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/route-plan-v2.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/route-qualification-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/router-wire-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/scoped-runtime-incident-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/seed-backup-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/seed-key-transition-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/seed-operator-inventory-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/seed-operator-revocation-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/seed-operator-rotation-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/signed-gossip-evidence-bundle-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/traffic-liveness-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/contracts/transport-path-observation-v1.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/coverage.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/dependency-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/expanded-bootstrap-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/expanded-bootstrap-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/expanded-consent-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/expanded-consent-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/expanded-graph-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/expanded-graph-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/expanded-manual-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/expanded-preparation-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/expanded-provisioning-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/expanded-public-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/expanded-public-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/expanded-replica-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/expanded-replica-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/f4-contract-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/f4-decimal-zeroes.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/f4-manifest-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/f4-oracle-repin.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/f4-owner-retirement-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/f4-progress-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/f4-progress-traces.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/f4-progress-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/f4-seed-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/fixture-seal.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/float-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/generated-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/gossip-nonprintable-ranges.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/grant-address-cases.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/identity-edge-cases.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/inventory.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/join_envelope.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/managed-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/membership-shape-cases.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/membership-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/membership-verifier-cases.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/port-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/remaining-gossip-authority-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/remaining-gossip-authority-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/remaining-gossip-bundle-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/remaining-gossip-context-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/remaining-gossip-derive-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/remaining-gossip-link-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/remaining-gossip-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/remaining-gossip-seal-vector.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/remaining-gossip-signed-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/remaining-load-proof-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/remaining-load-proof-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/remaining-public-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/remaining-public-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/remaining-route-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/remaining-route-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/remaining-snapshot-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/remaining-snapshot-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/resume-evidence-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/resume-evidence-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round3-assignment-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round3-assignment-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round3-projection-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round3-projection-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round3-seed-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round3-seed-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round4-live-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round4-live-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round4-residency-disposition.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round5-control-plane-tranche-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round5-layer-replan-simulation-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round5-planner-provenance.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round6-artifact-grant-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round6-http-refusal-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round6-signed-gossip-extra-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round7-invite-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round7-observation-diagnostic-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round8-android-onboarding-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round8-member-models-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round8-plan-binding-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round8-qwen-manifest-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round8-seed-coordinator-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round9-capability-report-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round9-package-manifest-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round9-peer-profile-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round9-route-assignment-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round9-seed-authority-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/round9-seed-members-vectors.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+crates/protocol/fixtures/signature.json:1: WARN FP001: fixture has no provenance row (add one to the crate's fixtures/PROVENANCE.tsv)
+lint: 1530 source files, 87 violations
+provenance: 482 fixture files, 231 with rows, 251 lacking (WARN); 0 other findings; lacking by crate: crates/api=46, crates/protocol=205
+real 22.46
+user 16.27
+sys 0.37

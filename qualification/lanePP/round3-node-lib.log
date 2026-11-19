@@ -1,0 +1,479 @@
+   Compiling serde v1.0.229
+   Compiling zerofrom v0.1.8
+   Compiling zeroize v1.9.0
+   Compiling bitflags v2.13.2
+   Compiling thiserror v2.0.21
+   Compiling yoke v0.8.3
+   Compiling siphasher v1.0.4
+   Compiling unicode-segmentation v1.13.3
+   Compiling phf_shared v0.13.1
+   Compiling portable-atomic v1.15.0
+   Compiling zerovec v0.11.8
+   Compiling zerotrie v0.2.5
+   Compiling phf_generator v0.13.1
+   Compiling once_cell v1.21.4
+   Compiling convert_case v0.10.0
+   Compiling futures-util v0.3.34
+   Compiling tinystr v0.8.4
+   Compiling potential_utf v0.1.6
+   Compiling derive_more-impl v2.1.1
+   Compiling icu_locale_core v2.3.0
+   Compiling icu_collections v2.3.0
+   Compiling tokio v1.53.1
+   Compiling icu_provider v2.3.1
+   Compiling icu_properties v2.3.0
+   Compiling icu_normalizer v2.3.0
+   Compiling objc2-exception-helper v0.1.1
+   Compiling idna_adapter v1.2.2
+   Compiling idna v1.1.0
+   Compiling regex-syntax v0.8.11
+   Compiling url v2.5.8
+   Compiling objc2 v0.6.4
+   Compiling serde_json v1.0.154
+   Compiling tracing-core v0.1.36
+   Compiling block2 v0.6.2
+   Compiling cipher v0.4.4
+   Compiling dispatch2 v0.3.1
+   Compiling tracing v0.1.44
+   Compiling phf_macros v0.13.1
+   Compiling glob v0.3.4
+   Compiling objc2-core-foundation v0.3.2
+   Compiling getrandom v0.3.4
+   Compiling tokio-util v0.7.19
+   Compiling phf_codegen v0.13.1
+   Compiling typeid v1.0.3
+   Compiling rustls-pki-types v1.15.1
+   Compiling toml_writer v1.1.3+spec-1.1.0
+   Compiling heck v0.5.0
+   Compiling erased-serde v0.4.10
+   Compiling ipnet v2.12.2
+   Compiling aho-corasick v1.1.5
+   Compiling web-time v1.1.0
+   Compiling curve25519-dalek v4.1.3
+   Compiling phf v0.13.1
+   Compiling parking_lot_core v0.9.12
+   Compiling regex-automata v0.4.18
+   Compiling string_cache_codegen v0.6.1
+   Compiling web_atoms v0.2.6
+   Compiling parking_lot v0.12.5
+   Compiling rustls-webpki v0.103.15
+   Compiling regex v1.13.1
+   Compiling time-macros v0.2.32
+   Compiling anyhow v1.0.104
+   Compiling rustls v0.23.45
+   Compiling string_cache v0.9.0
+   Compiling getrandom v0.4.3
+   Compiling serde_spanned v1.1.2
+   Compiling time v0.3.55
+   Compiling dunce v1.0.5
+   Compiling same-file v1.0.6
+   Compiling form_urlencoded v1.2.2
+   Compiling walkdir v2.5.0
+   Compiling toml v1.1.6+spec-1.1.0
+   Compiling ahash v0.8.12
+   Compiling ed25519-dalek v2.2.0
+   Compiling uuid v1.26.1
+   Compiling selectors v0.38.0
+   Compiling chacha20 v0.9.1
+   Compiling derive_more v2.1.1
+   Compiling simd-adler32 v0.3.10
+   Compiling ctor v1.0.13
+   Compiling cssparser v0.37.0
+   Compiling chacha20poly1305 v0.10.1
+   Compiling markup5ever v0.39.0
+   Compiling h2 v0.4.19
+   Compiling x25519-dalek v2.0.1
+   Compiling swift-rs v1.0.8
+   Compiling adler2 v2.0.1
+   Compiling generic-array v0.14.7
+   Compiling crc32fast v1.5.2
+   Compiling protocol v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/protocol)
+   Compiling n0-error v1.0.1
+   Compiling html5ever v0.39.0
+   Compiling plist v1.10.1
+   Compiling cfb v0.14.0
+   Compiling hyper v1.11.1
+   Compiling jsonptr v0.7.1
+   Compiling objc2-foundation v0.3.2
+   Compiling option-ext v0.2.0
+   Compiling either v1.19.0
+   Compiling dom_query v0.28.0
+   Compiling der v0.8.2
+   Compiling schemars v0.8.22
+   Compiling objc2-quartz-core v0.3.2
+   Compiling dirs-sys v0.5.0
+   Compiling pin-project v1.1.13
+   Compiling hyper-util v0.1.21
+   Compiling cargo_metadata v0.19.2
+   Compiling serde-untagged v0.1.9
+   Compiling json-patch v4.2.0
+   Compiling infer v0.22.0
+   Compiling miniz_oxide v0.9.1
+   Compiling urlpattern v0.6.0
+   Compiling hashbrown v0.14.5
+   Compiling serde_with v3.24.0
+   Compiling security-framework v3.7.0
+   Compiling hashlink v0.9.1
+   Compiling flate2 v1.1.10
+   Compiling n0-future v0.3.2
+   Compiling dirs v7.0.0
+   Compiling objc2-app-kit v0.3.2
+   Compiling spki v0.8.0
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling miniz_oxide v0.8.9
+   Compiling tauri-utils v2.10.0
+   Compiling fdeflate v0.3.7
+   Compiling tokio-rustls v0.26.5
+   Compiling ppv-lite86 v0.2.21
+   Compiling minimal-lexical v0.2.1
+   Compiling serdect v0.4.3
+   Compiling rusqlite v0.32.1
+   Compiling curve25519-dalek v5.0.0
+   Compiling tower v0.5.3
+   Compiling digest v0.10.7
+   Compiling pkcs8 v0.11.0
+   Compiling rustix v1.1.4
+   Compiling embed-resource v3.0.11
+   Compiling toml_edit v0.25.15+spec-1.1.0
+   Compiling ed25519 v3.0.0
+   Compiling der v0.7.10
+   Compiling tauri-winres v0.3.6
+   Compiling proc-macro-crate v3.5.0
+   Compiling sha2 v0.10.9
+   Compiling noq-udp v1.3.0
+   Compiling tower-http v0.6.11
+   Compiling hyper-rustls v0.27.10
+   Compiling rustls-platform-verifier v0.7.1
+   Compiling control v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/control)
+   Compiling cargo_toml v1.0.1
+   Compiling objc2-security v0.3.2
+   Compiling clang-sys v1.9.1
+   Compiling aes v0.8.4
+   Compiling ctr v0.9.2
+   Compiling dpi v0.1.2
+   Compiling winnow v1.0.4
+   Compiling raw-window-handle v0.6.2
+   Compiling tauri-build v2.7.0
+   Compiling toml_parser v1.1.5+spec-1.1.0
+   Compiling cookie v0.18.2
+   Compiling aes-gcm v0.10.3
+   Compiling objc2-system-configuration v0.3.2
+   Compiling control-runtime v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/control-runtime)
+   Compiling ed25519-dalek v3.0.0-rc.0
+   Compiling reqwest v0.13.5
+   Compiling system-configuration v0.8.0
+   Compiling spki v0.7.3
+   Compiling num_enum_derive v0.7.6
+   Compiling data-encoding-macro v0.1.21
+   Compiling prefix-trie v0.8.4
+   Compiling strum_macros v0.28.0
+   Compiling iroh-metrics-derive v1.0.1
+   Compiling webpki-roots v1.0.9
+   Compiling darling_core v0.20.11
+   Compiling futures-executor v0.3.34
+   Compiling simple-dns v0.12.0
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling foreign-types-shared v0.3.1
+   Compiling noq-proto v1.3.0
+   Compiling foreign-types v0.5.0
+   Compiling darling_macro v0.20.11
+   Compiling n0-dns-resolver v0.1.0
+   Compiling crossbeam-deque v0.8.8
+   Compiling png v0.17.16
+   Compiling netdev v0.46.3
+   Compiling strum v0.28.0
+   Compiling futures v0.3.34
+   Compiling iroh-metrics v1.0.2
+   Compiling hickory-proto v0.26.3
+   Compiling num_enum v0.7.6
+   Compiling iroh-base v1.2.0
+   Compiling node v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/node)
+   Compiling wry v0.57.0
+   Compiling objc2-web-kit v0.3.2
+   Compiling nom v7.1.3
+   Compiling rand_chacha v0.3.1
+   Compiling n0-watcher v1.0.0
+   Compiling core-graphics-types v0.2.0
+   Compiling tokio-stream v0.1.19
+   Compiling attohttpc v0.30.1
+   Compiling cobs v0.3.0
+   Compiling libloading v0.8.9
+   Compiling semver v1.0.28
+   Compiling tokio-websockets v0.13.3
+   Compiling bindgen v0.72.1
+   Compiling rayon-core v1.13.0
+   Compiling tauri-runtime v2.12.0
+   Compiling ico v0.5.0
+   Compiling moka v0.12.16
+   Compiling postcard v1.1.3
+   Compiling hickory-net v0.26.3
+   Compiling cexpr v0.6.0
+   Compiling igd-next v0.17.1
+   Compiling noq v1.3.0
+   Compiling core-graphics v0.25.0
+   Compiling netwatch v0.19.3
+   Compiling iroh-dns v1.3.0
+   Compiling rand v0.8.8
+   Compiling darling v0.20.11
+   Compiling tauri v2.12.0
+   Compiling pkcs8 v0.10.2
+   Compiling png v0.18.1
+   Compiling muda v0.20.0
+   Compiling derive_builder_core v0.20.2
+   Compiling tauri-codegen v2.7.0
+   Compiling tauri-runtime-wry v2.12.0
+   Compiling iroh-relay v1.2.0
+   Compiling onig_sys v69.9.1
+   Compiling pkcs1 v0.7.5
+   Compiling num-bigint-dig v0.8.6
+   Compiling portmapper v0.19.3
+   Compiling tao v0.37.1
+   Compiling hickory-resolver v0.26.3
+   Compiling planner v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/planner)
+   Compiling backon v1.6.0
+   Compiling rand_core v0.9.5
+   Compiling keyboard-types v0.8.3
+   Compiling esaxx-rs v0.1.10
+   Compiling serialize-to-javascript v0.1.2
+   Compiling owner-run v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/owner-run)
+   Compiling rand_chacha v0.9.0
+   Compiling iroh v1.0.2
+   Compiling backend-mlx v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/backend-mlx)
+   Compiling rsa v0.9.10
+   Compiling rayon v1.12.0
+   Compiling tauri-macros v2.7.0
+   Compiling derive_builder_macro v0.20.2
+   Compiling desktop v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/desktop)
+   Compiling x509-cert v0.2.5
+   Compiling window-vibrancy v0.8.1
+   Compiling itertools v0.14.0
+   Compiling transport v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/transport)
+   Compiling router v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/router)
+   Compiling castaway v0.2.4
+   Compiling embed_plist v1.2.2
+   Compiling base64 v0.13.1
+   Compiling static_assertions v1.1.0
+   Compiling mime v0.3.17
+   Compiling compact_str v0.9.0
+   Compiling spm_precompiled v0.1.4
+   Compiling macro_rules_attribute v0.2.2
+   Compiling monostate v0.1.18
+   Compiling rayon-cond v0.4.0
+   Compiling seed v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/seed)
+   Compiling derive_builder v0.20.2
+   Compiling onig v6.5.1
+   Compiling rand v0.9.5
+   Compiling model v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/model)
+   Compiling rustls-native-certs v0.8.4
+   Compiling dary_heap v0.3.8
+   Compiling unicode-normalization-alignments v0.1.12
+   Compiling node-service v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/node-service)
+   Compiling unicode_categories v0.1.1
+   Compiling tokenizers v0.22.2
+   Compiling runtime v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/runtime)
+   Compiling api v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/api)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 50.09s
+     Running unittests src/lib.rs (target/debug/deps/node_service-e2a49b7917020d83)
+
+running 148 tests
+test hello_bootstrap::tests::double_boot_hash_matches_executed_local_oracle ... ok
+test hello_bootstrap::tests::derivation_matches_executed_oracle_not_pid_or_node ... ok
+test hello_bootstrap::tests::unavailable_identity_probe_fails_closed ... ok
+test packaged_network::serving_probe_tests::the_relay_probe_reports_serving_only_while_a_run_is_active ... ok
+test packaged_run::work::stage_memory_tests::the_worker_reservation_is_the_one_the_stage_prepare_holds ... ok
+test hello_bootstrap::tests::probe_drop_kills_reaps_and_joins_blocked_stdout_reader ... ok
+test packaged_run::work::stage_memory_tests::a_stage_whose_consent_cannot_cover_the_context_is_refused_by_name_at_slices ... ok
+test packaged_run::work::challenge_tokens_tests::the_packed_oracle_yields_the_recorded_prompt_plus_the_challenge_output ... ok
+test hello_bootstrap::tests::finite_os_probe_drains_more_than_pipe_capacity_before_exit ... ok
+test packaged_run::work::stage_tokens_tests::every_stage_is_prepared_for_the_compiles_serving_context ... ok
+test packaged_run::work::stage_tokens_tests::a_context_that_cannot_hold_the_startup_check_is_refused_by_name ... ok
+test packaged_run::program_tests::explicit_expected_identity_reaches_the_packaged_compiler ... ok
+test packaged_run::program_tests::packaged_owner_exposes_slices_publish_and_activation_ports ... ok
+test packaged_run::work::objects::tests::named_compiler_shards_resolve_by_digest_without_copying_or_hardlinks ... ok
+test packaged_run::program_tests::startup_manifest_identity_is_bound_to_the_verified_executable ... ok
+test hello_bootstrap::tests::os_probe_over_cap_refuses_and_reaps ... ok
+test packaged_run::program_tests::packaged_compiler_selection_is_explicit_with_missing_or_hostile_environment ... ok
+l11_hello_agent_card wall_ms=1795089180387 remote=true run=run-ceiling phase=compile state=error detail=member_model_download_not_ported
+test packaged_run::work::tests::chat_route::quit_completes_while_a_relay_chat_streams_through_the_serving_run ... ok
+l11_hello_agent_card wall_ms=1795089180735 remote=true run=run-s4cb2 phase=compile state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089180978 remote=true run=run-dead phase=compile state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089181103 remote=true run=run-s4cb2 phase=compile state=error detail=member_model_download_not_ported
+test packaged_run::work::tests::chat_route::the_ceiling_cancels_the_page_chat_once_with_its_code ... ok
+test packaged_run::work::tests::both_demo_stages_fit_the_owners_self_grant_at_the_contracts_serving_context ... ok
+l11_hello_agent_card wall_ms=1795089181264 remote=true run=run-monitor-ceiling phase=compile state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089181281 remote=true run=run-s4cb2 phase=compile state=error detail=member_model_download_not_ported
+test packaged_run::work::tests::chat_route::a_rollover_ends_the_route_chat_chat_switching_runs_and_the_next_run_chats ... ok
+test packaged_run::work::tests::chat_route::a_stop_on_the_run_after_a_rollover_ends_its_chat_chat_cancelled ... ok
+test packaged_run::work::tests::an_owner_without_a_single_private_network_refuses_a_joined_mac_by_name ... ok
+test packaged_run::work::tests::chat_route::a_failed_run_ends_the_route_chat_owner_run_failed ... ok
+test packaged_run::work::tests::an_owner_only_run_without_a_single_private_network_still_starts_its_local_worker ... ok
+test packaged_run::work::tests::chat_route::a_dead_member_ends_the_page_chat_with_its_code ... ok
+test packaged_run::work::tests::a_second_owner_run_in_one_process_reads_the_interfaces_again ... ok
+test packaged_run::work::tests::an_owner_on_the_lan_refuses_a_joined_mac_on_its_loopback_by_name ... ok
+test packaged_run::work::tests::chat_route::the_monitor_ceiling_cancels_the_page_chat_once_with_its_code ... ok
+l11_hello_agent_card wall_ms=1795089182587 remote=true run=run-ceiling-first phase=compile state=error detail=member_model_download_not_ported
+test packaged_run::work::tests::chat_route::the_page_chats_through_the_run_route_before_during_and_after_a_run ... ok
+test packaged_run::work::tests::chat_route::the_owner_status_says_the_chat_is_available_while_the_run_serves ... ok
+test packaged_run::work::tests::chat_route::the_relay_chat_reaches_the_serving_runs_route ... ok
+test packaged_run::work::tests::chat_route::the_next_runs_ceiling_still_cancels_its_page_chat ... ok
+test packaged_run::work::tests::chat_route::the_route_bearer_never_reaches_a_reply_a_log_line_or_the_timing_file ... ok
+test packaged_run::work::tests::chat_route::two_pages_chat_over_the_route_one_at_a_time_each_reading_its_own_tokens ... ok
+l11_hello_agent_card wall_ms=1795089184980 remote=true run=run-s4cb2 phase=compile state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089185272 remote=true run=run-order phase=compile state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089185272 remote=true run=run-s4cb2 phase=compile state=error detail=member_model_download_not_ported
+test packaged_run::work::tests::chat_route::the_run_configs_token_id_tap_sees_the_route_ids_of_a_page_chat ... ok
+test packaged_run::work::tests::chat_route::the_teardown_cancels_the_page_chat_before_the_work_closes ... ok
+test packaged_run::work::tests::flake::a_contributor_renewal_the_seed_refuses_ends_the_snapshot_at_once ... ok
+test packaged_run::work::tests::flake::a_failed_contributor_renewal_puts_the_session_back ... ok
+test packaged_run::work::tests::flake::probe_rows_6_and_7_with_a_real_sized_push ... ignored, probe: lane FLK repeat harness (large push, real prepare_native, no model)
+test packaged_run::work::tests::flake::probe_the_natural_contributor_renewal_window ... ignored, probe: prints the natural renewal window (lane FLK repeat harness)
+test packaged_run::work::tests::flake::a_contributor_renewal_past_its_deadline_refuses_the_registration_and_keeps_the_resident_cell ... ok
+test packaged_run::work::tests::flake::a_contributor_renewal_under_a_clock_stepped_past_its_lease_puts_the_session_back ... ok
+test packaged_run::work::tests::flake::a_contributor_renewal_whose_thread_dies_leaves_no_snapshot_in_use ... ok
+test packaged_run::work::tests::flake::a_joined_renewal_the_seed_refuses_ends_the_binding_at_once ... ok
+test packaged_run::work::tests::flake::a_joined_renewal_past_its_deadline_ends_the_binding ... ok
+test packaged_run::work::tests::flake::a_late_contributor_put_back_never_overwrites_a_newer_flight ... ok
+test packaged_run::work::tests::flake::a_joined_renewal_under_a_clock_stepped_past_its_lease_puts_the_session_back ... ok
+test packaged_run::work::tests::flake::a_joined_renewal_whose_thread_dies_leaves_no_snapshot_in_use ... ok
+test packaged_run::work::tests::flake::a_joined_macs_renewal_that_starts_inside_its_standing_pass_keeps_the_runs_work_service ... ok
+test packaged_run::work::tests::flake::a_joined_macs_standing_pass_during_its_renewal_keeps_the_runs_work_service ... ok
+test packaged_run::work::tests::flake::the_owners_own_node_is_no_joined_mac_while_the_owners_authority_renews ... ok
+l11_hello_agent_card wall_ms=1795089189862 remote=true run=run-nv phase=collect state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089190139 remote=true run=run-ln2 phase=collect state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089190428 remote=true run=run-s4cb2 phase=compile state=error detail=member_model_download_not_ported
+test packaged_run::work::tests::local_network::a_new_run_whose_members_are_not_verified_yet_sends_nothing_and_is_never_refused ... ok
+l11_hello_agent_card wall_ms=1795089190531 remote=true run=run-ln1 phase=collect state=error detail=member_model_download_not_ported
+test packaged_run::work::tests::local_network::a_pending_permission_is_asked_early_and_refuses_the_compile_by_name ... ok
+test packaged_run::work::tests::local_network::a_changed_resolution_with_no_verified_member_sends_nothing ... ok
+test packaged_run::work::tests::flake::the_slices_step_survives_a_contributor_renewal_in_flight_at_its_work_announcement ... ok
+test packaged_run::work::tests::flake::an_overdue_contributor_renewal_that_lands_late_keeps_the_owners_local_work_service ... ok
+test packaged_run::work::tests::local_network::a_relay_runs_unanswered_dial_is_named_via_the_relay_with_zero_local_network_probes ... ok
+test packaged_run::work::tests::local_network::a_member_revoked_after_compose_is_not_probed_by_the_step_6_diagnostic ... ok
+l11_hello_agent_card wall_ms=1795089191788 remote=true run=run-rv1 phase=collect state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089191913 remote=true run=run-lo1 phase=collect state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089191980 remote=true run=run-adm phase=collect state=error detail=member_model_download_not_ported
+test packaged_run::work::tests::local_network::a_revoked_members_address_is_not_probed ... ok
+test packaged_run::work::tests::on_the_real_lan_an_owner_refuses_a_joined_mac_on_its_loopback_by_name ... ignored, needs this host's private LAN interface address in MYCELIUM_LAN_IP
+test packaged_run::work::tests::local_network::a_run_whose_network_resolves_local_only_sends_no_probe ... ok
+l11_hello_agent_card wall_ms=1795089192157 remote=true run=run-one phase=collect state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089192603 remote=true run=run-s4cb2 phase=compile state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089192827 remote=true run=run-two phase=collect state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089193425 remote=true run=run-l2o phase=collect state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089193509 remote=true run=run-l2l phase=collect state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089193741 remote=true run=run-a2b phase=collect state=error detail=member_model_download_not_ported
+test packaged_run::work::tests::local_network::compose_after_a_lan_probe_refuses_by_name_when_the_lan_is_gone ... ok
+test packaged_run::work::tests::local_network::a_step_6_dial_without_an_answer_is_named_on_the_mac_that_must_allow_it ... ok
+test packaged_run::work::tests::local_network::the_owner_signs_its_run_choice_once_per_run_and_binds_exactly_it ... ok
+test packaged_run::work::tests::local_work_session_tracks_renewal_and_contributor_removal ... ok
+test packaged_run::work::tests::local_network::a_second_run_reads_the_interfaces_afresh ... ok
+test packaged_run::work::tests::local_network::compose_after_a_local_only_probe_uses_the_lan_it_now_finds ... ok
+l11_hello_agent_card wall_ms=1795089194406 remote=true run=run-s6 phase=collect state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089194608 remote=true run=run-stop phase=collect state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089194776 remote=true run=run-s4cb2 phase=compile state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089194915 remote=true run=run-adm phase=collect state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089194967 remote=true run=run-stop phase=collect state=error detail=member_model_download_not_ported
+test packaged_run::work::tests::local_network::a_signed_address_the_runs_admission_refuses_is_not_probed ... ok
+test packaged_run::work::tests::local_network::stop_between_the_probe_and_compose_drops_the_preflight_record ... ok
+test packaged_run::work::tests::reach_watch::a_participants_reach_refusal_still_ends_the_collect_promptly_by_name ... ok
+test packaged_run::work::tests::reach_watch::a_raw_member_code_without_a_participants_report_passes_unchanged ... ok
+test packaged_run::work::tests::reach_watch::a_refusal_that_observe_returns_itself_is_still_named ... ok
+test packaged_run::work::tests::reach_watch::a_refusing_candidate_is_dropped_and_the_run_goes_on_with_the_other_two ... ok
+test packaged_run::work::tests::reach_watch::an_unselected_macs_reach_refusal_does_not_stop_the_run ... ok
+test packaged_run::work::tests::reach_watch::in_compile_only_a_selected_participants_refusal_is_named ... ok
+test packaged_run::work::tests::reach_watch::only_a_participants_report_for_this_run_and_deployment_counts ... ok
+test packaged_run::work::tests::quit_stopped::quit_with_the_joined_mac_gone_still_ends_within_its_allowance ... ok
+test packaged_run::work::tests::quit_stopped::a_teardown_slower_than_the_relay_reserve_still_publishes_stopped_while_the_relay_is_up ... ok
+test packaged_run::work::tests::reach_action::two_overlapping_reach_changes_run_one_transaction_after_the_other ... ok
+l11_hello_agent_card wall_ms=1795089196718 remote=true run=review-run phase=compile state=error detail=member_model_download_not_ported
+test packaged_run::work::tests::one_owner_run_reads_this_macs_interfaces_once ... ok
+l11_hello_agent_card wall_ms=1795089197794 remote=true run=run-a2b phase=collect state=error detail=member_model_download_not_ported
+test packaged_run::work::tests::quit_stopped::quit_publishes_stopped_to_a_mac_reading_through_the_relay_before_the_relay_closes ... ok
+test packaged_run::work::tests::local_network::compose_on_a_new_lan_address_binds_it_and_asks_again_from_it_first ... ok
+test packaged_run::work::tests::recovery_fence::an_old_renewal_expiring_late_leaves_the_reconnected_membership_current ... ok
+l11_hello_agent_card wall_ms=1795089198764 remote=true run=review-run phase=compile state=error detail=member_model_download_not_ported
+test packaged_run::work::tests::recovery_fence::an_old_renewal_succeeding_late_does_not_overwrite_the_reconnected_membership ... ok
+test packaged_run::work::tests::quit_stopped::at_the_quit_deadline_the_relay_closes_although_the_runs_teardown_still_runs ... ok
+test packaged_run::work::tests::local_network::the_slices_step_names_an_unanswered_dial_through_the_composed_wrapper ... ok
+test packaged_run::work::tests::regressions::review_source_parent_substitution_must_refuse_real_transfer ... ok
+test packaged_run::work::tests::restart_contributor::a_restart_on_the_configured_origin_proceeds_under_the_contributor_without_relocating ... ok
+test packaged_run::work::tests::regressions::source_file_replacement_after_admission_refuses_transfer ... ok
+test packaged_run::work::tests::regressions::source_file_replacement_after_verification_refuses_transfer ... ok
+test packaged_run::work::tests::regressions::review_cleanup_failure_must_retain_retry_owner_and_not_become_success ... ok
+test packaged_run::work::tests::restart_contributor::a_restart_to_a_new_origin_after_the_contributor_stopped_relocates_with_a_card ... ok
+test packaged_run::work::tests::restart_contributor::a_restart_to_a_new_origin_under_a_live_contributor_is_refused_before_anything_changes ... ok
+test packaged_run::work::tests::retire::a_runs_teardown_retires_the_owners_dead_compile_runs ... ok
+test packaged_run::work::tests::regressions::source_parent_escape_after_verification_refuses_transfer ... ok
+test packaged_run::work::tests::retire::the_next_start_keeps_a_legacy_run_and_retires_the_dead_marked_one_beside_it ... ok
+test packaged_run::work::tests::serving_q::an_http_stop_during_the_serving_wait_ends_the_run_stopped_not_failed ... ok
+test packaged_run::work::tests::serving_q::an_http_stop_outside_the_serving_step_releases_a_blocked_work_call_at_once ... ok
+test packaged_run::work::tests::retire::the_next_start_retires_runs_a_lost_process_left_behind ... ok
+test packaged_run::work::tests::serving_r2::quit_stops_the_run_before_its_workflow ... ok
+l11_hello_agent_card wall_ms=1795089206061 remote=true run=run-gone phase=compile state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089206095 remote=true run=run-monitored phase=compile state=error detail=member_model_download_not_ported
+test packaged_run::work::tests::serving_r3::quit_outside_the_serving_step_releases_a_blocked_work_call_at_once ... ok
+test packaged_run::work::tests::serving_r3::quit_during_the_serving_wait_ends_the_run_stopped_not_failed ... ok
+l11_hello_agent_card wall_ms=1795089207031 remote=true run=run-prepare phase=compile state=error detail=member_model_download_not_ported
+test packaged_run::work::tests::serving_r2::the_packaged_probes_answer_from_the_run_state_when_the_workflow_is_gone ... ok
+test packaged_run::work::tests::serving_r3::the_publish_step_over_an_absent_packaged_workflow_refuses_before_reading_it ... ok
+test packaged_run::work::tests::regressions::network_service_close_retries_only_its_unresolved_cleanup_owner ... ok
+test packaged_run::work::tests::serving_r2::the_serving_announcement_is_prepared_before_the_resident_lock ... ok
+test packaged_run::work::tests::serving_r2::the_packaged_host_monitors_a_serving_run_without_any_status_read ... ok
+test packaged_run::work::tests::serving_r3::the_targets_step_over_an_absent_packaged_workflow_matches_its_oracle_case ... ok
+test packaged_run::work::tests::quit_verified::a_joined_macs_quit_with_its_work_service_holding_a_stage_is_unproven ... ok
+l11_hello_agent_card wall_ms=1795089209376 remote=true run=run-tick phase=compile state=error detail=member_model_download_not_ported
+test packaged_run::work::tests::serving_r3::dropping_the_status_loop_waits_for_it_at_most_the_source_join ... ok
+test packaged_run::work::tests::serving_r3b::a_quit_deadline_waits_for_the_workflow_stop_the_close_thread_is_issuing ... ok
+test packaged_run::work::tests::stage_memory::the_stage_workers_reservation_at_the_serving_context_is_pinned_independently ... ok
+test packaged_run::work::tests::serving_r3b::a_close_thread_that_cannot_start_still_stops_a_serving_workflow_and_reports_it ... ok
+test packaged_run::work::tests::stage_program::packaged_stage_program_child ... ignored, child of both_packaged_stages_launch_the_admitted_program_* (development variables set)
+test packaged_run::work::tests::serving_r3b::at_the_shell_deadline_a_serving_quit_stops_the_workflow_before_it_may_exit ... ok
+l11_hello_agent_card wall_ms=1795089210092 remote=false run=run-tick phase=compile state=idle detail=owner_run_not_active
+test packaged_run::work::tests::serving_r3::with_no_workflow_the_monitor_ticks_the_local_contributor_before_answering_missing ... ok
+test packaged_run::work::tests::stage_memory::the_slices_check_holds_each_stage_to_the_share_its_member_enforces ... ok
+test packaged_run::work::tests::the_app_default_work_transport_is_this_macs_lan_address ... ignored, needs this host's private LAN interface address in MYCELIUM_LAN_IP
+test packaged_run::work::tests::stage_memory::the_slices_check_reads_the_contributors_grant_and_the_joined_macs_caps ... ok
+test packaged_run::work::tests::regressions::panicked_member_work_handoff_must_not_turn_a_later_close_into_success ... ok
+test packaged_run::work::tests::stage_memory::the_packaged_composition_plans_shares_with_the_stage_workers_reservation ... ok
+test packaged_run::work::tests::stage_memory::the_slices_preparation_refuses_an_insufficient_grant_by_name_before_any_push ... ok
+l11_hello_agent_card wall_ms=1795089212805 remote=true run=run-stop phase=compile state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089213058 remote=true run=run-stopped phase=compile state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089213491 remote=true run=run-stopped phase=serving state=error detail=native_sidecar_installation_invalid
+l11_hello_agent_card wall_ms=1795089213504 remote=true run=run-early phase=compile state=error detail=member_model_download_not_ported
+test packaged_run::work::tests::the_owners_fresh_self_grant_holds_five_thousand_commands ... ok
+test packaged_run::work::tests::the_owners_own_contributor_grant_admits_the_wall_the_compile_gives_the_local_node ... ok
+test packaged_run::work::tests::two_packaged_hosts_on_the_real_lan_interface_handoff_and_push_before_publish ... ignored, needs this host's private LAN interface address in MYCELIUM_LAN_IP
+test packaged_run::work::work_document_tests::a_whole_snapshot_run_composes_without_a_shard_document ... ok
+test packaged_work::reach::tests::a_joined_mac_binds_in_the_mode_the_owner_signed ... ok
+test packaged_work::reach::tests::a_joined_macs_portmapping_is_frozen_for_its_run ... ok
+l11_hello_agent_card wall_ms=1795089213950 remote=true run=run-s4cb2 phase=compile state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089213950 remote=true run=run-stopped phase=stopped state=stopped detail=-
+test packaged_run::work::tests::stopped::a_joined_macs_card_reads_stopped_after_the_owners_stop ... ok
+test packaged_work::reach::tests::every_announcement_is_validated_before_a_work_service_is_reused ... ok
+test packaged_work::reach::tests::relay_mode_refusals_give_relay_advice ... ok
+test packaged_work::reach::tests::status_lists_only_the_active_runs_connections_with_their_channel ... ok
+test packaged_run::work::tests::the_packaged_chain_runs_the_serving_step_instead_of_refusing_it_as_unported ... ok
+test packaged_work::reach::tests::status_samples_each_live_peer_path_and_names_portmapping_honestly ... ok
+test packaged_work::reach::tests::the_owners_choice_is_stored_signed_and_named_and_an_invalid_file_is_refused_by_name ... ok
+test router_port::tests::unreadable_driver_state_is_never_a_return ... ok
+l11_hello_agent_card wall_ms=1795089214200 remote=true run=run-early phase=compile state=error detail=member_model_download_not_ported
+l11_hello_agent_card wall_ms=1795089214221 remote=true run=run-probe phase=compile state=error detail=member_model_download_not_ported
+test packaged_run::work::tests::stopped::a_run_stopped_before_its_model_step_announces_nothing ... ok
+test router_port::tests::only_the_driver_return_ends_the_wait ... ok
+test packaged_work::reach::tests::a_run_starting_during_a_reach_change_takes_the_saved_choice ... ok
+test packaged_run::work::tests::stop_reaches_real_push_while_member_receive_is_held ... ok
+test packaged_run::work::tests::stage_program::both_packaged_stages_launch_the_admitted_program_whatever_the_environment_names ... ok
+test packaged_run::work::tests::the_packaged_chain_forwards_rollover_ceiling_and_monitor_to_its_owner_workflow ... ok
+test packaged_run::work::tests::the_owners_own_contributor_receives_its_shard_in_the_state_the_contributor_step_leaves ... ok
+l11_hello_agent_card wall_ms=1795089216417 remote=true run=run-s4cb2 phase=compile state=error detail=member_model_download_not_ported
+test packaged_run::work::tests::two_packaged_hosts_handoff_local_and_remote_links_and_push_before_publish ... ok
+test packaged_run::work::tests::quit_verified::a_workflow_stop_that_never_returns_still_ends_the_quit_unproven_within_its_bound ... ok
+test packaged_run::work::tests::serving_r3b::at_the_shell_deadline_a_relay_close_that_overruns_its_own_budgets_exits_3 ... ok
+test packaged_run::work::tests::quit_verified::a_quit_whose_run_close_leaves_the_owners_work_owed_is_unproven has been running for over 60 seconds
+test packaged_run::work::tests::quit_verified::a_quit_whose_run_close_leaves_the_owners_work_owed_is_unproven ... ok
+
+test result: ok. 142 passed; 0 failed; 6 ignored; 0 measured; 0 filtered out; finished in 81.26s
+
+real 132.42
+user 235.12
+sys 23.91

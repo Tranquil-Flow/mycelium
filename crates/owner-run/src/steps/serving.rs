@@ -391,6 +391,9 @@ pub fn run_serving_step(
     workflow.commit_serving(state, &announcement, work_limits.as_ref(), &mut |commit| {
         env.fenced(commit, "registry_origin", origin.clone())
     })?;
+    if let Some(readiness) = workflow.route_readiness() {
+        env.set_route_readiness(readiness);
+    }
     publish_participants(env, reports, state)?;
     env.progress("route ready: open the chat");
     Ok(())

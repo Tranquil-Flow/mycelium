@@ -1,6 +1,6 @@
 # Lane PP — prepare-honesty / retirement accounting investigation
 
-Latest status (Round 2, final round): BLOCKED before RED execution by the repository's disk floor (24 GiB available; minimum 25 GiB). Packaged retirement/readiness mismatch and a separate owner-side 600-second serve-result tracking wall located statically; rv46's precise retirement cause/time remains unproven. No production fix, no new test pass, no claimed release pass. See Round 2 below.
+Latest status (Round 3): both required REDs executed and committed at `31335ebe5126945f260ffcb2eb46ee4fce6a05c4`, before the fix. The fix and GREEN evidence are in the commit containing this report update. Tracking expiry no longer invents a serve completion; current run readiness observes real retirement/expiry. Required neighbor suites, fmt and targeted all-target clippy pass. Extra repository policy lint has the same 87 violations as executed base `85dc0af6`, with zero added/removed diagnostics. Ready for the orchestrator's delta-only review, NOT merged or physically release-qualified. Round 3 below supersedes the historical Round 1/2 dispositions.
 
 Round 1 status: BLOCKED at the required RED gate. No production fix, no claimed release pass.
 
@@ -9,7 +9,7 @@ Base/production tested: `c2963eb46b886f2142d0d9fce1ead5a99f471389`.
 All writes are in this worktree (build/runtime temporary files use the assigned Hermes scratch directory).
 No push, merge, rebase, installed-app access, SSH, GPU/model execution, cloudflared, downloads or budget changes.
 
-## Result and acceptance disposition
+## Round 1 — historical result and acceptance disposition
 
 The supplied failure readback establishes an observed UI/chat disagreement, but its interpretation of the prepare logs is not supported by the log-emitting code. The requested missing/failed-prepare accounting regression has NOT been reproduced. A new deterministic diagnostic over the existing model-free owner-work harness instead passes on unchanged candidate production code.
 
@@ -137,7 +137,7 @@ Do not merge this as a fix for rv46. Request either:
 
 The physical failure remains valid release-blocking evidence. Its proposed prepare-causality explanation is the blocked prerequisite, not a reason to invent a fix or claim success.
 
-## Round 3 — sanctioned convergence fix round (in progress)
+## Round 3 — sanctioned convergence fix round (RED + fix complete; review pending)
 
 Base: `85dc0af6`, production behavior unchanged from `c2963eb4`. Both required REDs
 executed before any production fix: `qualification/lanePP/round3-red-executed.log`.
@@ -164,6 +164,45 @@ Result: **0 passed, 2 failed**, 47 filtered out; test 6.08 s, command 8.56 s.
   stale target/debug/incremental (3.3 GiB logical); df then 26 GiB, after RED 25 GiB.
   No models, installed app, SSH, cloudflared, network, pushes or other worktrees touched.
   Wrapper now enforces 22 GiB and adopted four-job/nonincremental/line-table settings.
+
+### Fix and unchanged boundaries
+
+- RED commit `31335ebe` precedes this fix. Verified `c2963eb4..85dc0af6` has only the prior diagnostic/test inclusion under `crates/`; the RED commit adds only test-only call/age seams to production `remote.rs`, not changed timeout behavior. The two assertion failures above therefore exercise the unchanged `c2963eb4` behavior, not a compiler error or a copied driver.
+- `crates/api/src/joined_owner/remote.rs:319-388`: retain the SAME accepted `serve` operation after the local tracking wall, on both successful-pending and failed result polls. Emit `member_serve_tracking_timeout ... action=continue_polling` once per operation, even without preceding failed polls. Existing poll cadence, signed calls, pending bound, actual finished-reply delivery, channel shutdown and finite-operation wall/refusal codes remain unchanged. No new semantic command, retry facility, deadline increase or suppression of real member completion.
+- `crates/api/src/joined_owner/work.rs:1362`: bind an in-memory reader to this exact workflow. Ready requires `api_running`, no recorded retirement, a present finite unexpired signed lifetime, and a present non-retired carrier observation. A poisoned carrier lock records `joined_route_readiness_lock_poisoned` and returns false. Release the workflow lock before reading the carrier; do not tick, mutate, probe HTTP or reopen a route from status.
+- `crates/node-service/src/packaged_run/work.rs:1397`: forward that reader through the actual packaged work adapter, capturing this workflow rather than resolving a future resident slot. Absent packaged work is explicitly false. `owner-run/src/steps/serving.rs:394`, `runner.rs:274` and `machine.rs:481,841,1050` install it for the current context, fence late replaced-run writes, clear it on context replacement, and combine it with Serving in snapshots. Historical completed steps and Serving remain unchanged; F3/F9's `api_running` continuation is preserved. Legacy/injected ports without a joined epoch retain their previous machine behavior; both production joined ports supply the fail-closed reader.
+- No changes to RRP's result identity/authority retention, proof verification, consent, signed expiry production, the 2,000 ms control allowance, wire formats, dependencies, lockfile or UI assets. Actual expiry/member termination/carrier retirement and Stop/rollover/ceiling remain authoritative. This is current readiness accounting, not automatic recovery or a forced run failure.
+
+### v0.1.4 parity check (READ-ONLY source, no Python execution)
+
+Oracle HEAD verified `f4e366e98a1f705dfaf182897044500d290dbd7f`; clean before inspection. The shipped app path is `mycelium_a13_macos/app.py:1362-1364` -> `demo_app.py:79-86` -> `demo_chain.py:152-158,898` -> `chain_compile.py:308-341` -> `workflow.py:277-345,485-506` -> `serving.py:733-736` -> `mycelium_live/supervisor.py:4266-4279,3832-3858` -> `PhysicalLiveRoute.open` (`route.py:2525-2674`). Its run-scoped `ManagedSessionFactory` (`session_factory.py:36-46`) supplies the control sessions. `open` waits for finite `hello`, `configure`, and `start` observations (`route.py:2561,2587,2647-2661`), then retains the open route/workers for requests. It does NOT leave a v0.2-style resident `serve` result pending until the epoch ends.
+
+The managed owner's result wait IS bounded and raises `managed_control_response_timeout` (`control_session.py:503-545`; `ManagedNodeSession.send`:594-607). Therefore it would be false to claim Python already ignores all result-tracking timeouts. The parity decision is: preserve finite command timeout semantics, but do not treat v0.2's resident-serve observation wall as proof that the worker ended. This is the v0.2 one-epoch design distinction needed for shipped resident-route behavior (program `plans/EP-PLAN.md:5-27,58-87,111`, especially publish + smallest worker wall and serve covering signed expiry). No Python cold-restart composition is ported. Existing owner-run oracle/golden scenarios remain green, with the optional reader deliberately distinguishing joined live readiness from legacy history-only state.
+
+### GREEN and neighboring evidence
+
+Commands below ran via `bash qualification/lanePP/run.sh <label> <cargo arguments>`: own target, offline Cargo, four jobs, no incremental, line-table debug, `env -u PYTHONPATH`, renice 5 / nice 19, busy-marker/release-wrapper checks and 22 GiB preflight. Logs are `qualification/lanePP/<label>.log`; wall times include compilation. No test was removed, loosened or newly ignored.
+
+| Label | Cargo arguments | Result | Wall |
+|---|---|---|---|
+| round3-green-focused | `test -p api --test owner_work startup::retirement:: -- --nocapture` | original RED-A + RED-B: 2 passed, 0 failed | 18.87 s |
+| round3-green-extended | same | 6 passed, 0 failed | 20.44 s |
+| round3-owner-work | `test -p api --test owner_work` | 53 passed, 0 failed/ignored | 39.89 s |
+| round3-owner-run | `test -p owner-run --lib` | 19 passed, 0 failed/ignored | 6.70 s |
+| round3-api-lib | `test -p api --lib` | 136 passed, 0 failed, 7 existing ignored | 16.97 s |
+| round3-node-lib | `test -p node-service --lib --features "packaged desktop-shell"` | 142 passed, 0 failed, 6 existing ignored | 132.42 s |
+| round3-clippy | `clippy -p api -p owner-run -p node-service --all-targets --features "node-service/packaged node-service/desktop-shell" -- -D warnings` | exit 0 | 46.14 s |
+| round3-fmt | `fmt --all --check` | exit 0 | 3.34 s |
+| round3-retention | `test -p api --test owner_pin --test member_work` | member_work 21 + owner_pin 18 passed; 0 failed/ignored | 66.17 s |
+| round3-owner-run-all | `test -p owner-run` | 155 passed across lib/integration; 0 failed/ignored; doc tests 0 | 14.07 s |
+
+The final whole owner-work run includes all six focused cases after the clock hook's poll acknowledgement was strengthened: acknowledge only AFTER age was applied by the driver, not a poll already in flight. Additional cases cover failed polls beyond the wall followed by a real member end; exact signed expiry observed through `RunnerView` without chat/status tick; finite operations retaining both successful-pending and failed-poll terminal bounds; replacement context clearing old readiness. The replaced-worker regression in owner-run also rejects a late old-run readiness binding. The earlier focused GREEN logs precede that harness strengthening; final 53-test evidence covers it.
+
+Extra `xtask lint`: **not green**. `round3-lint.log` has 87 policy violations / 251 missing-provenance warnings (22.46 s). Ran the same unchanged lint tool against a `git archive 85dc0af6` source/fixture snapshot in assigned scratch using `xtask lint --root <scratch>`: same 87 violations / 251 warnings (17.24 s, `round3-lint-base.log`). `round3-lint-comparison.log` compares all diagnostic lines: 338 baseline/current, zero added or removed. No new finding touches this delta. Kept both failed logs; did not broaden this fix round into unrelated policy cleanup or re-pin anything.
+
+After packaged tests + clippy, disk fell to 21 GiB; the wrapper blocked the next command before running it. With no Cargo/rustc job active, pruned only this lane's `target/debug/deps/*.rcgu.o` whose corresponding rlib/dylib/executable existed and was newer (finished archived/linked intermediates). `round3-prune.log`: 15,176 files / 3,642,082,200 logical bytes, df back to 24 GiB. Fmt and remaining tests then ran; last check after the lint comparison was 23 GiB. No other lane's target, model cache, app state or release process touched.
+
+Tier escape: late physical chat refusal exposed a driver-lifetime / run-status seam that the model-free remote-driver + real epoch + real Runner tests should have covered. These regressions now cover it. This proves the located synthetic-retirement defect and readiness correction, NOT rv46's exact initiating event or a physical/native release pass. Ignored native/model cases, device runs, whole-workspace merge/release qualification are not claimed; no GPU/model run, SSH, cloudflared, push or merge. Orchestrator owns the delta-only review and integration decision.
 
 ## Round 2 — final round: packaged epoch retirement / readiness accounting
 

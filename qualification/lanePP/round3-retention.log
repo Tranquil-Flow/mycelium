@@ -1,0 +1,57 @@
+   Compiling api v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/api)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.41s
+     Running tests/member_work.rs (target/debug/deps/member_work-6b606189dad8e391)
+
+running 21 tests
+test a_resident_proof_prepared_for_another_capacity_is_refused_by_name ... ok
+test an_operator_driven_member_prepares_without_an_announcement ... ok
+test r2_invalid_route_expiries_refuse_without_panicking ... ok
+test a_previous_runs_announcement_never_decides_this_runs_share ... ok
+test a_share_above_the_caps_announced_for_this_run_after_the_push_refuses_the_prepare ... ok
+test a_share_above_the_members_caps_is_refused_by_name_before_custody ... ok
+test a_receive_whose_deadline_passes_on_a_busy_ledger_reserves_nothing ... ok
+test setup::ep2g_setup_one_dial_cancel ... ok
+test announced_work_without_bound_standing_consent_is_refused_before_custody ... ok
+test setup::ep2g_setup_zero_dials_membership_loss ... ok
+test a_receive_cancelled_on_a_busy_ledger_reserves_nothing ... ok
+test setup::ep2g_setup_one_dial_membership_loss ... ok
+test setup::ep2g_setup_zero_dials_cancel ... ok
+test setup::ep2g_setup_one_dial_withdrawal ... ok
+test the_member_holds_its_worker_to_the_share_announced_for_this_run ... ok
+test setup::ep2g_setup_zero_dials_withdrawal ... ok
+test a_member_serves_its_epoch_until_the_routes_signed_expiry_not_one_operation_wall ... ok
+test setup::ep2g_setup_one_dial_signed_expiry ... ok
+test setup::ep2g_setup_zero_dials_signed_expiry ... ok
+test r1_nondialing_owner_is_bounded_by_an_earlier_signed_expiry ... ok
+test r1_nondialing_owner_cannot_hold_serve_or_leave_past_the_members_own_wall has been running for over 60 seconds
+test r1_nondialing_owner_cannot_hold_serve_or_leave_past_the_members_own_wall ... ok
+
+test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 62.24s
+
+     Running tests/owner_pin.rs (target/debug/deps/owner_pin-494e52c48c0cd56a)
+
+running 18 tests
+test an_announcement_without_the_pin_keeps_the_oracle_bytes_and_a_valid_signature ... ok
+test a_set_owner_pin_is_published_last_under_the_owner_signature ... ok
+test a_member_takes_the_pin_only_from_a_verified_well_formed_announcement ... ok
+test result_retention::round2::unchanged_refresh_preserves_unread_result_control ... ok
+test result_retention::round2::unchanged_refresh_preserves_same_authority_retry ... ok
+test result_retention::a_replacement_announced_owner_cannot_read_the_previous_owners_consumed_result ... ok
+test result_retention::lost_result_response_is_returned_by_the_next_signed_carrier_poll ... ok
+test result_retention::round2::same_endpoint_changed_signed_deployment_cannot_read_previous_result ... ok
+test result_retention::round2::same_endpoint_changed_signed_run_cannot_read_previous_result ... ok
+test result_retention::round2::new_signed_owner_process_cannot_read_previous_result ... ok
+test result_retention::round2::returning_to_a_does_not_revive_an_unread_a_result ... ok
+test result_retention::round2::completion_published_after_repin_keeps_its_admission_authority ... ok
+test result_retention::round2::late_completion_does_not_revive_after_a_b_a ... ok
+test result_retention::round2::clearing_then_restoring_pin_does_not_revive_previous_result ... ok
+test the_member_control_endpoint_obeys_only_the_announced_owner_key ... ok
+test result_retention::round2::replacement_service_has_no_previous_result_control ... ok
+test the_control_loop_answers_the_announced_owner_and_drops_any_other ... ok
+test result_retention::round2::unread_completion_is_not_returned_to_a_replacement_authority ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.18s
+
+real 66.17
+user 22.11
+sys 1.94

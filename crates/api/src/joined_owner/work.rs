@@ -1359,6 +1359,34 @@ fn step_refusal(code: &str) -> StepError {
     StepError::Refused(OwnerRunError::new(code))
 }
 impl WorkPort for OwnerWork {
+    fn route_readiness(&self) -> Option<owner_run::chain::RouteReadiness> {
+        let shared = self.shared.clone();
+        let wall = self.clocks.wall.clone();
+        Some(Arc::new(move || {
+            let now = wall();
+            let route = {
+                let flow = shared.lock();
+                if flow.state != RUNNING
+                    || flow.retired.is_some()
+                    || !now.is_finite()
+                    || !flow
+                        .expires_at
+                        .is_some_and(|end| end.is_finite() && now < end)
+                {
+                    return false;
+                }
+                flow.route.clone()
+            };
+            // Never hold the workflow lock while taking the carrier's observation lock.
+            route.is_some_and(|r| match r.state.lock() {
+                Ok(observed) => !observed.retired(),
+                Err(_) => {
+                    eprintln!("joined_route_readiness_lock_poisoned");
+                    false
+                }
+            })
+        }))
+    }
     /// The joined route has no local cleanup tick: members own their cleanup.
     fn install_cleanup_progress(&mut self) -> Result<(), StepError> {
         Ok(())

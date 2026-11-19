@@ -424,6 +424,8 @@ pub struct OwnerRun {
     session_stop: bool,
     rollover: Rollover,
     ctx: Option<Ctx>,
+    /// Current run's live route observation, cleared whenever its context is replaced.
+    route_readiness: Option<crate::chain::RouteReadiness>,
     phase: Phase,
     /// `rebuild()` waiting for the old run's thread to end before it starts the fresh one: the
     /// attempt it is (`owner_run.py:288-297` joins the thread THAT rebuild captured).
@@ -464,6 +466,7 @@ impl OwnerRun {
             session_stop: false,
             rollover: Rollover::idle(),
             ctx: None,
+            route_readiness: None,
             phase: Phase::Idle,
             pending_rebuild: None,
             rebuild_attempts: 0,
@@ -473,6 +476,11 @@ impl OwnerRun {
     }
 
     // -- public (owner_run.py:157-331) ---------------------------------------------------------
+
+    /// Bind an observational readiness reader to this run only. Runner fences late writes.
+    pub fn set_route_readiness(&mut self, readiness: crate::chain::RouteReadiness) {
+        self.route_readiness = Some(readiness);
+    }
 
     /// `active()`.
     pub fn active(&self) -> bool {
@@ -830,6 +838,7 @@ impl OwnerRun {
         self.reason = Some(reason);
         self.started_at = Some(clock.wall);
         self.ctx = Some(ctx);
+        self.route_readiness = None;
         self.generation += 1;
     }
 
@@ -1038,7 +1047,8 @@ impl OwnerRun {
             registry_origin: ctx.and_then(|c| c.result.other.get("registry_origin").cloned()),
             participants: ctx.and_then(|c| c.result.other.get("participants").cloned()),
             started_at: self.started_at,
-            route_ready: self.state == State::Serving,
+            route_ready: self.state == State::Serving
+                && self.route_readiness.as_ref().is_none_or(|ready| ready()),
             cleanup_unproven: ctx.and_then(|c| c.result.cleanup_unproven.clone()),
             cleanup_errors: ctx.map_or_else(Vec::new, |c| c.result.cleanup_errors.clone()),
             rollover: self.rollover.clone(),

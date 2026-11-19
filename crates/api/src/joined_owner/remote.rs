@@ -5,9 +5,9 @@
 //! interface), admits each operator command with one signed call and polls its
 //! member-signed result by operation id. After a successful `accept`, replies
 //! must be signed by the member's enrolled key (`member_control::Remote`).
-//! Every failure is a reply with a typed code; nothing panics or waits
-//! unbounded: a single call is bounded by the local handshake budget and an
-//! operation by the member's chosen wall.
+//! Every control call is bounded by the local handshake budget. Finite operations
+//! are tracked up to the member wall; a resident `serve` is tracked until its real
+//! completion or channel shutdown, not ended by the owner's observation timeout.
 use super::link::{MemberLink, Refusal};
 use crate::member_control::{Owner, Remote};
 use budgets::{BudgetId as B, MonoInstant};
@@ -241,6 +241,8 @@ fn drive(
     let mut pending: VecDeque<(u64, String, Instant)> = VecDeque::new();
     // Result polls sent per pending operation (a failed poll's line names its attempt).
     let mut polls: std::collections::BTreeMap<u64, u64> = std::collections::BTreeMap::new();
+    // Once per resident serve, even if every earlier result poll succeeded.
+    let mut tracking_timeouts = std::collections::BTreeSet::new();
     // Failed result polls per operation, rate-limited (lane FLK, FLK-05): the first at once, then
     // at most one summary per period, and one outcome line when the operation ends.
     let mut failed_polls = runtime::repeats::Repeats::<u64>::new(runtime::repeats::period());
@@ -328,6 +330,7 @@ fn drive(
                     }
                     pending.pop_front();
                     polls.remove(&id);
+                    tracking_timeouts.remove(&id);
                     poll_outcome(&mut failed_polls, id, &name, "finished");
                     send(
                         if name == "accept" && reply["ok"] == true && remote.enrolled.is_none() {
@@ -351,7 +354,7 @@ fn drive(
                     ) {
                         eprintln!("{line}");
                     }
-                    if began.elapsed() >= budgets.wall {
+                    if name != "serve" && began.elapsed() >= budgets.wall {
                         polls.remove(&id);
                         pending.pop_front();
                         let code = format!("control_call_failed:{code}");
@@ -362,6 +365,18 @@ fn drive(
                 }
             }
             if pending.front().is_some_and(|p| p.0 == id) && began.elapsed() >= budgets.wall {
+                if name == "serve" {
+                    // Observation expiry is not evidence that the member ended its epoch.
+                    // Keep the same operation and poll cadence; signed expiry, consent and
+                    // the real member reply/carrier still govern the route and its cleanup.
+                    if tracking_timeouts.insert(id) {
+                        eprintln!(
+                            "member_serve_tracking_timeout member={member} operation={id} elapsed_ms={} action=continue_polling",
+                            began.elapsed().as_millis()
+                        );
+                    }
+                    continue;
+                }
                 polls.remove(&id);
                 pending.pop_front();
                 poll_outcome(

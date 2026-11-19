@@ -4,6 +4,7 @@
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
+    sync::atomic::{AtomicBool, Ordering},
     sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
@@ -12,6 +13,8 @@ type Call = Box<dyn FnMut(&Value) -> Result<Value, String> + Send>;
 pub(crate) struct Hook {
     pub call: Call,
     pub age: Arc<Mutex<Option<Duration>>>,
+    pub command: &'static str,
+    pub aged: Arc<AtomicBool>,
 }
 fn hooks() -> &'static Mutex<BTreeMap<iroh::EndpointId, Hook>> {
     static HOOKS: OnceLock<Mutex<BTreeMap<iroh::EndpointId, Hook>>> = OnceLock::new();
@@ -35,13 +38,12 @@ pub(crate) fn age(
     pending: &mut std::collections::VecDeque<(u64, String, Instant)>,
 ) {
     let hooks = hooks().lock().unwrap();
-    if let Some(hook) = hooks.get(&id) {
-        if let Some(age) = *hook.age.lock().unwrap() {
-            if let Some((_, name, began)) = pending.front_mut() {
-                if name == "serve" {
-                    *began = Instant::now().checked_sub(age).unwrap();
-                }
-            }
-        }
+    if let Some(hook) = hooks.get(&id)
+        && let Some(age) = *hook.age.lock().unwrap()
+        && let Some((_, name, began)) = pending.front_mut()
+        && name == hook.command
+    {
+        *began = Instant::now().checked_sub(age).unwrap();
+        hook.aged.store(true, Ordering::SeqCst);
     }
 }

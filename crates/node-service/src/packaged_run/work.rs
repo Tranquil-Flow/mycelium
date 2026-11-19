@@ -1394,6 +1394,16 @@ impl SlicesPort for Work {
     }
 }
 impl WorkPort for Work {
+    fn route_readiness(&self) -> Option<owner_run::chain::RouteReadiness> {
+        // Capture this workflow, never resolve a successor through the resident slot later.
+        Some(
+            lock(&self.resident)
+                .work
+                .as_ref()
+                .and_then(WorkPort::route_readiness)
+                .unwrap_or_else(|| Arc::new(|| false)),
+        )
+    }
     fn install_cleanup_progress(&mut self) -> Result<(), StepError> {
         lock(&self.resident)
             .work

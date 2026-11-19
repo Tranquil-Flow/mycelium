@@ -20,8 +20,15 @@ impl From<OwnerRunError> for StepError {
     }
 }
 
+/// A run-bound, in-memory readiness observation. No I/O, mutation, or callback into
+/// the run is permitted; hosts must respect the run -> workflow lock order.
+pub type RouteReadiness = std::sync::Arc<dyn Fn() -> bool + Send + Sync>;
+
 /// `RunContext` as a step sees it.
 pub trait StepEnv {
+    /// Install current-route observation, separate from historical step completion.
+    /// Environments without a status machine (standalone step tests) need not retain it.
+    fn set_route_readiness(&mut self, _readiness: RouteReadiness) {}
     /// `ctx.progress(detail)`.
     fn progress(&mut self, detail: &str);
     /// `ctx.stop_event.is_set()` (`ctx.check_stopped`).

@@ -1,0 +1,74 @@
+   Compiling typenum v1.20.1
+   Compiling subtle v2.6.1
+   Compiling libc v0.2.190
+   Compiling zeroize v1.9.0
+   Compiling serde_core v1.0.229
+   Compiling once_cell v1.21.4
+   Compiling signature v2.2.0
+   Compiling ed25519 v2.2.3
+   Compiling generic-array v0.14.7
+   Compiling ahash v0.8.12
+   Compiling serde v1.0.229
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling digest v0.10.7
+   Compiling inout v0.1.4
+   Compiling cpufeatures v0.2.17
+   Compiling cipher v0.4.4
+   Compiling curve25519-dalek v4.1.3
+   Compiling universal-hash v0.5.1
+   Compiling poly1305 v0.8.0
+   Compiling chacha20 v0.9.1
+   Compiling sha2 v0.10.9
+   Compiling hmac v0.12.1
+   Compiling aead v0.5.2
+   Compiling rand_core v0.6.4
+   Compiling memchr v2.8.3
+   Compiling chacha20poly1305 v0.10.1
+   Compiling x25519-dalek v2.0.1
+   Compiling thiserror v2.0.21
+   Compiling hkdf v0.12.4
+   Compiling ed25519-dalek v2.2.0
+   Compiling sha1 v0.10.6
+   Compiling hashbrown v0.14.5
+   Compiling rustix v1.1.4
+   Compiling errno v0.3.14
+   Compiling smallvec v1.16.4
+   Compiling serde_json v1.0.154
+   Compiling hashlink v0.9.1
+   Compiling rusqlite v0.32.1
+   Compiling protocol v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/protocol)
+   Compiling control v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/control)
+   Compiling control-runtime v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/control-runtime)
+   Compiling node v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/node)
+   Compiling planner v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/planner)
+   Compiling owner-run v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/owner-run)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.28s
+     Running unittests src/lib.rs (target/debug/deps/owner_run-8519fcf202ac455e)
+
+running 19 tests
+test owner_chain::teardown_tests::the_chains_teardown_hands_its_ports_the_runs_state ... ok
+test runner::view_tests::active_operation_is_a_noop_and_does_not_call_observers ... ok
+test runner::fence_tests::a_stop_before_the_fence_skips_the_commit ... ok
+test runner::fence_tests::a_fence_of_a_run_that_is_no_longer_running_refuses_without_committing ... ok
+test runner::fence_tests::a_stop_cannot_land_inside_the_serving_commit ... ok
+test runner::view_tests::held_transition_finishes_before_inactive_decision ... ok
+test runner::view_tests::view_reads_and_idle_operation_do_not_acquire_queue_or_call_observers ... ok
+test runner::lifecycle_tests::disconnected_release_is_recorded_and_owning_runner_still_joins ... ok
+test runner::view_tests::inactive_callback_excludes_transition_and_holds_no_queue_lock ... ok
+test steps::model::staging_slices_tests::a_host_that_stages_by_slice_slices_a_source_below_the_window ... ok
+test steps::model::staging_slices_tests::the_ported_window_still_applies_to_a_host_without_the_requirement ... ok
+test runner::fence_tests::a_status_snapshot_never_shows_the_serving_announcement_without_its_origin ... ok
+test runner::replaced_tests::a_call_of_a_replaced_run_cannot_publish_or_write_into_the_new_run ... ok
+test runner::fence_tests::a_concurrent_stop_lands_after_the_parked_publication ... ok
+test runner::serving_tests::the_real_serving_step_publishes_its_origin_inside_the_transaction ... ok
+test runner::watcher_tests::an_old_rebuild_watcher_cannot_expire_a_newer_rebuild ... ok
+test runner::watcher_tests::a_watcher_between_its_check_and_its_expiry_cannot_expire_a_newer_rebuild ... ok
+test runner::probe_tests::serving_probe_call_order_matches_source_before_side_effects ... ok
+test runner::lifecycle_tests::held_serving_hooks_release_locks_stop_and_join_only_with_owner ... ok
+
+test result: ok. 19 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+real 6.70
+user 12.76
+sys 1.54

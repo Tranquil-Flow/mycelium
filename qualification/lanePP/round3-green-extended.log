@@ -1,0 +1,49 @@
+   Compiling owner-run v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/owner-run)
+   Compiling runtime v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/runtime)
+   Compiling api v0.2.0-dev (/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/crates/api)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.02s
+     Running tests/owner_work.rs (target/debug/deps/owner_work-8d4bd826caddd244)
+
+running 6 tests
+test startup::retirement::successor_run_does_not_retain_old_epoch_readiness ... ok
+member result poll 1 (prepare_native): pp_test_result_poll_unavailable member=04448890ea attempt=1 operation_ms=600500
+member result poll 1 (prepare_native) member=04448890ea outcome=control_call_failed:pp_test_result_poll_unavailable failures=1 over_ms=4
+test startup::retirement::finite_operations_keep_their_existing_tracking_wall_on_successful_and_failed_polls ... ok
+joined owner gateway wake: Connection refused (os error 61)
+joined_route_close: carrier already ended
+joined owner gateway wake: Connection refused (os error 61)
+diag: managed seat unbound (seed runtime closed)
+member result poll 5 (serve): pp_test_result_poll_unavailable member=0124ce846a attempt=13 operation_ms=600500
+member_serve_tracking_timeout member=0124ce846a operation=5 elapsed_ms=600500 action=continue_polling
+test startup::retirement::signed_expiry_clears_readiness_without_a_chat_or_status_tick ... ok
+serve: route already settled at receiver close
+serve: route already settled at receiver close
+joined owner gateway wake: Connection refused (os error 61)
+joined_route_close: carrier already ended
+joined owner gateway wake: Connection refused (os error 61)
+diag: managed seat unbound (seed runtime closed)
+test startup::retirement::red_b_retired_epoch_clears_run_readiness_without_ending_api_running ... ok
+joined owner gateway connection ended: Stream(StreamError { code: "m16_stream_poll_timeout", io_kind: None })
+joined owner gateway connection ended: Stream(StreamError { code: "m16_stream_poll_timeout", io_kind: None })
+joined owner gateway connection ended: Stream(StreamError { code: "m16_stream_poll_timeout", io_kind: None })
+member_serve_tracking_timeout member=b82648cbc9 operation=5 elapsed_ms=600500 action=continue_polling
+joined owner gateway connection ended: Stream(StreamError { code: "m16_stream_poll_timeout", io_kind: None })
+serve: route already settled at receiver close
+serve: route already settled at receiver close
+member result poll 5 (serve) member=0124ce846a outcome=finished failures=16 over_ms=3410
+joined owner gateway wake: Connection refused (os error 61)
+joined_route_close: carrier already ended
+joined owner gateway wake: Connection refused (os error 61)
+diag: managed seat unbound (seed runtime closed)
+test startup::retirement::failed_result_polls_after_tracking_wall_keep_serve_live_until_actual_member_end ... ok
+joined owner gateway wake: Connection refused (os error 61)
+joined_route_close: carrier already ended
+joined owner gateway wake: Connection refused (os error 61)
+diag: managed seat unbound (seed runtime closed)
+test startup::retirement::red_a_tracking_timeout_does_not_retire_a_live_serving_epoch_or_refuse_chat ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 47 filtered out; finished in 8.54s
+
+real 20.44
+user 18.42
+sys 1.55

@@ -271,6 +271,11 @@ impl Env<'_> {
     }
 }
 impl StepEnv for Env<'_> {
+    fn set_route_readiness(&mut self, readiness: crate::chain::RouteReadiness) {
+        if let Some(mut run) = self.current() {
+            run.set_route_readiness(readiness);
+        }
+    }
     fn progress(&mut self, detail: &str) {
         if let Some(mut run) = self.current() {
             run.progress(Some(detail));
@@ -362,7 +367,8 @@ pub struct RunnerView {
 }
 
 impl RunnerView {
-    /// Read the machine only: no tick, clock, chain collaborator or live status probe.
+    /// Read the machine and its bound in-memory route readiness only: no tick,
+    /// chain collaborator or live status probe. Joined readiness also checks its expiry clock.
     pub fn snapshot(&self) -> Value {
         lock(&self.shared.run).snapshot().to_value()
     }

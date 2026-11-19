@@ -1,0 +1,3 @@
+lanePP pruned archived/linked intermediate objects: count=15176 logical_bytes=3642082200 root=/Users/mycelium-dev/Projects/mycelium-v02-m4-lanePP/target/debug/deps
+Filesystem     1G-blocks Used Available Capacity iused     ifree %iused  Mounted on
+/dev/disk3s1s1       926   11        24    33%  458725 255808160    0%   /

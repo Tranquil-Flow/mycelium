@@ -8,6 +8,12 @@ use serde_json::Value;
 /// Host-owned workflow lifecycle. Implementations use the existing workflow and
 /// local-agent callback; they must not create a planner, signer or client journal.
 pub trait WorkPort {
+    /// Readiness of this exact workflow/epoch, not a lookup of the host's current run.
+    /// None is for legacy/injected ports without a joined epoch. Joined production
+    /// ports must supply a fail-closed reader, including signed expiry and retirement.
+    fn route_readiness(&self) -> Option<crate::chain::RouteReadiness> {
+        None
+    }
     /// Install the existing local tick as cleanup_progress, if a workflow exists.
     /// Callback lifetime remains host-owned, including after this borrow ends.
     fn install_cleanup_progress(&mut self) -> Result<(), StepError>;
