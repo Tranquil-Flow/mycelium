@@ -1,0 +1,10 @@
+Lane PP round 2 preflight; no Cargo launched
+2026-11-19T11:25:39Z
+1f81f44e64905681475c5ac1c3f10c5626628c01
+lane/prepare-honesty
+?? qualification/lanePP/round2-preflight.log
+Filesystem   1G-blocks Used Available Capacity  iused     ifree %iused  Mounted on
+/dev/disk3s5       926  871        24    98% 12321967 255656480    5%   /System/Volumes/Data
+Filesystem   1024-blocks      Used Available Capacity  iused     ifree %iused  Mounted on
+/dev/disk3s5   971350180 913985240  25565648    98% 12321967 255656480    5%   /System/Volumes/Data
+12:25  up  3:34, 18 users, load averages: 4.78 5.03 5.18
