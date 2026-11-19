@@ -479,12 +479,24 @@ impl owner_chain::ChainPorts for ModelPorts {
             _ => Ok(None),
         }
     }
-    fn check_rollover_members(&self, _: &Value) -> Result<(), StepError> {
-        Err(owner_chain::unwired(
-            "model",
-            "NP-L10-rollover",
-            "SE-L10-ROLLOVER",
-        ))
+    /// `_check_rollover_members(binding)` (`demo_chain.py:1072-1078` @ v0.1.4): the run continues
+    /// only over the same members with the same identities. `local` is this Mac's running local
+    /// contributor (`app.local_contributor.member.node_id`; none answers `AttributeError`, as there),
+    /// the remote members are the current reports'. Unwired, every continuation was refused
+    /// `not_ported` at the worker wall and the run ended `rollover_failed` (rv48 cert, ledger 277).
+    fn check_rollover_members(&self, binding: &Value) -> Result<(), StepError> {
+        let local = self
+            .0
+            .with(|c| c.run.contributor.as_ref().map(|s| s.node.clone()))
+            .ok_or_else(|| StepError::Exception {
+                class: "AttributeError".to_owned(),
+            })?;
+        owner_run::steps::exchange::check_rollover_members(
+            &mut OwnerPorts::new(self.0.clone()),
+            &local,
+            api::app_host::now(),
+            binding,
+        )
     }
 }
 

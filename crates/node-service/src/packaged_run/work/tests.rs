@@ -1174,7 +1174,10 @@ fn a_rollovers_model_step_checks_its_members_instead_of_refusing_as_unported() {
     }
     let binding = json!({"model": ["m", "c", "d"], "members": Value::Object(members)});
     assert_eq!(
-        ports.model.check_rollover_members(&binding).map_err(|e| format!("{e:?}")),
+        ports
+            .model
+            .check_rollover_members(&binding)
+            .map_err(|e| format!("{e:?}")),
         Ok(()),
         "the same members and identities continue"
     );
