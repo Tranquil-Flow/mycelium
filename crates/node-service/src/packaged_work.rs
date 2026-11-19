@@ -587,11 +587,19 @@ impl Service {
             .shared
             .announcement
             .lock()
-            .map_err(|_| "member_announcement_poisoned")? = announcement;
+            .map_err(|_| "member_announcement_poisoned")? = announcement.clone();
         if let Err(code) = self.shared.live() {
             self.close()?;
             return Err(code);
         }
+        // No announcement/session/dispatcher guard survives here. Advance the control
+        // loop's existing lifetime only after admission; unchanged refreshes retain it.
+        // Before Ok, repin revokes preceding results for polls authorized after this
+        // update (an answer already authorized before revocation need not be recalled).
+        self.shared
+            .pins
+            .repin(&announcement)
+            .map_err(|e| e.0.to_owned())?;
         Ok(())
     }
     /// Standing acceptance is preflight only: no owner-authored consent and no native launch.

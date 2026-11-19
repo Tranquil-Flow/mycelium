@@ -50,6 +50,9 @@ use std::{
 use transport::{Channel, Clock, ConnectionFence};
 pub type Result<T> = std::result::Result<T, String>;
 
+#[cfg(test)]
+mod tests;
+
 // ---- The serial operation queue (from examples/shard_member/control.rs) ----
 
 /// Operations that block the member for long: each needs its own operation_id.
@@ -61,15 +64,44 @@ pub enum Origin {
     Stdin,
     Remote,
 }
-type Active = Arc<Mutex<Option<(Option<u64>, Arc<AtomicBool>)>>>;
+/// Private result provenance, not command admission. A pin replacement revokes its token;
+/// a fresh control loop has a distinct service token even if it shares the same Pins.
+#[derive(Clone)]
+struct ResultScope {
+    authority: Arc<AtomicBool>,
+    service: Arc<()>,
+}
+impl ResultScope {
+    fn new() -> Self {
+        Self {
+            authority: Arc::new(AtomicBool::new(true)),
+            service: Arc::new(()),
+        }
+    }
+    fn matches(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.authority, &other.authority)
+            && Arc::ptr_eq(&self.service, &other.service)
+            && self.authority.load(Ordering::SeqCst)
+    }
+}
+struct ActiveOperation {
+    id: Option<u64>,
+    cancelled: Arc<AtomicBool>,
+    scope: Option<ResultScope>,
+}
+type Active = Arc<Mutex<Option<ActiveOperation>>>;
+struct Completed {
+    reply: Value,
+    scope: Option<ResultScope>,
+}
 /// Cancels the active operation when dropped (the local operator's reader ended).
 pub struct CancelOnExit(Active);
 impl Drop for CancelOnExit {
     fn drop(&mut self) {
         match self.0.lock() {
             Ok(active) => {
-                if let Some((_, cancel)) = active.as_ref() {
-                    cancel.store(true, Ordering::SeqCst);
+                if let Some(active) = active.as_ref() {
+                    active.cancelled.store(true, Ordering::SeqCst);
                 }
             }
             Err(_) => eprintln!("operator_state_poisoned"),
@@ -105,7 +137,7 @@ pub struct Dispatcher {
     tx: Mutex<Option<mpsc::SyncSender<Result<Operation>>>>,
     active: Active,
     last_id: Mutex<u64>,
-    results: Mutex<BTreeMap<u64, Value>>,
+    results: Mutex<BTreeMap<u64, Completed>>,
     wall: Duration,
     closing: AtomicBool,
 }
@@ -135,14 +167,22 @@ impl Dispatcher {
     /// Cancellation of the active operation with exactly this id.
     pub fn cancel(&self, id: Option<u64>) -> Result<Value> {
         let current = self.active.lock().map_err(|_| "operator_state_poisoned")?;
-        let matched = id.is_some() && current.as_ref().is_some_and(|(held, _)| *held == id);
-        if let Some((_, flag)) = current.as_ref().filter(|_| matched) {
-            flag.store(true, Ordering::SeqCst);
+        let matched = id.is_some() && current.as_ref().is_some_and(|active| active.id == id);
+        if let Some(active) = current.as_ref().filter(|_| matched) {
+            active.cancelled.store(true, Ordering::SeqCst);
         }
         Ok(json!({"operation_id":id,"cancel_requested":matched,"cleanup_proven":false}))
     }
     /// Admit one operation; `Err(code)` is an immediate refusal reply.
     pub fn admit(&self, request: Value, origin: Origin) -> std::result::Result<(), &'static str> {
+        self.admit_scoped(request, origin, None)
+    }
+    fn admit_scoped(
+        &self,
+        request: Value,
+        origin: Origin,
+        scope: Option<ResultScope>,
+    ) -> std::result::Result<(), &'static str> {
         let command = request["command"]
             .as_str()
             .ok_or("operator_command_invalid")?;
@@ -168,7 +208,11 @@ impl Dispatcher {
             *last = id;
         }
         let cancelled = Arc::new(AtomicBool::new(false));
-        *current = Some((id, cancelled.clone()));
+        *current = Some(ActiveOperation {
+            id,
+            cancelled: cancelled.clone(),
+            scope,
+        });
         if command == "close" {
             self.closing.store(true, Ordering::SeqCst);
         }
@@ -186,11 +230,26 @@ impl Dispatcher {
             }))
             .map_err(|_| "operator_dispatch_failed")
     }
-    /// Remote result retrieval: the finished reply (removed), or pending.
+    /// Low-level destructive retrieval, unchanged for local callers. The signed control path
+    /// uses `result_scoped` instead; an operation number alone grants no remote result access.
     pub fn result(&self, id: u64) -> Result<Value> {
         let mut results = self.results.lock().map_err(|_| "operator_state_poisoned")?;
         Ok(match results.remove(&id) {
-            Some(reply) => json!({"operation_id":id,"finished":true,"reply":reply}),
+            Some(completed) => json!({"operation_id":id,"finished":true,"reply":completed.reply}),
+            None => json!({"operation_id":id,"finished":false}),
+        })
+    }
+    fn result_scoped(&self, id: u64, scope: Option<&ResultScope>) -> Result<Value> {
+        let results = self.results.lock().map_err(|_| "operator_state_poisoned")?;
+        let completed = results
+            .get(&id)
+            .filter(|result| match (&result.scope, scope) {
+                (Some(held), Some(scope)) => held.matches(scope),
+                (None, None) => true,
+                _ => false,
+            });
+        Ok(match completed {
+            Some(completed) => json!({"operation_id":id,"finished":true,"reply":completed.reply}),
             None => json!({"operation_id":id,"finished":false}),
         })
     }
@@ -198,7 +257,7 @@ impl Dispatcher {
         self.active
             .lock()
             .ok()
-            .and_then(|a| a.as_ref().and_then(|(id, _)| *id))
+            .and_then(|a| a.as_ref().and_then(|active| active.id))
     }
     /// A guard that cancels the active operation when the local operator's reader ends.
     pub fn cancel_on_exit(&self) -> CancelOnExit {
@@ -206,13 +265,13 @@ impl Dispatcher {
     }
     /// Cancel whatever operation is active (the local operator is gone).
     pub fn cancel_active(&self) -> Result<()> {
-        if let Some((_, cancel)) = self
+        if let Some(active) = self
             .active
             .lock()
             .map_err(|_| "operator_state_poisoned")?
             .as_ref()
         {
-            cancel.store(true, Ordering::SeqCst);
+            active.cancelled.store(true, Ordering::SeqCst);
         }
         Ok(())
     }
@@ -237,9 +296,22 @@ impl Dispatcher {
         local: impl FnOnce(&Value) -> Result<()>,
     ) -> Result<()> {
         if operation.origin == Origin::Remote {
+            // The existing per-operation cancellation Arc carries identity through the public
+            // Operation without changing its shape. Never label completion with today's pin,
+            // or borrow another operation's provenance just because its numeric id matches.
+            let scope = self
+                .active
+                .lock()
+                .map_err(|_| "operator_state_poisoned")?
+                .as_ref()
+                .filter(|active| {
+                    active.id == operation.id
+                        && Arc::ptr_eq(&active.cancelled, &operation.cancelled)
+                })
+                .and_then(|active| active.scope.clone());
             let mut results = self.results.lock().map_err(|_| "operator_state_poisoned")?;
             if let Some(id) = operation.id {
-                results.insert(id, out);
+                results.insert(id, Completed { reply: out, scope });
             }
             while results.len() > KEPT_RESULTS {
                 results.pop_first();
@@ -319,26 +391,61 @@ pub enum OwnerTrust {
 /// The member's current announced owner pin, shared between its announcement reader and its
 /// control endpoint.
 #[derive(Clone, Default)]
-pub struct Pins(Arc<Mutex<Option<OwnerPin>>>);
+pub struct Pins(Arc<Mutex<Option<HeldPin>>>);
+struct HeldPin {
+    pin: OwnerPin,
+    // Exact existing signed announcement fields; absent/null values do not invent a run.
+    run: Value,
+    deployment: Value,
+    owner_incarnation: Value,
+    authority: Arc<AtomicBool>,
+}
+impl Drop for HeldPin {
+    fn drop(&mut self) {
+        self.authority.store(false, Ordering::SeqCst);
+    }
+}
 impl Pins {
     pub fn new() -> Self {
         Self::default()
     }
     /// Take the pin of a newly verified announcement; a verified announcement without a valid pin
-    /// clears the held one (fail closed) and names why.
+    /// clears the held one (fail closed) and names why. A refresh of the same live authority
+    /// preserves result retries; replacement/clearing permanently revokes the old lifecycle.
     pub fn repin(
         &self,
         verified: &VerifiedAnnouncement,
     ) -> std::result::Result<OwnerPin, PinRefusal> {
         let pin = OwnerPin::from_announcement(verified);
-        *self.held() = pin.as_ref().ok().cloned();
+        let mut held = self.held();
+        match &pin {
+            Ok(pin) => {
+                let a = verified.announcement();
+                let unchanged = held.as_ref().is_some_and(|old| {
+                    old.pin == *pin
+                        && old.run == a["run_id"]
+                        && old.deployment == a["deployment_id"]
+                        && old.owner_incarnation == a["owner_incarnation"]
+                });
+                if !unchanged {
+                    *held = Some(HeldPin {
+                        pin: pin.clone(),
+                        run: a["run_id"].clone(),
+                        deployment: a["deployment_id"].clone(),
+                        owner_incarnation: a["owner_incarnation"].clone(),
+                        authority: Arc::new(AtomicBool::new(true)),
+                    });
+                }
+            }
+            Err(_) => *held = None,
+        }
         pin
     }
     /// The pin held now, if any.
     pub fn current(&self) -> Option<OwnerPin> {
-        self.held().clone()
+        self.held().as_ref().map(|held| held.pin.clone())
     }
-    fn held(&self) -> MutexGuard<'_, Option<OwnerPin>> {
+    fn held(&self) -> MutexGuard<'_, Option<HeldPin>> {
         // A pin is replaced whole; a panicked holder cannot leave a half-written one.
         self.0
             .lock()
@@ -346,6 +453,25 @@ impl Pins {
     }
 }
 impl OwnerTrust {
+    fn snapshot(&self, service: &ResultScope) -> Result<CommandAuthority> {
+        match self {
+            Self::Operator(owner) => Ok(CommandAuthority {
+                owner: *owner,
+                scope: service.clone(),
+            }),
+            Self::Announced(pins) => {
+                let held = pins.held();
+                let held = held.as_ref().ok_or("owner_pin_missing")?;
+                Ok(CommandAuthority {
+                    owner: held.pin.endpoint(),
+                    scope: ResultScope {
+                        authority: held.authority.clone(),
+                        service: service.service.clone(),
+                    },
+                })
+            }
+        }
+    }
     /// The owner control key obeyed now; `owner_pin_missing` when no announced pin is held.
     pub fn owner(&self) -> Result<iroh::EndpointId> {
         match self {
@@ -356,6 +482,47 @@ impl OwnerTrust {
                 .ok_or_else(|| "owner_pin_missing".into()),
         }
     }
+}
+/// The same snapshot supplies the TLS/signer pin AND result provenance. No pin reread after
+/// verification can attach an old command to a new authority (including A -> B -> A).
+struct CommandAuthority {
+    owner: iroh::EndpointId,
+    scope: ResultScope,
+}
+struct VerifiedCommand {
+    sequence: u64,
+    request: Value,
+    scope: ResultScope,
+}
+impl CommandAuthority {
+    fn verify(
+        self,
+        remote: iroh::EndpointId,
+        envelope: &Value,
+        me: &iroh::EndpointId,
+        last: u64,
+        now: f64,
+    ) -> Result<VerifiedCommand> {
+        let (sequence, request) = verify_from(self.owner, remote, envelope, me, last, now)?;
+        Ok(VerifiedCommand {
+            sequence,
+            request,
+            scope: self.scope,
+        })
+    }
+}
+fn verify_from(
+    owner: iroh::EndpointId,
+    remote: iroh::EndpointId,
+    envelope: &Value,
+    me: &iroh::EndpointId,
+    last: u64,
+    now: f64,
+) -> Result<(u64, Value)> {
+    if remote != owner {
+        return Err("member_control_owner_unpinned".into());
+    }
+    member_control::verify_command(envelope, &owner, me, last, now).map_err(|e| e.code.to_owned())
 }
 /// Admission of one signed command that arrived on a control connection from `remote`: the
 /// connection's TLS-pinned key and the command's signing key must both be the owner key obeyed
@@ -368,11 +535,7 @@ pub fn admit_command(
     last: u64,
     now: f64,
 ) -> Result<(u64, Value)> {
-    let owner = trust.owner()?;
-    if remote != owner {
-        return Err("member_control_owner_unpinned".into());
-    }
-    member_control::verify_command(envelope, &owner, me, last, now).map_err(|e| e.code.to_owned())
+    verify_from(trust.owner()?, remote, envelope, me, last, now)
 }
 /// The accept/verify/dispatch loop of the member's control endpoint, on a host the caller bound
 /// (and, in direct-LAN mode, admitted the operator's owner key on). Runs until `stop` is set.
@@ -439,6 +602,7 @@ fn control_loop_inner(
             .map_err(|_| "budget_unavailable")?
             .millis(),
     );
+    let service = ResultScope::new();
     let mut last = 0u64;
     let mut admitted: Option<iroh::EndpointId> = None;
     // Direct LAN: the receive filter's drops and the pre-send filter's refusals, reported when
@@ -523,18 +687,16 @@ fn control_loop_inner(
         if let Ok(delivery) = received {
             let command: Value = serde_json::from_slice(delivery.bytes()).unwrap_or(Value::Null);
             let handling = Instant::now();
-            let answer = match admit_command(
-                trust,
-                connection.remote_id(),
-                &command,
-                &me,
-                last,
-                app_host::now(),
-            ) {
-                Ok((sequence, request)) => {
-                    last = sequence;
-                    away.command = request["command"].as_str().unwrap_or_default().to_owned();
-                    handle(dispatcher, status, request)
+            let answer = match trust.snapshot(&service).and_then(|authority| {
+                authority.verify(connection.remote_id(), &command, &me, last, app_host::now())
+            }) {
+                Ok(verified) => {
+                    last = verified.sequence;
+                    away.command = verified.request["command"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_owned();
+                    handle_verified(dispatcher, status, verified)
                 }
                 Err(code) => {
                     away.command = format!("refused:{code}");
@@ -589,7 +751,20 @@ fn control_loop_inner(
     }
     Ok(())
 }
+// Preserve the original unscoped dispatcher regression seam; it is not a remote entry point.
+#[cfg(test)]
 fn handle(dispatcher: &Dispatcher, status: &Status, request: Value) -> Value {
+    handle_scoped(dispatcher, status, request, None)
+}
+fn handle_verified(dispatcher: &Dispatcher, status: &Status, command: VerifiedCommand) -> Value {
+    handle_scoped(dispatcher, status, command.request, Some(command.scope))
+}
+fn handle_scoped(
+    dispatcher: &Dispatcher,
+    status: &Status,
+    request: Value,
+    scope: Option<ResultScope>,
+) -> Value {
     let command = request["command"].as_str().unwrap_or_default();
     let id = request["operation_id"].as_u64();
     let result = match command {
@@ -624,12 +799,12 @@ fn handle(dispatcher: &Dispatcher, status: &Status, request: Value) -> Value {
             })
             .map_err(|_| "member_status_poisoned".to_owned()),
         "result" => match id {
-            Some(id) => dispatcher.result(id),
+            Some(id) => dispatcher.result_scoped(id, scope.as_ref()),
             None => Err("operator_operation_id_required".into()),
         },
         "cancel_operation" => dispatcher.cancel(id.filter(|id| *id > 0)),
         _ => dispatcher
-            .admit(request.clone(), Origin::Remote)
+            .admit_scoped(request.clone(), Origin::Remote, scope)
             .map(|()| json!({"accepted":true,"operation_id":id}))
             .map_err(str::to_owned),
     };

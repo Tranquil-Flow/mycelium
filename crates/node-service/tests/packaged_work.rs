@@ -672,3 +672,6 @@ fn the_owners_portmapping_is_frozen_with_its_run() {
     network.quit().ok();
     std::fs::remove_dir_all(&root).ok();
 }
+
+#[path = "packaged_work/result_lifetime.rs"]
+mod result_lifetime;

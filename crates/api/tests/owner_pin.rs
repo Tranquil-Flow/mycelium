@@ -22,6 +22,9 @@ use serde_json::{Value, json};
 #[path = "support/member_remote.rs"]
 mod member_remote;
 
+#[path = "owner_pin/result_retention.rs"]
+mod result_retention;
+
 fn oracle() -> Value {
     serde_json::from_str(include_str!("fixtures/oracle_signed_exchange.json")).unwrap()
 }
