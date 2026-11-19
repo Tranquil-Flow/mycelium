@@ -540,11 +540,29 @@ impl<H: MemberHost> MemberAgent<H> {
 }
 
 /// Close this Mac's bootstrap worker (its pump removes the stage and ACKs the cleanup).
-/// The end of one pass's work publication (announcement read + endpoint publish).
+/// Codes of a relay/seed exchange that did not reach the owner or got no answer from it, never an
+/// owner's refusal (`run_exchange_client::seed_code`: a transport failure, a proxy/edge error page,
+/// a response timeout).
+const TRANSIENT_PUBLICATION: &[&str] = &[
+    "managed_control_unreachable",
+    "managed_control_response_timeout",
+    "managed_control_internal_error",
+];
+/// The end of one pass's work publication (announcement read + endpoint publish). A failed exchange
+/// keeps the member's work and the next pass (2 s) tries again, as v0.1.4 contains a failed
+/// standing poll as `standing_error` without touching running work (app.py:1201-1212 @ f4e366e9).
+/// It stays bounded: a lapsed membership drops the binding and the pass closes work above, and the
+/// owner's own deadlines end a run it can no longer drive. Any answer from the owner closes work.
 fn settle_publication<H: MemberHost>(host: &H, publication: Result<(), String>) {
-    if let Err(code) = publication {
-        host.close_work();
-        eprintln!("member_work_publication:{code}");
+    match publication {
+        Ok(()) => {}
+        Err(code) if TRANSIENT_PUBLICATION.contains(&code.as_str()) => {
+            eprintln!("member_work_publication:{code} work_kept");
+        }
+        Err(code) => {
+            host.close_work();
+            eprintln!("member_work_publication:{code}");
+        }
     }
 }
 fn close_worker<H: MemberHost>(host: &H) -> OResult<()> {
@@ -2042,7 +2060,11 @@ mod settle_tests {
             "managed_control_response_timeout",
             "managed_control_internal_error",
         ] {
-            assert_eq!(closes_after(code), 0, "{code}: work must survive a transport failure");
+            assert_eq!(
+                closes_after(code),
+                0,
+                "{code}: work must survive a transport failure"
+            );
         }
     }
     #[test]
@@ -2054,10 +2076,17 @@ mod settle_tests {
             "managed_owner_closed",
             "member_work_exchange_poisoned",
         ] {
-            assert_eq!(closes_after(code), 1, "{code}: an answer from the owner closes work");
+            assert_eq!(
+                closes_after(code),
+                1,
+                "{code}: an answer from the owner closes work"
+            );
         }
         let host = Host::default();
         settle_publication(&host, Ok(()));
-        assert_eq!(host.work_closes.load(std::sync::atomic::Ordering::SeqCst), 0);
+        assert_eq!(
+            host.work_closes.load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
     }
 }
