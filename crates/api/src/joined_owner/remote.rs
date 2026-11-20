@@ -70,7 +70,13 @@ impl RemoteChannel {
     ) -> Result<(Self, mpsc::Receiver<Value>), Refusal> {
         let budgets = Budgets {
             close: span(B::RouterClose)?,
-            call: span(B::SidecarLocalHandshake)?,
+            // Across networks the first call's connect runs through the relay (see
+            // `runtime::iroh_host::control_handshake`); on the LAN it stays 2 s.
+            call: runtime::iroh_host::control_handshake(
+                lan.as_ref()
+                    .is_some_and(|(_, policy)| policy.relay().is_some()),
+            )
+            .map_err(|_| Refusal("budget_unavailable".into()))?,
             poll: span(B::PyMyceliumA13MacosManagedControlHttpRetryInitialSecondsL317)?,
             wall: span(B::MemberChosenWall)?,
             pending: usize::try_from(
@@ -213,7 +219,7 @@ fn drive(
     if ready.send(Ok(())).is_err() {
         eprintln!("member control starter gone");
     }
-    // One signed call, bounded by the local handshake budget.
+    // One signed call, bounded by the control handshake budget (relay-sized across networks).
     let call = |remote: &Remote, request: Value| -> Result<Value, String> {
         let deadline = until(budgets.call).ok_or("deadline_invalid")?;
         #[cfg(test)]

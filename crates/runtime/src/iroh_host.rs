@@ -185,6 +185,22 @@ fn count(id: BudgetId) -> Result<usize, Error> {
 fn lan_pin_capacity() -> Result<usize, Error> {
     count(BudgetId::SidecarQueueCapacity)
 }
+/// One control handshake's cap: a connect on the owner side, an inbound handshake on the member
+/// side. On the direct LAN it is the local handshake budget (`SidecarLocalHandshake`, 2 s): the
+/// peer is one hop away. Across networks the first handshake of a freshly bound endpoint runs
+/// through Mycelium's relay (both ends attach to it, then QUIC handshakes over it) and a mobile
+/// hotspot adds its own latency, so the cap is v0.1.4's bound for the same cross-network
+/// owner-to-member connect (the managed-control mailbox connect, 30 s). With the 2 s cap the
+/// owner's first `consent_status` call timed out on hardware (rv51 hotspot session,
+/// `control_connect_timeout ... allowance_ms=2000`) while the member saw the late handshake
+/// arrive (`member_control_refused ... accept_Authentication`).
+pub fn control_handshake(across_networks: bool) -> Result<Duration, Error> {
+    budget(if across_networks {
+        BudgetId::PyMyceliumA13MacosManagedControlManagedcontrolmailboxConnectTimeoutL823
+    } else {
+        BudgetId::SidecarLocalHandshake
+    })
+}
 fn budget(id: BudgetId) -> Result<Duration, Error> {
     Ok(Duration::from_millis(
         id.span(Entries::ZERO)
@@ -1101,7 +1117,7 @@ impl<'a> LoopbackHost<'a> {
             Done(Option<Result<Handshake, tokio::task::JoinError>>),
             Arrived(Option<Box<iroh::endpoint::Incoming>>),
         }
-        let handshake = budget(BudgetId::SidecarLocalHandshake)?;
+        let handshake = control_handshake(self.cross.is_some())?;
         let slots = count(BudgetId::RelayConnectionSlots)?;
         let cross = self.cross.clone();
         let mut pool = self.handshakes.lock().map_err(|_| Error::Unavailable)?;
@@ -1593,5 +1609,26 @@ mod late_close_tests {
                 "the late close's cleanup error replaced the deadline error"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod control_handshake_tests {
+    use super::*;
+    #[test]
+    fn a_cross_network_handshake_gets_the_relay_bound_and_the_lan_keeps_two_seconds() {
+        assert_eq!(
+            control_handshake(false).unwrap(),
+            Duration::from_millis(2_000)
+        );
+        assert_eq!(
+            control_handshake(true).unwrap(),
+            Duration::from_millis(30_000)
+        );
+        // Within the control call ceiling, so a cross-network call is never refused as too long.
+        assert!(
+            control_handshake(true).unwrap()
+                <= budget(BudgetId::NodeControlCallTimeoutCeiling).unwrap()
+        );
     }
 }
