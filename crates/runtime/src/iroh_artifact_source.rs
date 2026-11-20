@@ -118,6 +118,7 @@ impl<S: ArtifactObjects> ArtifactService<S> {
                 Ok(Ok(raw)) => raw,
                 _ => return Ok(()),
             };
+            let serving = std::time::Instant::now();
             let precheck = precheck(connection.remote_id(), &raw);
             let (header, data, pace) = match precheck {
                 Err(error) => (
@@ -193,6 +194,7 @@ impl<S: ArtifactObjects> ArtifactService<S> {
                 },
             };
             let pace = pace.millis().min(self.limits.maximum_pace.millis());
+            let prepared = serving.elapsed();
             if pace > 0 {
                 tokio::time::sleep(Duration::from_millis(pace)).await;
             }
@@ -212,6 +214,13 @@ impl<S: ArtifactObjects> ArtifactService<S> {
                 // that behavior, but expose the failure without payload data.
                 eprintln!("artifact_source_stream_finish_failed");
             }
+            // Lane XC diagnostic: verify + read + sign, pacing, and the write into the stream.
+            eprintln!(
+                "artifact_source_chunk bytes={} prepare_ms={} pace_ms={pace} total_ms={}",
+                data.len(),
+                prepared.as_millis(),
+                serving.elapsed().as_millis()
+            );
         }
     }
 }

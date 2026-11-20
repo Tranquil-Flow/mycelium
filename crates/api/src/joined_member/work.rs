@@ -1209,6 +1209,7 @@ impl Work {
                 offset_bytes: offset,
                 length_bytes: length,
             };
+            let fetching = Instant::now();
             receive
                 .fetch_chunk_checked(
                     &mut link,
@@ -1230,6 +1231,11 @@ impl Work {
                     },
                 )
                 .map_err(|e| e.0)?;
+            // Lane XC diagnostic: the member's time per signed chunk (request to stored bytes).
+            eprintln!(
+                "member_fetch_chunk offset={offset} bytes={length} ms={}",
+                fetching.elapsed().as_millis()
+            );
             offset += length;
         }
         link.finish();

@@ -138,6 +138,7 @@ impl<'a, C: Clock> ChunkSession<'a, C> {
         let raw = self.runtime.block_on(async {
             let exchange = async {
             let wait = || self.limits.wait(self.clock, deadline);
+            let began = std::time::Instant::now();
             let (mut send, mut recv) = tokio::time::timeout(wait()?, connection.open_bi())
                 .await
                 .map_err(|_| fail("artifact_source_timeout"))?
@@ -148,10 +149,20 @@ impl<'a, C: Clock> ChunkSession<'a, C> {
                 .map_err(|_| fail("artifact_source_unreachable"))?;
             send.finish()
                 .map_err(|_| fail("artifact_source_unreachable"))?;
-            tokio::time::timeout(wait()?, recv.read_to_end(maximum))
+            let sent = began.elapsed();
+            let read = tokio::time::timeout(wait()?, recv.read_to_end(maximum))
                 .await
                 .map_err(|_| fail("artifact_source_timeout"))?
-                .map_err(|_| fail("artifact_source_response_invalid"))
+                .map_err(|_| fail("artifact_source_response_invalid"));
+            // Lane XC diagnostic: request sent vs response read, on this chunk's stream.
+            eprintln!(
+                "artifact_chunk_wire offset={} sent_ms={} read_ms={} {}",
+                request.offset_bytes,
+                sent.as_millis(),
+                began.elapsed().saturating_sub(sent).as_millis(),
+                crate::iroh_host::path_report(connection)
+            );
+            read
             };
             let Some(check) = checkpoint else { return exchange.await; };
             let interval = budgets::BudgetId::RegistryPoll.span(budgets::Entries::ZERO)
