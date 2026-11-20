@@ -146,3 +146,90 @@ fn probe_a_cross_network_reply_returns_over_a_relay_started_connection() {
     client.close(&clock, deadline(&clock, 5)).unwrap();
     server.close(&clock, deadline(&clock, 5)).unwrap();
 }
+
+/// Lane XC root cause, on one Mac: a SECOND endpoint bound with the same key registers at the
+/// relay after the first; the relay keeps only the newest connection per key active
+/// (`iroh-relay-1.0.2/src/server/clients.rs:84-98`), so the server's reply to the first one,
+/// which it sends through the relay, is delivered to the second and lost. This is the packaged
+/// owner on hardware (rv52f: two owner control endpoints `id=3cda344136`, one per joined Mac).
+#[test]
+#[ignore = "network: registers at relay.mycelium.now"]
+fn probe_a_second_endpoint_with_the_same_key_steals_the_relayed_reply() {
+    let relay: iroh::RelayUrl = MYCELIUM_RELAY_URL.parse().unwrap();
+    let iface: IpAddr = std::env::var("PROBE_IFACE")
+        .expect("PROBE_IFACE")
+        .parse()
+        .unwrap();
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let clock = Mono(Instant::now());
+    let policy = || LanPolicy::private_only().across_networks(relay.clone());
+    let (server_key, client_key) = (SecretKey::generate(), SecretKey::generate());
+    let bind = |key: &SecretKey, ip: IpAddr| {
+        LoopbackHost::bind_lan(
+            &rt,
+            &clock,
+            deadline(&clock, 15),
+            key.clone(),
+            &[Channel::NodeControl],
+            ip,
+            policy(),
+        )
+        .expect("bind across networks")
+    };
+    let mut server = bind(&server_key, IpAddr::V4(Ipv4Addr::LOCALHOST));
+    let mut client = bind(&client_key, iface);
+    server.relay_ready(&clock, deadline(&clock, 15)).ok();
+    client.relay_ready(&clock, deadline(&clock, 15)).ok();
+    // The same key, bound second: now the relay's active client for that key.
+    let mut twin = bind(&client_key, iface);
+    twin.relay_ready(&clock, deadline(&clock, 15)).ok();
+    std::thread::sleep(Duration::from_secs(1));
+    let signed = EndpointAddr::from_parts(
+        server_key.public(),
+        [TransportAddr::Ip(SocketAddr::new(
+            "192.0.2.1".parse().unwrap(),
+            9,
+        ))],
+    );
+    let reply = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            if let Ok(c) = server.accept(&clock, deadline(&clock, 30)) {
+                rt.block_on(async {
+                    if let Ok((mut send, mut recv)) = c.accept_bi().await {
+                        let _cmd = recv.read_to_end(1 << 16).await;
+                        send.write_all(&[b'r'; 2_500]).await.ok();
+                        send.finish().ok();
+                        tokio::time::timeout(Duration::from_secs(4), c.closed())
+                            .await
+                            .ok();
+                    }
+                });
+            }
+        });
+        match client.connect_channel(&signed, Channel::NodeControl, &clock, deadline(&clock, 20)) {
+            Err(e) => format!("connect {e:?}"),
+            Ok(c) => {
+                let r = rt.block_on(async {
+                    let (mut send, mut recv) = c.open_bi().await.unwrap();
+                    send.write_all(&[b'c'; 900]).await.unwrap();
+                    send.finish().unwrap();
+                    tokio::time::timeout(Duration::from_secs(10), recv.read_to_end(1 << 16)).await
+                });
+                c.close(0u32.into(), b"done");
+                format!("{:?}", r.map(|r| r.map(|b| b.len())))
+            }
+        }
+    });
+    println!("with a same-key twin at the relay: {reply}");
+    twin.close(&clock, deadline(&clock, 5)).unwrap();
+    client.close(&clock, deadline(&clock, 5)).unwrap();
+    server.close(&clock, deadline(&clock, 5)).unwrap();
+    assert_ne!(
+        reply, "Ok(Ok(2500))",
+        "expected the twin to steal the relayed reply"
+    );
+}

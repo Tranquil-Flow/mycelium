@@ -216,6 +216,7 @@ pub fn sign_reply(signer: &Identity, command: &Value, reply: Value) -> Result<Va
     )
 }
 /// Owner-side handle on one remote member control endpoint.
+#[derive(Clone)]
 pub struct Remote {
     pub addr: iroh::EndpointAddr,
     /// The member's enrolled key digest once paired (from the seed row).

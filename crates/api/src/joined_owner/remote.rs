@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 //! The owner's side of the signed member control channel as product code
-//! (moved from the B8 owner test driver). One owned thread per member holds
-//! the owner control endpoint (LocalOnly loopback, or direct LAN on exactly one
-//! interface), admits each operator command with one signed call and polls its
+//! (moved from the B8 owner test driver). One owned thread per member drives
+//! its calls through the run's ONE owner control endpoint per owner key ([`Hub`]:
+//! LocalOnly loopback, direct LAN or across networks on exactly one interface), admits each operator command with one signed call and polls its
 //! member-signed result by operation id. After a successful `accept`, replies
 //! must be signed by the member's enrolled key (`member_control::Remote`).
 //! Every control call is bounded by the local handshake budget. Finite operations
@@ -163,72 +163,22 @@ fn drive(
             eprintln!("member control starter gone");
         }
     };
-    let Ok(rt) = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
-        .enable_all()
-        .build()
-    else {
-        return refuse("runtime_failed".into());
-    };
-    let clock = crate::managed_carrier::HostClock::default();
-    let until = |d: Duration| -> Option<MonoInstant> {
-        clock
-            .monotonic()
-            .checked_add(budgets::Span::from_millis(
-                u64::try_from(d.as_millis()).ok()?,
-            ))
-            .ok()
-    };
-    let Some(bind_deadline) = until(budgets.close) else {
-        return refuse("deadline_invalid".into());
-    };
-    let bound = match lan {
-        Some((ip, policy)) => LoopbackHost::bind_lan(
-            &rt,
-            &clock,
-            bind_deadline,
-            secret.clone(),
-            &[Channel::NodeControl],
-            ip,
-            policy,
-        ),
-        None => LoopbackHost::bind_protocols(
-            &rt,
-            &clock,
-            bind_deadline,
-            secret.clone(),
-            &[Channel::NodeControl],
-        ),
-    };
-    let mut host = match bound {
-        Ok(host) => host,
-        Err(e) => return refuse(format!("member_control_bind_failed:{e:?}")),
-    };
-    let owner = match Owner::new(&secret) {
-        Ok(owner) => owner,
-        Err(e) => return refuse(e.code.to_owned()),
-    };
-    let concurrency = match B::NodeControlCallConcurrency.count() {
-        Ok(n) => n,
-        Err(_) => return refuse("budget_unavailable".into()),
-    };
-    let client = match NodeControlClient::new(&host, &clock, concurrency) {
-        Ok(client) => client,
-        Err(e) => return refuse(format!("member_control_client_failed:{e:?}")),
+    // ONE owner control endpoint per owner key, shared by every member channel of the run
+    // (see [`Hub`]): two endpoints under one key at the relay lose each other's replies.
+    let hub = match Hub::acquire(&secret, lan, budgets.close) {
+        Ok(hub) => hub,
+        Err(code) => return refuse(code),
     };
     if ready.send(Ok(())).is_err() {
         eprintln!("member control starter gone");
     }
     // One signed call, bounded by the control handshake budget (relay-sized across networks).
     let call = |remote: &Remote, request: Value| -> Result<Value, String> {
-        let deadline = until(budgets.call).ok_or("deadline_invalid")?;
         #[cfg(test)]
         if let Some(reply) = tracking_hooks::call(remote.addr.id, &request) {
             return reply;
         }
-        remote
-            .call(&owner, &client, request, deadline, crate::app_host::now())
-            .map_err(|e| e.code.to_owned())
+        hub.call(remote, request, budgets.call)
     };
     // Long operations are admitted only while the owner can track one more.
     let call_unless_full = |remote: &Remote,
@@ -395,8 +345,210 @@ fn drive(
             }
         }
     }
-    drop(client);
-    if let Some(deadline) = until(budgets.close)
+    drop(hub);
+}
+/// One signed control call handed to the [`Hub`]: the member, the request, its allowance and
+/// where the reply goes.
+type Job = (Remote, Value, Duration, mpsc::Sender<Result<Value, String>>);
+/// The run's ONE owner control endpoint for an owner key and network (lane XC), shared by every
+/// member channel ([`RemoteChannel`]) of that key. Each channel used to bind its own endpoint
+/// under the same key; across networks both registered at the relay, which keeps only the
+/// NEWEST connection per key active (`iroh-relay-1.0.2/src/server/clients.rs:84-98`), so a
+/// member's reply to the other endpoint was lost (rv52f hotspot: two owner endpoints
+/// `id=3cda344136`, one per joined Mac; `control_read_timeout` on the first call). On the LAN
+/// the duplicate was invisible (direct IP paths). The hub's thread binds the endpoint once and
+/// runs calls on `NodeControlCallConcurrency` workers; the last channel's drop closes it.
+struct Hub {
+    key: (iroh::EndpointId, Option<(IpAddr, LanPolicy)>),
+    jobs: Mutex<Option<mpsc::Sender<Job>>>,
+    thread: Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+/// The live hubs (weak: a hub lives as long as a channel holds it).
+static HUBS: Mutex<Vec<std::sync::Weak<Hub>>> = Mutex::new(Vec::new());
+impl Hub {
+    fn acquire(
+        secret: &iroh::SecretKey,
+        lan: Option<(IpAddr, LanPolicy)>,
+        close: Duration,
+    ) -> Result<Arc<Self>, String> {
+        let key = (secret.public(), lan);
+        let mut hubs = HUBS.lock().map_err(|_| "member_control_hub_poisoned")?;
+        hubs.retain(|h| h.strong_count() > 0);
+        if let Some(hub) = hubs
+            .iter()
+            .filter_map(std::sync::Weak::upgrade)
+            .find(|h| h.key == key)
+        {
+            return Ok(hub);
+        }
+        let (jobs, inbox) = mpsc::channel::<Job>();
+        let (ready_tx, ready) = mpsc::channel();
+        let (secret, lan) = (secret.clone(), key.1.clone());
+        let thread = std::thread::Builder::new()
+            .name("joined-owner-control-endpoint".into())
+            .spawn(move || serve_hub(secret, lan, close, inbox, ready_tx))
+            .map_err(|_| "member_control_thread_failed")?;
+        match ready.recv() {
+            Ok(Ok(())) => {}
+            Ok(Err(code)) => {
+                thread.join().ok();
+                return Err(code);
+            }
+            Err(_) => return Err("member_control_thread_failed".into()),
+        }
+        let hub = Arc::new(Self {
+            key,
+            jobs: Mutex::new(Some(jobs)),
+            thread: Mutex::new(Some(thread)),
+        });
+        hubs.push(Arc::downgrade(&hub));
+        Ok(hub)
+    }
+    /// One signed call through the shared endpoint, bounded by `within`.
+    fn call(&self, remote: &Remote, request: Value, within: Duration) -> Result<Value, String> {
+        let (reply_tx, reply) = mpsc::channel();
+        self.jobs
+            .lock()
+            .map_err(|_| "member_control_closed")?
+            .as_ref()
+            .ok_or("member_control_closed")?
+            .send((remote.clone(), request, within, reply_tx))
+            .map_err(|_| "member_control_closed")?;
+        reply
+            .recv()
+            .map_err(|_| "member_control_closed".to_owned())?
+    }
+    #[cfg(test)]
+    fn live(owner: iroh::EndpointId) -> usize {
+        HUBS.lock()
+            .unwrap()
+            .iter()
+            .filter_map(std::sync::Weak::upgrade)
+            .filter(|h| h.key.0 == owner)
+            .count()
+    }
+}
+impl Drop for Hub {
+    fn drop(&mut self) {
+        match self.jobs.lock() {
+            Ok(mut jobs) => drop(jobs.take()),
+            Err(poisoned) => drop(poisoned.into_inner().take()),
+        }
+        let thread = match self.thread.lock() {
+            Ok(mut t) => t.take(),
+            Err(poisoned) => poisoned.into_inner().take(),
+        };
+        if let Some(t) = thread
+            && t.join().is_err()
+        {
+            eprintln!("member control endpoint panicked");
+        }
+    }
+}
+fn serve_hub(
+    secret: iroh::SecretKey,
+    lan: Option<(IpAddr, LanPolicy)>,
+    close: Duration,
+    inbox: mpsc::Receiver<Job>,
+    ready: mpsc::Sender<Result<(), String>>,
+) {
+    let refuse = |code: String| {
+        if ready.send(Err(code)).is_err() {
+            eprintln!("member control starter gone");
+        }
+    };
+    let Ok(rt) = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+    else {
+        return refuse("runtime_failed".into());
+    };
+    let clock = crate::managed_carrier::HostClock::default();
+    let until = |d: Duration| -> Option<MonoInstant> {
+        clock
+            .monotonic()
+            .checked_add(budgets::Span::from_millis(
+                u64::try_from(d.as_millis()).ok()?,
+            ))
+            .ok()
+    };
+    let Some(bind_deadline) = until(close) else {
+        return refuse("deadline_invalid".into());
+    };
+    let bound = match lan {
+        Some((ip, policy)) => LoopbackHost::bind_lan(
+            &rt,
+            &clock,
+            bind_deadline,
+            secret.clone(),
+            &[Channel::NodeControl],
+            ip,
+            policy,
+        ),
+        None => LoopbackHost::bind_protocols(
+            &rt,
+            &clock,
+            bind_deadline,
+            secret.clone(),
+            &[Channel::NodeControl],
+        ),
+    };
+    let mut host = match bound {
+        Ok(host) => host,
+        Err(e) => return refuse(format!("member_control_bind_failed:{e:?}")),
+    };
+    let owner = match Owner::new(&secret) {
+        Ok(owner) => owner,
+        Err(e) => return refuse(e.code.to_owned()),
+    };
+    let workers = match B::NodeControlCallConcurrency.count() {
+        Ok(n) => n,
+        Err(_) => return refuse("budget_unavailable".into()),
+    };
+    {
+        let client = match NodeControlClient::new(&host, &clock, workers) {
+            Ok(client) => client,
+            Err(e) => return refuse(format!("member_control_client_failed:{e:?}")),
+        };
+        if ready.send(Ok(())).is_err() {
+            eprintln!("member control starter gone");
+        }
+        let inbox = Mutex::new(inbox);
+        let workers = usize::try_from(workers.get()).unwrap_or(1).max(1);
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| {
+                    loop {
+                        let job = match inbox.lock() {
+                            Ok(inbox) => inbox.recv(),
+                            Err(_) => return,
+                        };
+                        let Ok((remote, request, within, reply)) = job else {
+                            return;
+                        };
+                        let outcome = until(within)
+                            .ok_or_else(|| "deadline_invalid".to_owned())
+                            .and_then(|deadline| {
+                                remote
+                                    .call(
+                                        &owner,
+                                        &client,
+                                        request,
+                                        deadline,
+                                        crate::app_host::now(),
+                                    )
+                                    .map_err(|e| e.code.to_owned())
+                            });
+                        if reply.send(outcome).is_err() {
+                            eprintln!("member control caller gone");
+                        }
+                    }
+                });
+            }
+        });
+    }
+    if let Some(deadline) = until(close)
         && let Err(e) = host.close(&clock, deadline)
     {
         eprintln!("member control close: {e:?}");
@@ -496,5 +648,47 @@ impl MemberLink for RemoteMember {
                 v["code"].as_str().unwrap_or("member_refused").to_owned(),
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod hub_tests {
+    use super::*;
+    /// Lane XC: every member channel of one owner key shares ONE owner control endpoint (two
+    /// endpoints under one key at the relay lose each other's replies); the last drop closes it.
+    #[test]
+    fn member_channels_of_one_owner_share_one_control_endpoint() {
+        let owner = iroh::SecretKey::generate();
+        let other = iroh::SecretKey::generate();
+        let member =
+            |n: u8| iroh::EndpointAddr::new(iroh::SecretKey::from_bytes(&[n; 32]).public());
+        assert_eq!(Hub::live(owner.public()), 0);
+        let (a, _ra) = RemoteChannel::start(owner.clone(), member(1), None).unwrap();
+        let (b, _rb) = RemoteChannel::start(owner.clone(), member(2), None).unwrap();
+        let (c, _rc) = RemoteChannel::start(other.clone(), member(3), None).unwrap();
+        assert_eq!(
+            Hub::live(owner.public()),
+            1,
+            "one endpoint for both members of one owner"
+        );
+        assert_eq!(
+            Hub::live(other.public()),
+            1,
+            "another owner key binds its own"
+        );
+        drop(a);
+        assert_eq!(
+            Hub::live(owner.public()),
+            1,
+            "still held by the second channel"
+        );
+        drop(b);
+        assert_eq!(
+            Hub::live(owner.public()),
+            0,
+            "the last channel's drop closes it"
+        );
+        drop(c);
+        assert_eq!(Hub::live(other.public()), 0);
     }
 }
