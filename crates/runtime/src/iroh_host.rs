@@ -860,6 +860,15 @@ impl<'a> LoopbackHost<'a> {
             })
             .await
         })?;
+        if mode == NetworkMode::CrossNetwork {
+            // Lane XC diagnostic: every cross-network endpoint this process registers at the relay.
+            eprintln!(
+                "iroh_cross_bound id={} alpns={} sockets={:?}",
+                endpoint.id().fmt_short(),
+                channels.len(),
+                endpoint.bound_sockets()
+            );
+        }
         let host = Self {
             runtime,
             endpoint: Some(endpoint),
@@ -1570,6 +1579,11 @@ impl<'a> LoopbackHost<'a> {
     /// runtime must also be drained/dropped for OS socket-release proof: Iroh's
     /// aborted internal tasks can retain sockets until the executor reaps them.
     pub fn close(&mut self, clock: &impl Clock, deadline: MonoInstant) -> Result<(), Error> {
+        if self.mode == NetworkMode::CrossNetwork
+            && let Some(endpoint) = &self.endpoint
+        {
+            eprintln!("iroh_cross_closed id={}", endpoint.id().fmt_short());
+        }
         self.admitting = false;
         if let Some(lan) = &self.lan {
             // Pins stop releasing: the endpoint's close frames still go out.

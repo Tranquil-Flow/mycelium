@@ -143,7 +143,7 @@ impl<'a, 'r, C: Clock> NodeControlClient<'a, 'r, C> {
                     Ok(Err(ReadToEndError::TooLong))=>return Err(ControlError("control_response_too_large")),
                     Ok(Err(_))=>return Err(ControlError("control_read_failed")),
                     Err(_)=>{
-                        eprintln!("control_read_timeout_paths remote={} {}",connection.0.remote_id().fmt_short(),crate::iroh_host::path_report(&connection.0));
+                        eprintln!("control_read_timeout_paths local={} remote={} {}",endpoint.id().fmt_short(),connection.0.remote_id().fmt_short(),crate::iroh_host::path_report(&connection.0));
                         return Err(ControlError("control_read_timeout"));
                     }
                 };
