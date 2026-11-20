@@ -159,13 +159,18 @@ pub fn retire_dead_runs(host: &Path) -> Result<Retirement> {
 fn retire_one(runs: &Path, run: &str, row: &Value, end: std::time::Instant) -> Result<Outcome> {
     let changed = || Error(OWNER_CHANGED);
     let root = runs.join(run);
+    let anchor = volume_of(runs).map_err(|_| changed())?;
     let directory = open_directory(&root).map_err(|_| changed())?;
     let meta = directory.metadata().map_err(|_| changed())?;
     if !meta.is_dir()
         || meta.mode() & 0o7777 != 0o700
         || meta.uid() != rustix::process::getuid().as_raw()
-        || row["run_dev"] != meta.dev()
-        || row["run_ino"] != meta.ino()
+        || !persisted_identity(
+            &row["run_dev"],
+            &row["run_ino"],
+            (meta.dev(), meta.ino()),
+            anchor,
+        )
     {
         return Err(changed());
     }
@@ -265,10 +270,17 @@ fn remove_stage(run: &fs::File, row: &Value) -> Result<()> {
 /// directory recorded the refund of exactly that row and has no stage shards left.
 pub(super) fn refund_matches(runs: &Path, run: &str, row: &Value) -> bool {
     let root = runs.join(run);
-    let Ok(meta) = fs::symlink_metadata(&root) else {
+    let (Ok(meta), Ok(anchor)) = (fs::symlink_metadata(&root), volume_of(runs)) else {
         return false;
     };
-    if !meta.is_dir() || row["run_dev"] != meta.dev() || row["run_ino"] != meta.ino() {
+    if !meta.is_dir()
+        || !persisted_identity(
+            &row["run_dev"],
+            &row["run_ino"],
+            (meta.dev(), meta.ino()),
+            anchor,
+        )
+    {
         return false;
     }
     if !matches!(fs::symlink_metadata(root.join(STAGE)), Err(e) if e.kind() == std::io::ErrorKind::NotFound)

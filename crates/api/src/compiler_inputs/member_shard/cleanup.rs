@@ -20,7 +20,13 @@ fn open(dir: &fs::File, name: &str, flags: OFlags) -> Result<fs::File> {
     .map(fs::File::from)
     .map_err(|_| bad())
 }
+/// The device of an opened directory, read now: the anchor of the identities persisted under it.
+fn fd_volume(dir: &fs::File) -> Result<u64> {
+    dir.metadata().map(|m| m.dev()).map_err(|_| bad())
+}
 fn root_fd(root: &Path, row: &Value) -> Result<fs::File> {
+    let anchor =
+        crate::compiler_inputs::volume_of(root.parent().ok_or(bad())?).map_err(|_| bad())?;
     let f = fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
@@ -30,8 +36,12 @@ fn root_fd(root: &Path, row: &Value) -> Result<fs::File> {
     if !m.is_dir()
         || m.mode() & 0o7777 != 0o700
         || m.uid() != rustix::process::getuid().as_raw()
-        || row["run_dev"] != m.dev()
-        || row["run_ino"] != m.ino()
+        || !crate::compiler_inputs::persisted_identity(
+            &row["run_dev"],
+            &row["run_ino"],
+            (m.dev(), m.ino()),
+            anchor,
+        )
     {
         return Err(bad());
     }
@@ -62,7 +72,7 @@ fn intent(root: &Path, record: &Value, row: &Value) -> Result<()> {
 fn captured_file(dir: &fs::File, record: &Value) -> Result<fs::File> {
     let file = open(dir, RETIRED, OFlags::RDWR)?;
     let id = file_identity(&file)?;
-    if record["file_identity"] != json!([id.0, id.1]) {
+    if !crate::compiler_inputs::persisted_pair(&record["file_identity"], id, fd_volume(dir)?) {
         return Err(bad());
     }
     Ok(file)
@@ -89,7 +99,11 @@ fn stage_matches(dir: &fs::File, record: &Value) -> Result<()> {
     let m = stage.metadata().map_err(|_| bad())?;
     if m.mode() & 0o7777 != 0o700
         || m.uid() != rustix::process::getuid().as_raw()
-        || record["stage_identity"] != json!([m.dev(), m.ino()])
+        || !crate::compiler_inputs::persisted_pair(
+            &record["stage_identity"],
+            (m.dev(), m.ino()),
+            fd_volume(dir)?,
+        )
     {
         return Err(bad());
     }
@@ -109,7 +123,7 @@ pub(super) fn retire(
         let stage = open(&dir, "stage-shards", OFlags::RDONLY | OFlags::DIRECTORY)?;
         let f = open(&stage, record["name"].as_str().ok_or(bad())?, OFlags::RDWR)?;
         let id = file_identity(&f)?;
-        if record["file_identity"] != json!([id.0, id.1]) {
+        if !crate::compiler_inputs::persisted_pair(&record["file_identity"], id, fd_volume(&dir)?) {
             return Err(bad());
         }
         if !matches!(
@@ -135,7 +149,7 @@ pub(super) fn retire(
         let name = record["name"].as_str().ok_or(bad())?;
         let f = open(&stage, name, OFlags::RDWR)?;
         let id = file_identity(&f)?;
-        if record["file_identity"] != json!([id.0, id.1]) {
+        if !crate::compiler_inputs::persisted_pair(&record["file_identity"], id, fd_volume(&dir)?) {
             return Err(bad());
         }
         checkpoint()?;

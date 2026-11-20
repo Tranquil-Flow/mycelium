@@ -194,6 +194,32 @@ fn directory(path: &Path) -> Result<(u64, u64)> {
     }
     Ok((meta.dev(), meta.ino()))
 }
+/// Whether an object observed now is the one a persisted `(dev, ino)` names. macOS assigns `st_dev`
+/// at mount, so the device number recorded before a restart differs after it while every inode is
+/// unchanged (rv50 LAN s2, ledger 295: a retained shard bound to 16777232 refused every later slice
+/// fetch once the volume came back as 16777235). The inode is therefore exact, and the device is
+/// proved by `anchor`: the device, read now, of the directory the record lives under, so an object
+/// on another volume (a mount, a moved tree) still never matches. v0.1.4 compares `st_dev` only
+/// within one process and persists none.
+pub(crate) fn persisted_identity(
+    recorded_dev: &Value,
+    recorded_ino: &Value,
+    observed: (u64, u64),
+    anchor: u64,
+) -> bool {
+    recorded_dev.is_u64() && observed.0 == anchor && recorded_ino.as_u64() == Some(observed.1)
+}
+/// [`persisted_identity`] for a record's `[dev, ino]` pair.
+pub(crate) fn persisted_pair(recorded: &Value, observed: (u64, u64), anchor: u64) -> bool {
+    recorded.as_array().is_some_and(|pair| pair.len() == 2)
+        && persisted_identity(&recorded[0], &recorded[1], observed, anchor)
+}
+/// The device of `dir`, read now: the anchor of every identity persisted beneath it.
+pub(crate) fn volume_of(dir: &Path) -> Result<u64> {
+    fs::symlink_metadata(dir)
+        .map(|meta| meta.dev())
+        .map_err(|_| Error("compiler_storage_owner_changed"))
+}
 fn segment(value: &str) -> bool {
     !value.is_empty()
         && !matches!(value, "." | "..")
@@ -787,6 +813,7 @@ fn storage_rows(runs: &Path, entries: &Map<String, Value>) -> Result<u64> {
         return Err(bad);
     }
     let mut total = 0u64;
+    let anchor = volume_of(runs)?;
     for (run, row) in entries {
         if !segment(run) || !matches!(row["phase"].as_str(), Some("retained" | "cleanup_required"))
         {
@@ -800,8 +827,12 @@ fn storage_rows(runs: &Path, entries: &Map<String, Value>) -> Result<u64> {
         if !meta.is_dir()
             || meta.mode() & 0o7777 != 0o700
             || meta.uid() != rustix::process::getuid().as_raw()
-            || Some(meta.dev()) != row["run_dev"].as_u64()
-            || Some(meta.ino()) != row["run_ino"].as_u64()
+            || !persisted_identity(
+                &row["run_dev"],
+                &row["run_ino"],
+                (meta.dev(), meta.ino()),
+                anchor,
+            )
         {
             return Err(Error("compiler_storage_owner_changed"));
         }

@@ -240,7 +240,7 @@ impl MemberShard {
         }
         let host = fs::canonicalize(host).map_err(|_| fail("compiler_directory_invalid"))?;
         let runs = host.join("chain-runs");
-        directory(&runs)?;
+        let anchor = directory(&runs)?.0;
         let root = runs.join(run);
         // Reopen only; never create a missing owner while reconciling debt.
         let m = fs::symlink_metadata(&root).map_err(|_| fail("member_shard_owner_missing"))?;
@@ -273,8 +273,7 @@ impl MemberShard {
                 return Err(fail("compiler_storage_reservation_changed"));
             }
         }
-        if row["run_dev"] != identity.0
-            || row["run_ino"] != identity.1
+        if !super::persisted_identity(&row["run_dev"], &row["run_ino"], identity, anchor)
             || row["bytes"] != transfer["size_bytes"]
         {
             return Err(fail("member_shard_identity_changed"));
@@ -290,21 +289,19 @@ impl MemberShard {
         if saved != record {
             return Err(fail("member_shard_pins_changed"));
         }
-        let expected_id = (
-            record["file_identity"][0]
-                .as_u64()
-                .ok_or(fail("member_shard_identity_changed"))?,
-            record["file_identity"][1]
-                .as_u64()
-                .ok_or(fail("member_shard_identity_changed"))?,
-        );
+        if !record["file_identity"]
+            .as_array()
+            .is_some_and(|pair| pair.len() == 2 && pair.iter().all(Value::is_u64))
+        {
+            return Err(fail("member_shard_identity_changed"));
+        }
         let path = root
             .join("stage-shards")
             .join(record["name"].as_str().unwrap());
         let file = match fs::symlink_metadata(root.join("stage-shards")) {
             Ok(_) => {
                 let id = directory(&root.join("stage-shards"))?;
-                if record["stage_identity"] != json!([id.0, id.1]) {
+                if !super::persisted_pair(&record["stage_identity"], id, anchor) {
                     return Err(fail("member_shard_identity_changed"));
                 }
                 match fs::OpenOptions::new()
@@ -327,7 +324,9 @@ impl MemberShard {
             cleanup::captured(&root, &record, &row)?;
         }
         let file_identity = file.as_ref().map(file_identity).transpose()?;
-        if file_identity.is_some_and(|id| id != expected_id) {
+        if file_identity
+            .is_some_and(|id| !super::persisted_pair(&record["file_identity"], id, anchor))
+        {
             return Err(fail("member_shard_identity_changed"));
         }
         let retained = row["phase"] == "retained";
@@ -364,7 +363,11 @@ impl MemberShard {
                 if !m.is_dir()
                     || m.mode() & 0o7777 != 0o700
                     || m.uid() != rustix::process::getuid().as_raw()
-                    || self.record["stage_identity"] != json!([m.dev(), m.ino()])
+                    || !super::persisted_pair(
+                        &self.record["stage_identity"],
+                        (m.dev(), m.ino()),
+                        self.identity.0,
+                    )
                 {
                     return Err(fail("member_shard_identity_changed"));
                 }
