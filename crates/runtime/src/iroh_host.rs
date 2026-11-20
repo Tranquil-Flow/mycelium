@@ -273,6 +273,34 @@ pub fn selected_path(connection: &Connection) -> Option<&'static str> {
         .find(|path| path.is_selected())
         .map(|path| if path.is_relay() { "relay" } else { "direct" })
 }
+/// Lane XC diagnostic: every path of `connection` (kind, remote, selected, rtt, datagrams sent
+/// and received, losses, black holes) plus the connection's totals, one line, for the
+/// cross-network evidence (rv52 hotspot: a reply that never returned over a relay-started path).
+pub fn path_report(connection: &Connection) -> String {
+    let mut out = Vec::new();
+    for path in connection.paths().iter() {
+        let s = path.stats();
+        out.push(format!(
+            "{}{}:{:?} rtt_ms={} tx={} rx={} lost={} black_holes={}",
+            if path.is_selected() { "*" } else { "" },
+            if path.is_relay() { "relay" } else { "ip" },
+            path.remote_addr(),
+            s.rtt.as_millis(),
+            s.udp_tx.datagrams,
+            s.udp_rx.datagrams,
+            s.lost_packets,
+            s.black_holes_detected
+        ));
+    }
+    let c = connection.stats();
+    format!(
+        "paths=[{}] total_tx={} total_rx={} total_lost={}",
+        out.join(" | "),
+        c.udp_tx.datagrams,
+        c.udp_rx.datagrams,
+        c.lost_packets
+    )
+}
 /// Lane XB3 at a run's start: bind a throwaway endpoint across networks on `interface` under
 /// `policy` (a fresh key, no portmapping, no channel served) and wait at most
 /// `SidecarReadyAddressWindow` (the oracle's wait for a relay address) for its relay.

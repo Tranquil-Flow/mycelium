@@ -735,6 +735,12 @@ fn control_loop_inner(
             away.closed_by_peer = true;
         }
         away.close_wait = closing.elapsed();
+        if !away.closed_by_peer {
+            eprintln!(
+                "member_control_close_paths endpoint={short} {}",
+                runtime::iroh_host::path_report(&connection)
+            );
+        }
         if served.elapsed() > report_after {
             eprintln!(
                 "member_control_away endpoint={short} from={} command={} away_ms={} receive_ms={} handle_ms={} respond_ms={} close_wait_ms={} closed_by_peer={}",
