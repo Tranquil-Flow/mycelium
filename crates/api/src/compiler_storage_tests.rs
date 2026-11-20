@@ -891,3 +891,48 @@ fn a_compile_stopped_while_its_reservation_waits_for_the_ledger_reserves_nothing
         "no reservation written"
     );
 }
+
+/// Rewrites every persisted device number the way a restart does: macOS assigns `st_dev` at mount,
+/// so after a restart the same directories (same inodes) report another device (rv50 LAN s2,
+/// ledger 295: 16777232 before, 16777235 after, inode 461865306 unchanged).
+fn renumber_volume_in_ledger(root: &Path) {
+    let path = root.join("chain-runs").join(STORAGE_LEDGER);
+    let mut ledger = ledger_of(root);
+    for row in ledger["entries"].as_object_mut().unwrap().values_mut() {
+        row["run_dev"] = json!(row["run_dev"].as_u64().unwrap() ^ 0x5a5a);
+    }
+    fs::write(&path, protocol::canonical::to_bytes(&ledger).unwrap()).unwrap();
+}
+
+/// Proves: L13 restart survival (ledger 295). A retained or dead compile charged before a restart
+/// stays accounted, retirable and no obstacle to the next reservation after it; only the inode
+/// (and the volume being the ledger's own, now) binds a run directory across a restart.
+#[test]
+fn a_restart_that_renumbers_the_volume_neither_wedges_nor_unbinds_the_ledger() {
+    let f = Fixture::new();
+    storage_policy(&f.root, 100_000_000);
+    drop(compiled_run(&f, "before-restart", 40_000_000));
+    renumber_volume_in_ledger(&f.root);
+    // The next Start after the restart: inventory and reservation must not refuse the ledger.
+    let next = f.emit_run("after-restart");
+    drop(next.reserve_stage_output(1_000).unwrap());
+    drop(next);
+    // The dead pre-restart run is still the owner's and is retired by its inode.
+    let retirement = compiler_inputs::retire_dead_runs(&f.root).unwrap();
+    assert!(retirement.refused.is_empty(), "{:?}", retirement.refused);
+    assert!(retirement.retired.contains(&"before-restart".to_owned()));
+    // A different inode is still a different directory, restart or not.
+    drop(compiled_run(&f, "moved", 1_000));
+    let mut ledger = ledger_of(&f.root);
+    ledger["entries"]["moved"]["run_ino"] =
+        json!(ledger["entries"]["moved"]["run_ino"].as_u64().unwrap() + 1);
+    fs::write(
+        f.root.join("chain-runs").join(STORAGE_LEDGER),
+        protocol::canonical::to_bytes(&ledger).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        f.emit_run("refused").reserve_stage_output(1).unwrap_err().0,
+        "compiler_storage_owner_changed"
+    );
+}

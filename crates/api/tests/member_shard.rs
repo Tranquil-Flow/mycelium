@@ -681,3 +681,38 @@ fn a_ledger_freed_inside_the_reservation_wait_is_rechecked_before_reserving() {
     );
     assert_eq!(f.charge(), f.bytes.len() as u64);
 }
+
+/// Proves: L13 restart survival (ledger 295, rv50 LAN s2). A joined Mac's retained shard recorded
+/// before a restart, when macOS renumbers the volume (`st_dev`; inodes unchanged), still resumes,
+/// is no obstacle to the next run's reservation, and is discarded and refunded normally.
+#[test]
+fn a_restart_that_renumbers_the_volume_keeps_retained_custody_usable() {
+    let f = Fixture::new();
+    let mut kept = f.begin("kept");
+    kept.write_chunk(0, &f.bytes).unwrap();
+    kept.verify(&|| Ok(())).unwrap();
+    drop(kept);
+    let runs = f.root.join("chain-runs");
+    let renumber = |path: PathBuf, edit: &dyn Fn(&mut Value)| {
+        let mut v: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        edit(&mut v);
+        fs::write(&path, protocol::canonical::to_bytes(&v).unwrap()).unwrap();
+    };
+    let shift = |v: &mut Value| *v = json!(v.as_u64().unwrap() ^ 0x5a5a);
+    renumber(runs.join("compiler-storage.private.json"), &|v| {
+        shift(&mut v["entries"]["kept"]["run_dev"])
+    });
+    renumber(runs.join("kept/member-shard.private.json"), &|v| {
+        shift(&mut v["file_identity"][0]);
+        shift(&mut v["stage_identity"][0]);
+    });
+    // The field failure: the next run's slice fetch refused `compiler_storage_owner_changed`.
+    let mut next = f.begin("next");
+    next.discard().unwrap();
+    drop(next);
+    let mut resumed = f.resume("kept").unwrap();
+    assert_eq!(resumed.received_bytes().unwrap(), f.bytes.len() as u64);
+    resumed.discard().unwrap();
+    drop(resumed);
+    assert_eq!(f.charge(), 0);
+}
