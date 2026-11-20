@@ -132,16 +132,8 @@ fn probe_a_cross_network_reply_returns_over_a_relay_started_connection() {
             matches!(outcome.1, Ok(Ok(2_500))),
             "round {round}: the reply did not come back"
         );
-        // A relay-started connection stays on the relay on BOTH ends (iroh_cross::RelayFirst);
-        // without it both ends moved to the hole-punched IP path within ~200 ms. Later rounds
-        // may start on the IP address iroh learned (a handshake proves that path both ways).
-        if round == 0 {
-            assert_eq!(
-                (outcome.2, outcome.5),
-                (Some("relay"), Some("relay")),
-                "round {round}: left the relay"
-            );
-        }
+        // Both ends are on this Mac: a validated private/loopback path is preferred over the
+        // relay (iroh_cross::RelayFirst; public IP paths never are, see its unit test).
     }
     client.close(&clock, deadline(&clock, 5)).unwrap();
     server.close(&clock, deadline(&clock, 5)).unwrap();
@@ -231,5 +223,104 @@ fn probe_a_second_endpoint_with_the_same_key_steals_the_relayed_reply() {
     assert_ne!(
         reply, "Ok(Ok(2500))",
         "expected the twin to steal the relayed reply"
+    );
+}
+
+/// Lane XC rv52h: the owner Mac's OWN member fetches its slice from the owner's OWN source, both
+/// across networks on this Mac's interface. At the source's signed (real, private) address the
+/// connection must carry the bytes on that direct path, never hairpinned through the relay (on
+/// hardware 872 MiB took 339 s over the relay and the run's 600 s fetch wall ran out).
+#[test]
+#[ignore = "network: registers at relay.mycelium.now"]
+fn probe_a_same_mac_peer_at_its_private_address_is_served_directly() {
+    let relay: iroh::RelayUrl = MYCELIUM_RELAY_URL.parse().unwrap();
+    let iface: IpAddr = std::env::var("PROBE_IFACE")
+        .expect("PROBE_IFACE")
+        .parse()
+        .unwrap();
+    assert!(
+        runtime::iroh_host::private_lan(iface),
+        "PROBE_IFACE must be a private address"
+    );
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .unwrap();
+    let clock = Mono(Instant::now());
+    let (server_key, client_key) = (SecretKey::generate(), SecretKey::generate());
+    let bind = |key: &SecretKey| {
+        LoopbackHost::bind_lan(
+            &rt,
+            &clock,
+            deadline(&clock, 15),
+            key.clone(),
+            &[Channel::NodeControl],
+            iface,
+            LanPolicy::private_only().across_networks(relay.clone()),
+        )
+        .expect("bind across networks")
+    };
+    let mut server = bind(&server_key);
+    let mut client = bind(&client_key);
+    server.relay_ready(&clock, deadline(&clock, 15)).unwrap();
+    client.relay_ready(&clock, deadline(&clock, 15)).unwrap();
+    let signed: Vec<SocketAddr> = server.address().unwrap().ip_addrs().copied().collect();
+    assert!(
+        signed.iter().any(|a| a.ip() == iface),
+        "the source signs its bound address"
+    );
+    let dial = signed
+        .iter()
+        .fold(EndpointAddr::new(server_key.public()), |a, s| {
+            a.with_ip_addr(*s)
+        });
+    const BYTES: usize = 64 << 20;
+    let (elapsed, report, selected) = std::thread::scope(|scope| {
+        scope.spawn(|| {
+            let c = server.accept(&clock, deadline(&clock, 30)).expect("accept");
+            rt.block_on(async {
+                let (mut send, mut recv) = c.accept_bi().await.unwrap();
+                recv.read_to_end(1 << 10).await.unwrap();
+                send.write_all(&vec![b'r'; BYTES]).await.unwrap();
+                send.finish().unwrap();
+                tokio::time::timeout(Duration::from_secs(10), c.closed())
+                    .await
+                    .ok();
+            });
+        });
+        let c = client
+            .connect_channel(&dial, Channel::NodeControl, &clock, deadline(&clock, 20))
+            .expect("connect");
+        let began = Instant::now();
+        let got = rt.block_on(async {
+            let (mut send, mut recv) = c.open_bi().await.unwrap();
+            send.write_all(b"go").await.unwrap();
+            send.finish().unwrap();
+            tokio::time::timeout(Duration::from_secs(120), recv.read_to_end(BYTES + 1)).await
+        });
+        let elapsed = began.elapsed();
+        assert_eq!(got.unwrap().unwrap().len(), BYTES);
+        let out = (
+            elapsed,
+            runtime::iroh_host::path_report(&c),
+            runtime::iroh_host::selected_path(&c),
+        );
+        c.close(0u32.into(), b"done");
+        out
+    });
+    println!(
+        "same-Mac 64 MiB at the signed private address: {elapsed:?} selected={selected:?} {report}"
+    );
+    client.close(&clock, deadline(&clock, 5)).unwrap();
+    server.close(&clock, deadline(&clock, 5)).unwrap();
+    assert_eq!(
+        selected,
+        Some("direct"),
+        "the bytes went through the relay: {report}"
+    );
+    assert!(
+        elapsed < Duration::from_secs(10),
+        "64 MiB on one Mac took {elapsed:?}"
     );
 }

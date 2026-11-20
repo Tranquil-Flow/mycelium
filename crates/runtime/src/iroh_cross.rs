@@ -62,15 +62,15 @@ pub(crate) fn cross_builder(
         .map_err(|_| Error::Unavailable)
 }
 
-/// Across networks the RELAY carries the run's traffic on both ends (lane XC). iroh's default
-/// selector treats the relay as a backup and moves application data to any IP path the moment one
-/// has stats. Across two NATs such a path can work one way only: on hardware (rv52 hotspot, B on a
-/// mobile hotspot, A behind a home router) the member selected a hole-punched IP path to the
-/// owner's public address while the owner kept only the relay, so the member's reply (and its
-/// close) never reached the owner (`control_read_timeout`; owner paths `[*relay]`, member paths
-/// `[relay | *ip:<owner public>]`). The connection now stays on the relay whenever one is open,
-/// which is what the choice promises ("through the Mycelium relay") and what v0.1.4 did across
-/// networks; an IP path is used only when no relay path exists (the loopback tests' dead relay).
+/// Which path carries a cross-network connection (lane XC): a working PRIVATE-LAN path first,
+/// then the relay, then any other (public, hole-punched) IP path only when no relay path is open.
+/// iroh's default selector moves data to any IP path the moment one has stats; the run's choice
+/// promises "through the Mycelium relay" between networks (as v0.1.4 did), so public IP paths
+/// never displace the relay. But two endpoints on ONE network, above all the owner Mac's own
+/// member fetching its slice from the owner's own source, must not hairpin through the relay:
+/// on hardware (rv52h) that member fetched 872 MiB over the relay in 339 s, so the run's 600 s
+/// fetch wall ran out, while a private path to the source's signed bound address was open.
+/// A private path is chosen only once iroh validated it (it has stats), so it works both ways.
 #[derive(Debug)]
 pub(crate) struct RelayFirst;
 impl iroh::endpoint::transports::PathSelector for RelayFirst {
@@ -78,27 +78,45 @@ impl iroh::endpoint::transports::PathSelector for RelayFirst {
         &self,
         ctx: &iroh::endpoint::transports::PathSelectionContext<'_>,
     ) -> iroh::endpoint::transports::PathSelection {
+        use iroh::endpoint::transports::Addr;
         let mut selection = iroh::endpoint::transports::PathSelection::none();
         let paths: Vec<_> = ctx.paths().filter(|p| p.stats().is_some()).collect();
-        let relay: Vec<bool> = paths.iter().map(|p| p.network_path().is_relay()).collect();
+        let kinds: Vec<PathKind> = paths
+            .iter()
+            .map(|p| match p.network_path().remote() {
+                Addr::Ip(a) if crate::iroh_host::private_lan(a.ip()) || a.ip().is_loopback() => {
+                    PathKind::Private
+                }
+                Addr::Relay(..) => PathKind::Relay,
+                _ => PathKind::Public,
+            })
+            .collect();
         let current = ctx
             .current()
             .and_then(|c| paths.iter().position(|p| p.network_path() == c));
-        if let Some(index) = relay_first(&relay, current) {
+        if let Some(index) = relay_first(&kinds, current) {
             selection.set(&paths[index]);
         }
         selection
     }
 }
-/// [`RelayFirst`]'s choice over the open paths (`relay[i]`: path `i` is a relay path) and the
-/// index of the current selection among them: `None` keeps the current selection. A relay path
-/// wins over any IP path; with no relay path the current IP path stays, else the first one.
-pub(crate) fn relay_first(relay: &[bool], current: Option<usize>) -> Option<usize> {
-    let first_relay = relay.iter().position(|r| *r);
+/// A cross-network path's rank for [`RelayFirst`] (lower wins).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum PathKind {
+    /// An IP path to a private-LAN or loopback address: the peer is on this network.
+    Private,
+    Relay,
+    /// Any other IP path (a public, hole-punched address).
+    Public,
+}
+/// [`RelayFirst`]'s choice over the open paths and the index of the current selection among
+/// them: `None` keeps the current selection. The best kind present wins; among paths of the
+/// current one's kind the current stays (no flapping).
+pub(crate) fn relay_first(kinds: &[PathKind], current: Option<usize>) -> Option<usize> {
+    let best = kinds.iter().min()?;
     match current {
-        Some(c) if relay[c] => None,
-        Some(_) => first_relay,
-        None => first_relay.or_else(|| (!relay.is_empty()).then_some(0)),
+        Some(c) if kinds[c] == *best => None,
+        _ => kinds.iter().position(|k| k == best),
     }
 }
 
@@ -215,29 +233,41 @@ impl CrossGate {
 
 #[cfg(test)]
 mod relay_first_tests {
-    use super::relay_first;
+    use super::{PathKind::*, relay_first};
     #[test]
-    fn across_networks_the_relay_wins_over_any_ip_path_and_ip_is_used_only_without_one() {
-        // rv52 hotspot: the member had [relay, *ip] and kept sending on the one-way IP path.
+    fn across_networks_private_beats_the_relay_which_beats_public_ip() {
+        // rv52 hotspot: a public hole-punched path never displaces the relay.
         assert_eq!(
-            relay_first(&[true, false], Some(1)),
+            relay_first(&[Relay, Public], Some(1)),
             Some(0),
-            "an IP selection moves to the relay"
+            "public IP moves to the relay"
         );
-        assert_eq!(relay_first(&[false, true], Some(0)), Some(1));
+        assert_eq!(relay_first(&[Public, Relay], Some(0)), Some(1));
         assert_eq!(
-            relay_first(&[true, false], Some(0)),
+            relay_first(&[Relay, Public], Some(0)),
             None,
             "a relay selection stays"
         );
         assert_eq!(
-            relay_first(&[false, true], None),
+            relay_first(&[Public, Relay], None),
             Some(1),
-            "no selection: the relay first"
+            "no selection: the relay"
         );
-        // No relay path open (the loopback tests' dead relay): IP is allowed and sticky.
-        assert_eq!(relay_first(&[false, false], None), Some(0));
-        assert_eq!(relay_first(&[false, false], Some(1)), None);
+        // rv52h: the owner's own member at the source's private address stays on that path.
+        assert_eq!(
+            relay_first(&[Relay, Private], Some(0)),
+            Some(1),
+            "relay moves to private"
+        );
+        assert_eq!(relay_first(&[Relay, Private, Public], None), Some(1));
+        assert_eq!(
+            relay_first(&[Private, Relay], Some(0)),
+            None,
+            "a private selection stays"
+        );
+        // No relay path open (the loopback tests' dead relay): public IP is allowed and sticky.
+        assert_eq!(relay_first(&[Public, Public], None), Some(0));
+        assert_eq!(relay_first(&[Public, Public], Some(1)), None);
         assert_eq!(relay_first(&[], None), None);
     }
 }
