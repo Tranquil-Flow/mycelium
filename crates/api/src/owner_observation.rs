@@ -19,7 +19,7 @@ use runtime::{
         ManagedControlOwner, OwnerError, OwnerHost,
         session::{CallFence, ManagedSessionFactory, SessionHost, SharedManagedOwner},
     },
-    observe::{HelloSession, HelloSessions, ObservationContext, ObservationError, Offer},
+    observe::{HelloSession, HelloSessions, ObservationError, Offer},
     observe_owner::ObserveAdapter,
 };
 use serde_json::{Value, json};
@@ -1506,18 +1506,6 @@ impl<H: ChainHost> ObservationBackend for Backend<H> {
             requested.as_ref().err().map(|e| e.0.as_str()),
         );
         requested
-    }
-    fn rebuild_observation(
-        &mut self,
-        _: &mut Option<ObservationContext>,
-        _: &str,
-        _: &str,
-        _: &[Value],
-    ) -> Result<String, owner_run::chain::PortError> {
-        Err(owner_run::chain::PortError::Failed {
-            code: Some("NP-L10-observation-rebuild".into()),
-            text: "ManagedServingWorkflow source/stop/cleanup is not mounted".into(),
-        })
     }
 }
 

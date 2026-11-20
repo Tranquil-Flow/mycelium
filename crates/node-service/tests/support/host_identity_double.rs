@@ -190,16 +190,6 @@ impl ObservationBackend for Hellos {
     fn request_stage_cleanup(&mut self, offer: &Offer) -> Result<(), ObservationError> {
         self.0.request_stage_cleanup(offer)
     }
-    fn rebuild_observation(
-        &mut self,
-        context: &mut Option<ObservationContext>,
-        run: &str,
-        deployment: &str,
-        descriptors: &[Value],
-    ) -> Result<String, PortError> {
-        self.0
-            .rebuild_observation(context, run, deployment, descriptors)
-    }
 }
 fn nonce() -> String {
     api::app_host::hex(&api::app_host::random(16).unwrap_or_default())

@@ -7,7 +7,7 @@ use api::{
 use owner_run::{chain::PortError, steps::observe::ObservePort};
 use protocol::identity::Identity;
 use runtime::{
-    observe::{HelloSessions, ObservationContext, ObservationError, Offer},
+    observe::{HelloSessions, ObservationError, Offer},
     observe_owner::ObserveAdapter,
 };
 use serde_json::{Value, json};
@@ -68,18 +68,6 @@ impl ObservationBackend for Backend {
     }
     fn request_stage_cleanup(&mut self, _: &Offer) -> Result<(), ObservationError> {
         panic!("no synthetic cleanup")
-    }
-    fn rebuild_observation(
-        &mut self,
-        _: &mut Option<ObservationContext>,
-        _: &str,
-        _: &str,
-        _: &[Value],
-    ) -> Result<String, PortError> {
-        Err(PortError::Failed {
-            code: Some("owner_run_step_not_ported".into()),
-            text: "NP-L10-observation-rebuild".into(),
-        })
     }
 }
 fn fixture() -> (Backend, Vec<Value>, Vec<Identity>) {
