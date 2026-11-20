@@ -132,6 +132,16 @@ fn probe_a_cross_network_reply_returns_over_a_relay_started_connection() {
             matches!(outcome.1, Ok(Ok(2_500))),
             "round {round}: the reply did not come back"
         );
+        // A relay-started connection stays on the relay on BOTH ends (iroh_cross::RelayFirst);
+        // without it both ends moved to the hole-punched IP path within ~200 ms. Later rounds
+        // may start on the IP address iroh learned (a handshake proves that path both ways).
+        if round == 0 {
+            assert_eq!(
+                (outcome.2, outcome.5),
+                (Some("relay"), Some("relay")),
+                "round {round}: left the relay"
+            );
+        }
     }
     client.close(&clock, deadline(&clock, 5)).unwrap();
     server.close(&clock, deadline(&clock, 5)).unwrap();

@@ -51,6 +51,7 @@ pub(crate) fn cross_builder(
         .relay_mode(RelayMode::Custom(iroh::RelayMap::from(relay.clone())))
         .clear_ip_transports()
         .bind_addr(SocketAddr::new(interface, 0))
+        .map(|builder| builder.path_selector(std::sync::Arc::new(RelayFirst)))
         .map(|builder| {
             builder.portmapper_config(if policy.portmapping() {
                 PortmapperConfig::default()
@@ -59,6 +60,46 @@ pub(crate) fn cross_builder(
             })
         })
         .map_err(|_| Error::Unavailable)
+}
+
+/// Across networks the RELAY carries the run's traffic on both ends (lane XC). iroh's default
+/// selector treats the relay as a backup and moves application data to any IP path the moment one
+/// has stats. Across two NATs such a path can work one way only: on hardware (rv52 hotspot, B on a
+/// mobile hotspot, A behind a home router) the member selected a hole-punched IP path to the
+/// owner's public address while the owner kept only the relay, so the member's reply (and its
+/// close) never reached the owner (`control_read_timeout`; owner paths `[*relay]`, member paths
+/// `[relay | *ip:<owner public>]`). The connection now stays on the relay whenever one is open,
+/// which is what the choice promises ("through the Mycelium relay") and what v0.1.4 did across
+/// networks; an IP path is used only when no relay path exists (the loopback tests' dead relay).
+#[derive(Debug)]
+pub(crate) struct RelayFirst;
+impl iroh::endpoint::transports::PathSelector for RelayFirst {
+    fn select(
+        &self,
+        ctx: &iroh::endpoint::transports::PathSelectionContext<'_>,
+    ) -> iroh::endpoint::transports::PathSelection {
+        let mut selection = iroh::endpoint::transports::PathSelection::none();
+        let paths: Vec<_> = ctx.paths().filter(|p| p.stats().is_some()).collect();
+        let relay: Vec<bool> = paths.iter().map(|p| p.network_path().is_relay()).collect();
+        let current = ctx
+            .current()
+            .and_then(|c| paths.iter().position(|p| p.network_path() == c));
+        if let Some(index) = relay_first(&relay, current) {
+            selection.set(&paths[index]);
+        }
+        selection
+    }
+}
+/// [`RelayFirst`]'s choice over the open paths (`relay[i]`: path `i` is a relay path) and the
+/// index of the current selection among them: `None` keeps the current selection. A relay path
+/// wins over any IP path; with no relay path the current IP path stays, else the first one.
+pub(crate) fn relay_first(relay: &[bool], current: Option<usize>) -> Option<usize> {
+    let first_relay = relay.iter().position(|r| *r);
+    match current {
+        Some(c) if relay[c] => None,
+        Some(_) => first_relay,
+        None => first_relay.or_else(|| (!relay.is_empty()).then_some(0)),
+    }
 }
 
 /// Lane XA status (patch 2, REVIEW XB-07): the kind of one of this endpoint's direct addresses.
@@ -169,5 +210,34 @@ impl CrossGate {
     /// Dials refused before any packet (an address outside the policy).
     pub(crate) fn refused_out(&self) -> u64 {
         self.refused_out.load(Ordering::Relaxed)
+    }
+}
+
+#[cfg(test)]
+mod relay_first_tests {
+    use super::relay_first;
+    #[test]
+    fn across_networks_the_relay_wins_over_any_ip_path_and_ip_is_used_only_without_one() {
+        // rv52 hotspot: the member had [relay, *ip] and kept sending on the one-way IP path.
+        assert_eq!(
+            relay_first(&[true, false], Some(1)),
+            Some(0),
+            "an IP selection moves to the relay"
+        );
+        assert_eq!(relay_first(&[false, true], Some(0)), Some(1));
+        assert_eq!(
+            relay_first(&[true, false], Some(0)),
+            None,
+            "a relay selection stays"
+        );
+        assert_eq!(
+            relay_first(&[false, true], None),
+            Some(1),
+            "no selection: the relay first"
+        );
+        // No relay path open (the loopback tests' dead relay): IP is allowed and sticky.
+        assert_eq!(relay_first(&[false, false], None), Some(0));
+        assert_eq!(relay_first(&[false, false], Some(1)), None);
+        assert_eq!(relay_first(&[], None), None);
     }
 }
