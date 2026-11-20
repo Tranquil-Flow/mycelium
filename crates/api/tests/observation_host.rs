@@ -262,3 +262,55 @@ fn tampered_or_readmitted_member_is_refused_before_session_or_mailbox_effects() 
         assert!(adapter.context().is_none());
     }
 }
+
+/// Proves: L13-08 / rv49 certification (ledger 286). A Rollover/Rebuild run's observe step calls
+/// `rebuild`; it is `rebuild_with_current_members` (`chain_compile.py:480-546` @ f4e366e9): drop the
+/// cards of members that are no longer current, refuse below two before any effect, then prepare a
+/// fresh observation (same verified path as `prepare`). Never `NP-L10-observation-rebuild`, which
+/// stopped every automatic continuation at native hello (`rollover_failed`).
+#[test]
+fn a_rollover_rebuilds_its_observation_over_the_current_members() {
+    // Both current: the rebuild reaches the real session factory, as `prepare` does.
+    let (backend, cards, _signers) = fixture();
+    let mut adapter = ObserveAdapter::new(
+        VerifiedObservationHost { backend },
+        || 1000.0,
+        || panic!("no hello nonce before sessions"),
+    );
+    let err = adapter.rebuild(RUN, "dep-1", &cards).unwrap_err();
+    assert!(
+        matches!(err,PortError::Failed{code:Some(ref c),..} if c=="managed_control_owner_unavailable"),
+        "{err:?}"
+    );
+    assert_eq!(adapter.host_mut().backend.session_attempts, 1);
+    assert!(adapter.context().is_none());
+    // A vanished member's card is dropped, not fatal; one current member left refuses before any
+    // session or mailbox effect.
+    let (mut backend, cards, _signers) = fixture();
+    backend.members.remove("member-two");
+    let mut adapter = ObserveAdapter::new(
+        VerifiedObservationHost { backend },
+        || 1000.0,
+        || panic!("no nonce"),
+    );
+    let err = adapter.rebuild(RUN, "dep-1", &cards).unwrap_err();
+    assert!(
+        matches!(err,PortError::Failed{code:Some(ref c),..} if c=="rebuild_requires_two_current_members"),
+        "{err:?}"
+    );
+    assert_eq!(adapter.host_mut().backend.session_attempts, 0);
+    // A re-admitted member (new generation) is no longer the card's member: dropped too.
+    let (mut backend, cards, _signers) = fixture();
+    backend.members.get_mut("member-two").unwrap()["generation"] = json!(2);
+    let mut adapter = ObserveAdapter::new(
+        VerifiedObservationHost { backend },
+        || 1000.0,
+        || panic!("no nonce"),
+    );
+    let err = adapter.rebuild(RUN, "dep-1", &cards).unwrap_err();
+    assert!(
+        matches!(err,PortError::Failed{code:Some(ref c),..} if c=="rebuild_requires_two_current_members"),
+        "{err:?}"
+    );
+    assert_eq!(adapter.host_mut().backend.session_attempts, 0);
+}
