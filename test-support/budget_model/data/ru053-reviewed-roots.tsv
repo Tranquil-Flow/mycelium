@@ -1,5 +1,5 @@
 root	path	line	sha256	text
-crates/runtime/src/iroh_artifact.rs:ArtifactWireLimits::wait	crates/runtime/src/iroh_artifact.rs	185	788b7a8c801fe985194e6c6a6bc2cfb4b7ce5d4a45956ca697f97d860277d8a0	    pub(crate) fn wait(
-crates/runtime/src/iroh_artifact.rs:ChunkSession::fetch	crates/runtime/src/iroh_artifact.rs	61	788b7a8c801fe985194e6c6a6bc2cfb4b7ce5d4a45956ca697f97d860277d8a0	    pub fn fetch(
-crates/runtime/src/iroh_artifact.rs:ChunkSession::fetch_once	crates/runtime/src/iroh_artifact.rs	90	788b7a8c801fe985194e6c6a6bc2cfb4b7ce5d4a45956ca697f97d860277d8a0	    fn fetch_once(
-crates/runtime/src/iroh_artifact.rs:ChunkSession::fetch_once_checked	crates/runtime/src/iroh_artifact.rs	99	788b7a8c801fe985194e6c6a6bc2cfb4b7ce5d4a45956ca697f97d860277d8a0	    fn fetch_once_checked(
+crates/runtime/src/iroh_artifact.rs:ArtifactWireLimits::wait	crates/runtime/src/iroh_artifact.rs	196	482673c83207bac6d2259fd48e2d58cc7ae06eedff09dbd9be9e0e83dc4b20bd	    pub(crate) fn wait(
+crates/runtime/src/iroh_artifact.rs:ChunkSession::fetch	crates/runtime/src/iroh_artifact.rs	61	482673c83207bac6d2259fd48e2d58cc7ae06eedff09dbd9be9e0e83dc4b20bd	    pub fn fetch(
+crates/runtime/src/iroh_artifact.rs:ChunkSession::fetch_once	crates/runtime/src/iroh_artifact.rs	90	482673c83207bac6d2259fd48e2d58cc7ae06eedff09dbd9be9e0e83dc4b20bd	    fn fetch_once(
+crates/runtime/src/iroh_artifact.rs:ChunkSession::fetch_once_checked	crates/runtime/src/iroh_artifact.rs	99	482673c83207bac6d2259fd48e2d58cc7ae06eedff09dbd9be9e0e83dc4b20bd	    fn fetch_once_checked(

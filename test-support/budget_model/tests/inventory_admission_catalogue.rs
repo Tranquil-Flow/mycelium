@@ -643,9 +643,9 @@ impl Record {
             parity: "-".into(),
             // Reviewed edge rows: `ChunkSession::fetch` calls `self.fetch_once(..)` at :68, whose body calls
             // `self.fetch_once_checked(..)` at :97, whose body calls
-            // `protocol::artifact_grant::verify_chunk_receipt(..)` at :179.
+            // `protocol::artifact_grant::verify_chunk_receipt(..)` at :190.
             calls: vec![format!(
-                "{CONSUMER_FILE}:68,{CONSUMER_FILE}:97,{CONSUMER_FILE}:179"
+                "{CONSUMER_FILE}:68,{CONSUMER_FILE}:97,{CONSUMER_FILE}:190"
             )],
         }
     }
@@ -1057,7 +1057,7 @@ fn admission_catalogue_ru053_refuses_guarded_stats_keys() {
 
 /// The consumer file the edge probes patch: `ChunkSession::fetch` calls `self.fetch_once(..)` at :68,
 /// `ChunkSession::fetch_once` calls `self.fetch_once_checked(..)` at :97, and
-/// `ChunkSession::fetch_once_checked` calls the protocol `verify_chunk_receipt` at :179 (two lines, :179-180).
+/// `ChunkSession::fetch_once_checked` calls the protocol `verify_chunk_receipt` at :190 (two lines, :190-191).
 const CONSUMER_FILE: &str = "crates/runtime/src/iroh_artifact.rs";
 const RECEIPT_CALL: &str = "        protocol::artifact_grant::verify_chunk_receipt(&header[\"receipt\"], request, grant, data)\n            .map_err(|e| fail(e.0))?;\n";
 const FETCH_ONCE_CALL: &str =
@@ -1065,16 +1065,16 @@ const FETCH_ONCE_CALL: &str =
 /// A decoy module whose fn has the protocol fn's name and arguments.
 const DECOY_MOD: &str = "\nmod decoy {\n    pub fn verify_chunk_receipt(\n        _: &serde_json::Value,\n        _: &ChunkRequest,\n        _: &Grant,\n        _: &[u8],\n    ) -> Result<(), protocol::artifact_grant::GrantError> {\n        Ok(())\n    }\n}\n";
 
-/// A record rooted at `ChunkSession::fetch_once_checked`, whose own body calls the protocol fn at :179: a plain path
+/// A record rooted at `ChunkSession::fetch_once_checked`, whose own body calls the protocol fn at :190: a plain path
 /// call, so no reviewed edge is involved and a patched consumer file can still admit it.
 fn fetch_once_record() -> Record {
     let mut record = Record::control();
     record.hops[0].0 = format!("{CONSUMER_FILE}:ChunkSession::fetch_once_checked");
-    record.calls = vec![format!("{CONSUMER_FILE}:179")];
+    record.calls = vec![format!("{CONSUMER_FILE}:190")];
     record
 }
 
-/// The consumer file with its receipt call (:179-180) replaced by exactly two other lines and `tail` appended,
+/// The consumer file with its receipt call (:190-191) replaced by exactly two other lines and `tail` appended,
 /// so every line number before the tail is unchanged.
 fn consumer_with(call: &str, tail: &str) -> Patched {
     let text = Workspace.read(CONSUMER_FILE).expect("the consumer file");
@@ -1083,8 +1083,8 @@ fn consumer_with(call: &str, tail: &str) -> Patched {
     let at = text.find(RECEIPT_CALL).expect("the receipt call");
     assert_eq!(
         text[..at].lines().count(),
-        178,
-        "the receipt call starts at :179"
+        189,
+        "the receipt call starts at :190"
     );
     assert_eq!(call.matches('\n').count(), 2, "{call}");
     Patched {
@@ -1133,7 +1133,7 @@ fn appended(path: &'static str, tail: &str) -> Patched {
 fn admission_catalogue_ru053_refuses_same_name_wrong_callee() {
     control_is_admitted();
     admitted_in(&fetch_once_record(), &Workspace);
-    // A decoy module beside the real call changes nothing: :179 still calls the protocol fn.
+    // A decoy module beside the real call changes nothing: :190 still calls the protocol fn.
     admitted_in(
         &fetch_once_record(),
         &consumer_with(RECEIPT_CALL, DECOY_MOD),
@@ -1158,7 +1158,7 @@ fn admission_catalogue_ru053_refuses_same_name_wrong_callee() {
     let mut record = Record::control();
     record.calls = vec![format!("{CONSUMER_FILE}:1")];
     refused_keeps_58(&[record], &decoy, "ru053-unmapped-edge");
-    // In place, every line number kept, the call at :179 names a same-named fn elsewhere: the decoy module's
+    // In place, every line number kept, the call at :190 names a same-named fn elsewhere: the decoy module's
     // fn by path or through a `use` of that sibling, a local module with the same path tail shadowing the
     // protocol crate, or the same tail under this crate's root.
     for (call, tail) in [
@@ -1186,13 +1186,13 @@ fn admission_catalogue_ru053_refuses_same_name_wrong_callee() {
         );
     }
     // The call site is not a line of the caller's own body holding that call: the line after
-    // fetch_once_checked closes (:183), a line of its body holding no call (:178), the same line number in
+    // fetch_once_checked closes (:194), a line of its body holding no call (:189), the same line number in
     // another file; and an
     // edge with no call site at all.
     for at in [
-        vec![format!("{CONSUMER_FILE}:183")],
-        vec![format!("{CONSUMER_FILE}:178")],
-        vec!["crates/protocol/src/artifact_grant.rs:179".to_string()],
+        vec![format!("{CONSUMER_FILE}:194")],
+        vec![format!("{CONSUMER_FILE}:189")],
+        vec!["crates/protocol/src/artifact_grant.rs:190".to_string()],
         Vec::new(),
     ] {
         let mut record = fetch_once_record();
@@ -1481,7 +1481,7 @@ fn admission_catalogue_ru053_refuses_unsupported_edge_shape() {
     ]);
     refused_keeps_58(&[fetch_once_record()], &reexport, "ru053-stale-pin");
     // The reviewed edge (`self.fetch_once(..)` at :68) holds only for the consumer file bytes it pins: one
-    // more comment line and it no longer applies, while the plain path call at :179 still does.
+    // more comment line and it no longer applies, while the plain path call at :190 still does.
     let original = Workspace.read(CONSUMER_FILE).expect("the consumer file");
     let touched = Patched {
         path: CONSUMER_FILE,
@@ -1510,7 +1510,7 @@ const TABLES: [&str; 4] = [
 ];
 const PROTOCOL_MANIFEST: &str = "crates/protocol/Cargo.toml";
 /// A real call of `ChunkSession::fetch_once_checked` (`self.limits.wait(..)`) that no reviewed edge row lists.
-const UNLISTED_CALL_LINE: usize = 171;
+const UNLISTED_CALL_LINE: usize = 182;
 
 /// A tree that serves `files` (and, when set, `metadata`) over `base`.
 struct Over<'t> {
@@ -1690,10 +1690,10 @@ fn admission_catalogue_ru053_refuses_stale_edge_pin() {
         Workspace.read(EDGES_TABLE)
     );
     let original = Workspace.read(CONSUMER_FILE).expect("the consumer file");
-    let receipt = RECEIPT_CALL.lines().next().expect("the :179 line");
+    let receipt = RECEIPT_CALL.lines().next().expect("the :190 line");
     // The file's sha256 changed, every pinned line number and text kept.
     let sha_changed = appended(CONSUMER_FILE, "// reviewed bytes changed\n");
-    // The :179 line's text changed, every line number kept.
+    // The :190 line's text changed, every line number kept.
     let text_changed = replaced(
         CONSUMER_FILE,
         receipt,
@@ -1716,16 +1716,16 @@ fn admission_catalogue_ru053_refuses_stale_edge_pin() {
     let test_changed = appended(BEHAVIOUR_FILE, "// reviewed bytes changed\n");
     let crate_changed = appended("crates/runtime/Cargo.toml", "# reviewed bytes changed\n");
     // Rows whose file sha256 is right but whose text (a trailing space) or line (off by one) is not.
-    let at_179 = format!("\t{CONSUMER_FILE}\t179\t");
+    let at_190 = format!("\t{CONSUMER_FILE}\t190\t");
     let row_text = edited_rows(EDGES_TABLE, |row| {
-        row.contains(&at_179).then(|| format!("{row} "))
+        row.contains(&at_190).then(|| format!("{row} "))
     });
     let row_line = edited_rows(EDGES_TABLE, |row| {
-        row.contains(&at_179)
-            .then(|| row.replacen(&at_179, &format!("\t{CONSUMER_FILE}\t180\t"), 1))
+        row.contains(&at_190)
+            .then(|| row.replacen(&at_190, &format!("\t{CONSUMER_FILE}\t191\t"), 1))
     });
     let mut follows_row = fetch_once_record();
-    follows_row.calls = vec![format!("{CONSUMER_FILE}:180")];
+    follows_row.calls = vec![format!("{CONSUMER_FILE}:191")];
     let cases: [Case; 9] = [
         ("file sha256 changed", vec![Record::control()], &sha_changed),
         (
@@ -1776,15 +1776,15 @@ fn admission_catalogue_ru053_refuses_stale_edge_pin() {
 fn admission_catalogue_ru053_refuses_unmapped_edge() {
     control_is_admitted();
     admitted_in(&fetch_once_record(), &Workspace);
-    // Chain gaps: the :179 row starts at fetch_once_checked, not at the root fetch; the :68 row alone ends at
+    // Chain gaps: the :190 row starts at fetch_once_checked, not at the root fetch; the :68 row alone ends at
     // fetch_once, not at verify_chunk_receipt.
     let mut from_gap = Record::control();
-    from_gap.calls = vec![format!("{CONSUMER_FILE}:179")];
+    from_gap.calls = vec![format!("{CONSUMER_FILE}:190")];
     let mut to_gap = Record::control();
     to_gap.calls = vec![format!("{CONSUMER_FILE}:68")];
-    // A gap inside the chain: :68 ends at fetch_once, :179 starts at fetch_once_checked (the :97 row skipped).
+    // A gap inside the chain: :68 ends at fetch_once, :190 starts at fetch_once_checked (the :97 row skipped).
     let mut mid_gap = Record::control();
-    mid_gap.calls = vec![format!("{CONSUMER_FILE}:68,{CONSUMER_FILE}:179")];
+    mid_gap.calls = vec![format!("{CONSUMER_FILE}:68,{CONSUMER_FILE}:190")];
     // A real call of fetch_once_checked that the reviewed table does not list.
     let mut unlisted = fetch_once_record();
     unlisted.calls = vec![format!("{CONSUMER_FILE}:{UNLISTED_CALL_LINE}")];
@@ -1924,7 +1924,7 @@ fn admission_catalogue_ru053_refuses_duplicate_test_reference() {
         metadata: None,
     };
     // The same class in `consumer_calls`: a reviewed edges table with a cycle (`fetch_once_checked` back to
-    // `fetch` on the :171 line), so a chain can list the :68 row twice and stay contiguous.
+    // `fetch` on the :182 line), so a chain can list the :68 row twice and stay contiguous.
     let edges = Workspace
         .read(EDGES_TABLE)
         .expect("the reviewed edges table");
@@ -1932,7 +1932,7 @@ fn admission_catalogue_ru053_refuses_duplicate_test_reference() {
     let back = consumer
         .split('\n')
         .nth(UNLISTED_CALL_LINE - 1)
-        .expect("the :171 line");
+        .expect("the :182 line");
     let cyclic = Over {
         base: &Workspace,
         files: vec![Patched {
@@ -1967,7 +1967,7 @@ fn admission_catalogue_ru053_refuses_duplicate_test_reference() {
     admitted_in(&tests_named(&[a], &[a]), &Workspace);
     admitted_in(&tests_named(&[a], &[b]), &two);
     admitted_in(&tests_named(&[a, b], &[]), &two);
-    admitted_in(&calls_listed(&[68, 97, 179]), &cyclic);
+    admitted_in(&calls_listed(&[68, 97, 190]), &cyclic);
     // Each list names a test at most once (checked before any pin); a chain lists a reviewed row at most once.
     let cases: [Case; 5] = [
         (
@@ -1991,8 +1991,8 @@ fn admission_catalogue_ru053_refuses_duplicate_test_reference() {
             &Workspace,
         ),
         (
-            "consumer_calls :68,:97,:171,:68,:97,:179 over the cyclic table",
-            vec![calls_listed(&[68, 97, UNLISTED_CALL_LINE, 68, 97, 179])],
+            "consumer_calls :68,:97,:182,:68,:97,:190 over the cyclic table",
+            vec![calls_listed(&[68, 97, UNLISTED_CALL_LINE, 68, 97, 190])],
             &cyclic,
         ),
     ];
