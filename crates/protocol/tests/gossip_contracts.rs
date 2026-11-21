@@ -59,7 +59,10 @@ fn corpus(raw: &str, f: impl Fn(&Value) -> Result<Value, ContractError>) {
 fn gossip_views_and_bundle_derive_exact_bytes_and_refuse_invalid_sources() {
     // O:contract:mycelium.gossip.router_view.v1; O:contract:mycelium.gossip.allocator_view.v1; O:contract:mycelium.gossip.evidence_bundle.v1.
     corpus(
-        concat!(include_str!("../fixtures/remaining-gossip-derive-vectors.json.part-00"), include_str!("../fixtures/remaining-gossip-derive-vectors.json.part-01")),
+        concat!(
+            include_str!("../fixtures/remaining-gossip-derive-vectors.json.part-00"),
+            include_str!("../fixtures/remaining-gossip-derive-vectors.json.part-01")
+        ),
         |v| gossip::build_bundle(v, LIMITS),
     );
 }
@@ -115,7 +118,10 @@ fn gossip_bundle_refusals_carry_the_oracle_per_field_text() {
 fn gossip_derivation_refusals_carry_the_oracle_evidence_text() {
     // O:contract:mycelium.gossip.evidence_bundle.v1 via the builder path: every oracle
     // `EvidenceBundleError` has the same text; harness-level shape errors are only refusals.
-    let rows: Vec<Value> = serde_json::from_str(concat!(include_str!("../fixtures/remaining-gossip-derive-vectors.json.part-00"), include_str!("../fixtures/remaining-gossip-derive-vectors.json.part-01")))
+    let rows: Vec<Value> = serde_json::from_str(concat!(
+        include_str!("../fixtures/remaining-gossip-derive-vectors.json.part-00"),
+        include_str!("../fixtures/remaining-gossip-derive-vectors.json.part-01")
+    ))
     .unwrap();
     let (mut compared, mut refusals, mut container_artifacts) = (0, 0, 0);
     let mut mismatched = std::collections::BTreeMap::new();

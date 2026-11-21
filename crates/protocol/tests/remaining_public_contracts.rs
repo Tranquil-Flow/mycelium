@@ -7,8 +7,14 @@ fn remaining_public_shapes_match_positive_bytes_and_all_negative_vectors() {
     // O:contract:mycelium.assignment_artifact_cache.v1; O:contract:mycelium.assignment_materialization.v1;
     // O:contract:mycelium.concurrent_request_runtime.v1; O:contract:mycelium.m23_heterogeneous_kv_gate.v1;
     // O:contract:mycelium.m13_placement_projection.v1; O:contract:mycelium.m14_topology_projection.v1; O:contract:mycelium.m15_plan_comparison.v1.
-    let rows: Vec<Value> =
-        serde_json::from_str(concat!(include_str!("../fixtures/remaining-public-vectors.json.part-00"), include_str!("../fixtures/remaining-public-vectors.json.part-01"), include_str!("../fixtures/remaining-public-vectors.json.part-02"), include_str!("../fixtures/remaining-public-vectors.json.part-03"), include_str!("../fixtures/remaining-public-vectors.json.part-04"))).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(concat!(
+        include_str!("../fixtures/remaining-public-vectors.json.part-00"),
+        include_str!("../fixtures/remaining-public-vectors.json.part-01"),
+        include_str!("../fixtures/remaining-public-vectors.json.part-02"),
+        include_str!("../fixtures/remaining-public-vectors.json.part-03"),
+        include_str!("../fixtures/remaining-public-vectors.json.part-04")
+    ))
+    .unwrap();
     for row in rows {
         let base = &row["value"];
         let p = base["protocol"].as_str().unwrap();

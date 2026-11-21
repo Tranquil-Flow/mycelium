@@ -226,7 +226,13 @@ fn fixture_seal_and_coverage_crosswalk_are_complete() {
             "route-parser-oracle-corpus",
         ),
         (
-            concat!(include_str!("../fixtures/remaining-public-vectors.json.part-00"), include_str!("../fixtures/remaining-public-vectors.json.part-01"), include_str!("../fixtures/remaining-public-vectors.json.part-02"), include_str!("../fixtures/remaining-public-vectors.json.part-03"), include_str!("../fixtures/remaining-public-vectors.json.part-04")),
+            concat!(
+                include_str!("../fixtures/remaining-public-vectors.json.part-00"),
+                include_str!("../fixtures/remaining-public-vectors.json.part-01"),
+                include_str!("../fixtures/remaining-public-vectors.json.part-02"),
+                include_str!("../fixtures/remaining-public-vectors.json.part-03"),
+                include_str!("../fixtures/remaining-public-vectors.json.part-04")
+            ),
             "remaining-public-schema-oracle-corpus",
         ),
         (
