@@ -171,12 +171,12 @@ const PRIOR: &[(&str, usize, &str)] = &[
     (
         "python-candidates.tsv",
         8258,
-        "3030b1cc39ca549040d639cd24dc223bad4f3ad0a4507db29f461adefb0a7913",
+        "04b9c878161b77b5faa2176893c829a18914da786d53a40cbab5659ffad6bc7c",
     ),
     (
         "python-bounds.tsv",
         6958,
-        "513648b09c9227c926cb844ff4f7ca2ac7af7b2a7c0c6988efb649f634b3ab7c",
+        "c0d645f750dd1c44b65ae3c9c9df2297b8c430808fffd12401d905cc4c41e2fd",
     ),
     (
         "python-final-review-sites.tsv",

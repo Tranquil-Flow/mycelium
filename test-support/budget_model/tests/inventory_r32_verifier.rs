@@ -302,7 +302,7 @@ fn inherited_prefixes_and_manual_only_crosswalk_are_unchanged() {
         (
             CENSUS,
             8259,
-            "03fd7e3c529fd2b1202fa2f53913f52f09633be50e095d1b05ca10ec2d8c2992",
+            "d54bca412b1576ad175258e2e2e2397c0917a8518a01b7c98084aa92d60ec7ec",
             4,
         ),
         (

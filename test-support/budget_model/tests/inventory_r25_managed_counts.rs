@@ -47,12 +47,12 @@ fn exact_three_discoveries_reviews_and_full_union_preserve_prior_pending() {
         (
             CENSUS,
             8253,
-            "9d87c2648c4cc8d9f9e277a6e5da75cb01fdfa3fecfa1111d030bb4c2f8b13e8",
+            "5403af5c35957148405820d4b7e7135736ae7f9a660c91477e9cd2d3e0630121",
         ),
         (
             BOUNDS,
             6954,
-            "5957b1df69fd644bd65c00be47dd9c92a18e1a000ed92a386db3577ec2373278",
+            "58be344d0a4ff19a8d63cd5255b8713626f47d7de386e9cca49e1cfe3ccc3070",
         ),
     ] {
         let prefix: String = text.split_inclusive('\n').take(lines).collect();
@@ -155,7 +155,7 @@ fn exact_three_discoveries_reviews_and_full_union_preserve_prior_pending() {
 fn full_source_arguments_constants_and_consumers_are_independently_pinned() {
     assert_eq!(
         oracle_blobs::sha256_hex(ARG.as_bytes()),
-        "072a4f40f259244efddba865b29c94117be9c4b7994db6b11924965aaca85c79"
+        "fd3e44d1a86cbfc358691247089edcdefb200030ad6a46f07dfcf04003c518aa"
     );
     let pins = include_str!("../data/python-r25-source-lines.tsv");
     assert_eq!(

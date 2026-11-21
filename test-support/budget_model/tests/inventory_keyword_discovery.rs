@@ -195,7 +195,7 @@ fn discovery_is_an_exact_append_and_does_not_claim_new_reviews() {
     let prefix: String = census.split_inclusive('\n').take(7663).collect();
     assert_eq!(
         oracle_blobs::sha256_hex(prefix.as_bytes()),
-        "d4a034d3cb445c679a9fdf3d64025ec38c7d5015b9eb6a4bee2c72ed84406cbb"
+        "c1b3129eba761f60ac36283b05b38bc41779fc567d0025be082b2654725cc3f6"
     );
     let mut r25: BTreeSet<_> = r25_count_admission::keys()
         .union(

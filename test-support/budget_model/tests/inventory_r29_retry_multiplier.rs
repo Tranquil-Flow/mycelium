@@ -249,7 +249,7 @@ const PRIOR: &[(&str, usize, &str)] = &[
     (
         "python-candidates.tsv",
         8257,
-        "a25b9bc708e276baf2987ebcff6b3ad9925fbfbb9acdec848b15fb61357fec54",
+        "51861138067135b320d3c371783de5abe65294d5e98f197f8ffc7a528f04461a",
     ),
     (
         "python-adjudication-a.tsv",

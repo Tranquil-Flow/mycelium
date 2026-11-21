@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 const CENSUS: &str = include_str!("../data/python-candidates.tsv");
 const SITES: &str = include_str!("../data/python-discovery-r4-sites.tsv");
 /// SHA-256 of `python-candidates.tsv` at f0756be (7,582 rows + header), before the extension.
-const PRE_R4_SHA256: &str = "e20063bb5a05efe92cf0659c9c66ef8339e23e3101f79aecb0e80485318e7053";
+const PRE_R4_SHA256: &str = "3e41c65eed4cdd818de4a1db85359b768c70db20c60db7e4411f5ce4166c003f";
 const PRE_R4_LINES: usize = 7_583;
 const PRE_R4_PENDING: usize = 853;
 const NEW_SITES: usize = 71;

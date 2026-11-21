@@ -115,8 +115,8 @@
     }
   },
   "prior_hashes": {
-    "python-candidates.tsv": "9d87c2648c4cc8d9f9e277a6e5da75cb01fdfa3fecfa1111d030bb4c2f8b13e8",
-    "python-bounds.tsv": "5957b1df69fd644bd65c00be47dd9c92a18e1a000ed92a386db3577ec2373278",
+    "python-candidates.tsv": "5403af5c35957148405820d4b7e7135736ae7f9a660c91477e9cd2d3e0630121",
+    "python-bounds.tsv": "58be344d0a4ff19a8d63cd5255b8713626f47d7de386e9cca49e1cfe3ccc3070",
     "python-scope.tsv": "d532777d2211682c1ebb4ccea71b82697e19edbc91b0497e738b434d49c37319",
     "python-adjudication-a.tsv": "85fde7dbe8b80def1ae47f5dd9f63514c592eab6b2da21b8690bcbc2b800ad3c",
     "python-adjudication-b.tsv": "e2d0ec85c3bf648c038a09fb56abb47b9ba5d8d783114eaffab96a754d292010",

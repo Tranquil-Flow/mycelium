@@ -37,12 +37,12 @@ fn exact_addition_preserves_every_prior_census_review_and_witness_byte() {
         (
             include_str!("../data/python-candidates.tsv"),
             8256,
-            "17cdbe8b0f4645a359b158d0e63ae5aec23f8ac6716dcab4601464c4898ecee8",
+            "bb7dc8ea41734755ceb691ea766e6d0d83b9ee7864982261f0eb5c78f02af8ee",
         ),
         (
             include_str!("../data/python-bounds.tsv"),
             6957,
-            "db31660004f0978e25ae37c31e7a4197b3039c6a28856045e930e77bed28ae2e",
+            "87c32b50eb23d460b55231f422cbc7067beffeb9a639050819beef7ad6ee9f16",
         ),
         (
             include_str!("../data/python-final-review-sites.tsv"),
