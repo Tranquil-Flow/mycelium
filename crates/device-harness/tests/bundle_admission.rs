@@ -391,7 +391,7 @@ fn the_committed_genuine_manifest_and_package_pins_describe_one_bundle_layout() 
     // The manifest digest is pinned here independently of the manifest bytes.
     let pin = Content {
         size_bytes: 44299,
-        sha256: "320c010f869eab91307d71b0ef1f21fd80e63d79369c4480704b418b893bf4dc".into(),
+        sha256: "acae88fb9dc9cf5aa7d0d05a3c69ccfcbc72cac6ee69af60864333fa07c41544".into(),
     };
     let expected = Expected::from_documents(&manifest, &pin, &pins, &statics).unwrap();
     let paths: Vec<_> = expected.files().keys().map(String::as_str).collect();

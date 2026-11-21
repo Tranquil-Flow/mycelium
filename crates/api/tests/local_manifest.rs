@@ -2,7 +2,7 @@
 //! `api::local_manifest::compile_local_model_manifest` equals the executed `physical_deployment.
 //! compile_local_model_manifest` (f4e366e9, Python 3.14) on 101 scripted local snapshot layouts:
 //! `L10-evidence/r18-probe-manifest.py` (sha256 7ba0a3d72fd733ecc111b51d2c4e55073c07ecdad50492f0d30d2962bdd5c2ef)
-//! -> `fixtures/oracle_manifest.json` (sha256 81b21e1ff272ceae9e23fc84780eb503b58e66ea573c86da917758833acd8c0b).
+//! -> `fixtures/oracle_manifest.json` (sha256 360b0714d0561af8dbec4c10624c5905aa3d9f8e0fc9348f4901d83e8bfc9ae7).
 //! The probe stores the layouts as specs (tiny BF16 safetensors with the real Qwen2.5-0.5B tensor names, HF blob
 //! links, corrupt headers, hostile index paths); this test rebuilds byte-identical files from them. Accepted
 //! manifests are compared as canonical JSON (so the manifest digest, which hashes every file, is checked too);

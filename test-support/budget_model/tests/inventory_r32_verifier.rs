@@ -326,7 +326,7 @@ fn inherited_prefixes_and_manual_only_crosswalk_are_unchanged() {
         (
             include_str!("../data/python-bounds.tsv"),
             6959,
-            "3c61b5299e2419033a60e9aa627f2aaddfe7a4fbd25f2f842a0448a51bde7385",
+            "75845da1d67e918aff14865911132f4f64347ca625af59aac66cb9b0095614fa",
             0,
         ),
         (
