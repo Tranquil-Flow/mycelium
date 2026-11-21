@@ -9,6 +9,7 @@ then `/Users/mycelium-dev/Projects/mycelium-v02-process/AGENTS.md` and `docs/BUI
 - One lane = one worktree + one branch `v02/<lane>`; never write another lane's paths. The parent integrates into `main`.
 - Zero Python in this repository, its tests, CI or release path. No PyO3. The old Python app is an external black-box oracle only.
 - AGPL-3.0-only; SPDX header on every new source file. Commits as Tranquil-Flow <tranquil_flow@protonmail.com>, no trailers. No push, no remote.
+- No personal home-folder paths in files or commit messages: write `~/` or `$HOME` (placeholders: `xtask/data/home-path-placeholders.txt`). Enable the hooks once per clone: `git config core.hooksPath .githooks`; `cargo test -p xtask --test no_home_paths` is the backstop.
 - Never delete or loosen a test to get green. Every timeout/duration comes from the typed budget table (lane L1); no literals.
 - No silent errors: every fallible result is propagated or recorded with a specific code (lane L4 enforces).
 - Heavy commands (`cargo build/test/clippy` beyond a single small crate) run `nice -n 19`. The job count is whatever the foreman sets in

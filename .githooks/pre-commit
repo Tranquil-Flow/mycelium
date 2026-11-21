@@ -1,0 +1,10 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-only
+# Refuse a commit whose staged additions or staged file names hold a personal home path.
+# Enable once per clone: git config core.hooksPath .githooks
+set -eu
+. "$(git rev-parse --show-toplevel)/.githooks/home-paths.sh"
+{
+  git diff --cached --name-only --diff-filter=ACMR
+  git diff --cached --no-color --no-ext-diff --text -U0 --diff-filter=ACMR | sed -n 's/^+//p' | grep -v '^++ ' || true
+} | home_paths_check "pre-commit"

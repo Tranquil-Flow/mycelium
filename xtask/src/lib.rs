@@ -3,6 +3,7 @@ pub mod behaviours;
 pub mod gate;
 pub mod groups;
 pub mod lint;
+pub mod no_home_paths;
 pub mod no_python;
 pub mod policy;
 pub mod preflight;

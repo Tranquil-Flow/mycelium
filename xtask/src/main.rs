@@ -6,7 +6,7 @@ use std::{
     process::ExitCode,
 };
 use xtask::{
-    gate, groups, lint, no_python,
+    gate, groups, lint, no_home_paths, no_python,
     policy::{Allowlist, Date},
     preflight::Preflight,
     provenance, quick, release, retention, retire, workspace,
@@ -149,6 +149,7 @@ fn main() -> ExitCode {
         ("behaviours", groups::behaviours_main),
         ("quick", quick::cli),
         ("no-python", no_python::cli),
+        ("no-home-paths", no_home_paths::cli),
     ] {
         if arguments.first().map(String::as_str) == Some(word) {
             return match handler(&arguments[1..]) {

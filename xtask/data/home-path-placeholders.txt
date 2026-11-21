@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Placeholder account names allowed after /Users/ or /home/ in tracked files and commit messages.
+# Anything else there is a personal home path and is refused by .githooks/pre-commit,
+# .githooks/commit-msg and `cargo test -p xtask --test no_home_paths`. Add a name only if it is
+# clearly not a real person's account. Use ~/ or $HOME in docs and scripts instead of a full path.
+Shared
+mycelium-dev
+joinmac
+builder
+another-builder
+another-builder-name
+developer
+someone
+test
+user
+you
+a
+ab
+te
+x

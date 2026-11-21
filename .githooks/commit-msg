@@ -1,0 +1,6 @@
+#!/bin/sh
+# SPDX-License-Identifier: AGPL-3.0-only
+# Refuse a commit message holding a personal home path. Enable: git config core.hooksPath .githooks
+set -eu
+. "$(git rev-parse --show-toplevel)/.githooks/home-paths.sh"
+grep -v '^#' "$1" | home_paths_check "commit-msg"
